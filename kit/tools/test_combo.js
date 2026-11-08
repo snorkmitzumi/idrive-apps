@@ -86,6 +86,7 @@ async function boot(dir, opts) {
     };
 }
 
+const quiet = { info() {}, warn() {}, error() {} };
 const tmp = (name) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'combo-' + name + '-'));
 
 const checks = [
@@ -109,6 +110,69 @@ const checks = [
         const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
+    }],
+    ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
+        const { Values } = appModule('values');
+        let clock = 1e6;
+        const s = settingsOf({ peakHold: 15 });
+        const v = new Values({ settings: s, log: quiet, now: () => clock, dataDir: tmp('peak') });
+        v.raise('rpm', 6000); clock += 10000; v.raise('rpm', 3000);
+        assert.strictEqual(v.peak('rpm'), 6000, 'held within 15 s');
+        clock += 6000; v.raise('rpm', 3000);
+        assert.strictEqual(v.peak('rpm'), 3000, 'dropped back after 15 s');
+        s.S.peakHold = 0;
+        v.raise('rpm', 6500); clock += 600000; v.raise('rpm', 2000);
+        assert.strictEqual(v.peak('rpm'), 6500, 'peakHold 0: held');
+        v.resetPeaks();
+        assert.strictEqual(v.peak('rpm'), undefined, 'Reset peaks clears it');
+    }],
+    ['2. boost source: sport display once it moves, else the engine unit; the setting wins', async () => {
+        const { Values } = appModule('values');
+        const s = settingsOf({ boostSource: 'auto' });
+        let v = new Values({ settings: s, log: quiet, now: () => 1e6, dataDir: tmp('boost') });
+        v.put('boostFes', 0.5); v.put('boostFes', 0.6);
+        assert.deepStrictEqual(v.boost(), { value: 0.6, from: 'fes' });
+        v = new Values({ settings: s, log: quiet, now: () => 1e6, dataDir: tmp('boost2') });
+        v.put('boostDme', 0.8); v.put('boostDme', 0.9);
+        assert.deepStrictEqual(v.boost(), { value: 0.9, from: 'dme' });
+        s.S.boostSource = 'fes';
+        assert.strictEqual(v.boost().value, null, 'Sport display asked, only the engine unit has it');
+    }],
+    ['2. power: sport display % x max power, or torque x rpm', async () => {
+        const { Values } = appModule('values');
+        const s = settingsOf({ maxPower: 215 });
+        const v = new Values({ settings: s, log: quiet, now: () => 1e6, dataDir: tmp('pw') });
+        v.put('powerPct', 50);
+        assert.deepStrictEqual(v.power(), { kw: 107.5, calc: false });
+        s.S.powerSource = 'calc';
+        v.put('torque', 500); v.put('rpm', 4000);
+        const p = v.power();
+        assert(p.calc && Math.abs(p.kw - 500 * 4000 / 9549) < 1e-9, JSON.stringify(p));
+    }],
+    ['2. split: the car\'s own, else the transfer case', async () => {
+        const { Values } = appModule('values');
+        let clock = 1e6;
+        const v = new Values({ settings: settingsOf(), log: quiet, now: () => clock, dataDir: tmp('split'), gearRatios: [] });
+        v.put('splitRear', 70);
+        assert.strictEqual(v.split().rear, 70);
+        clock += 11000;
+        v.put('lmvFront', 4);
+        assert.deepStrictEqual(v.split(), { rear: 100, from: 'transfer case: clutch open', nm: 4 });
+    }],
+    ['2. signals: the car\'s raw fields scaled as in M Vitals', async () => {
+        const { Values } = appModule('values'), { watches } = appModule('signals');
+        const v = new Values({ settings: settingsOf(), log: quiet, now: () => 1e6, dataDir: tmp('sig') });
+        const S = SPEC.config.scaling;
+        const sc = (k, raw) => { const c = S[k]; if (!c || raw == null || raw === c.invalid || (c.invalidFrom != null && raw >= c.invalidFrom)) return null; return raw * c.factor + (c.offset || 0); };
+        const engine = { handlers: () => ({}) };
+        const w = {};
+        watches(v, engine, sc, quiet).forEach(([iface, h]) => { w[iface.split('.').pop()] = h; });
+        w.CDS.statusEngineSpeed2({ actualValueRPMEngineCrankshaft: 16000 });
+        assert.strictEqual(v.live.rpm, 4000);
+        w.MDrive.statusMSystem({ statusAllWheelSetup: '_4WD_STANDARD', qualifierFunctionAllWheel: 'FUNKTION_VERFUEGBAR_AKTIV' });
+        assert.strictEqual(v.live.awd, '_4WD_STANDARD');
+        assert.strictEqual(v.live.awdSeen, true, 'all-wheel drive remembered');
+        assert(v.carPresent(), 'a value from the car');
     }],
 ];
 
