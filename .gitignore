@@ -11,6 +11,8 @@ dist/
 .env.*
 # editor and tool folders (Serena MCP, VS Code, JetBrains), editor swap files, Windows thumbnails
 .serena/
+# design sessions' mockups and plan ledgers (superpowers brainstorming / plan execution)
+.superpowers/
 .vscode/
 .idea/
 *.swp
