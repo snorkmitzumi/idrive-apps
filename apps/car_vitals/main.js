@@ -556,8 +556,10 @@ mgu.run({
             } catch (e) { log.warn('engine unit poll: ' + e); }
             fuelBusy = false;
             // hidden (another app on screen): every HIDDEN_MS only - the gateway takes one request at a time, and a
-            // round of ~10 here would slow down the app that is shown (eDrive's power reads); the history thins out meanwhile
-            fuelTimer = setTimeout(pollFuel, fast ? 400 : ui.isVisible('MAIN') ? 5000 : HIDDEN_MS);
+            // round of ~10 here would slow down the app that is shown (eDrive's power reads); the history thins out meanwhile.
+            // Asked now, not at the start of the round: the reads take a while, and an app hidden during them must not
+            // get a full round 400 ms later
+            fuelTimer = setTimeout(pollFuel, !ui.isVisible('MAIN') ? HIDDEN_MS : fast ? 400 : 5000);
         }
         const HIDDEN_MS = 60000;
         fuelTimer = setTimeout(pollFuel, 1000);

@@ -20,8 +20,10 @@ const themes = require(path.join(KIT, 'themes'));
 
 global.setInterval = () => 0;
 let app = null;
-class FakeDiag extends EventEmitter { constructor() { super(); this.available = false; } init() {} }
-class FakeReader { constructor() { this.raws = {}; this.pick = {}; } static label(c) { return c.did; } key(c) { return c.did; } async value() { return null; } }
+// diag: the app's link (the last one made); hold: a promise every read waits for (a slow engine unit), when set
+let diag = null, hold = null;
+class FakeDiag extends EventEmitter { constructor() { super(); this.available = false; diag = this; } init() {} }
+class FakeReader { constructor() { this.raws = {}; this.pick = {}; } static label(c) { return c.did; } key(c) { return c.did; } async value() { if (hold) await hold; return null; } }
 const stubs = {
     './kit/mgu': { run(a) { app = a; } },
     './kit/diag': { Diag: FakeDiag, hex: require(path.join(KIT, 'diag')).hex },
@@ -117,6 +119,19 @@ async function boot(dir, vis) {
             await now.fn();
             // shown: the shown rate again (400 ms on the Engine page with boost from the engine unit, else 5 s)
             assert(polls().length === 1 && polls()[0].ms <= 5000, 'shown: back to the shown rate: ' + polls().map((x) => x.ms));
+            // a fast round (the Engine page, boost from the engine unit) during which the app is hidden: the next one
+            // in 60 s, not 400 ms (that would be a full background round just as the other app opens)
+            const vis2 = { shown: true, handlers: [] };
+            await boot(dir, vis2);
+            diag.available = true;
+            const fastRound = polls().pop();
+            timers.length = 0;
+            let release;
+            hold = new Promise((r) => { release = r; });
+            const running = fastRound.fn();
+            vis2.shown = false;                    // another app opened while the engine unit answers
+            release(); await running; hold = null;
+            assert.deepStrictEqual(polls().map((x) => x.ms), [60000], 'hidden during a fast round: the next one in 60 s');
         } finally {
             global.setTimeout = realSet; global.clearTimeout = realClear;
         }
