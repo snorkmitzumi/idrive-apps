@@ -44,7 +44,7 @@ async function boot(dir) {
     const texts = [];
     let frame = null, last = null;
     const ctx = {
-        ui: { onClick() {}, text() {}, image: async () => {} },
+        ui: { onClick() {}, text() {}, image: async () => {}, isVisible: () => true, onVisible() {} },
         settings: { get: (k) => S[k], onChange() {} },
         log: { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: () => Promise.resolve({}) },

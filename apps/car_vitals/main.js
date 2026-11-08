@@ -425,10 +425,19 @@ mgu.run({
         // connect in the background: the screen must not wait for the diagnostic link
         const link = new Diag(ctx.signals, log);
         link.quiet = true;
+        // polling: a busy transport is tried again after 150, 300, 450, 600 ms (the kit's 1-4 s are for one-off reads)
+        link.busyMs = 150;
         link.init();
         const rd = new DidReader(link, { ecu: dme.ecu });
         // xDrive front axle torque from the transfer case unit (config.xdrive), read while the Chassis page is on screen
         const xcfg = Object.assign({ front: [], gearRatios: [] }, (ctx.spec.config && ctx.spec.config.xdrive) || {});
+        // short waits per candidate (as eDrive's): one that hangs holds every read behind it. The kit's defaults (4 s
+        // per reply, 10 s "response pending", 8 s transport call) are for one-off reads. A candidate's own
+        // timeoutMs / diagOpts in app.json still win.
+        const POLL_OPTS = { timeoutMs: 1000, diagOpts: { retryBaseMs: 150, pendingTimeoutMs: 1500, callTimeoutMs: 2000 } };
+        const quick = (list) => list.map((c) => Object.assign({}, POLL_OPTS, c));
+        Object.keys(dme).forEach((k) => { if (Array.isArray(dme[k])) dme[k] = quick(dme[k]); });
+        xcfg.front = quick(xcfg.front);
         let chassisSeen = 0, lmvAt = 0;
         const fuelT = {}, fuelFail = {}, fuelTry = {};
         let fuelSeen = 0, engineSeen = 0, fuelTimer = null, fuelBusy = false, fuelLast = 0;
@@ -545,11 +554,16 @@ mgu.run({
                 }
             } catch (e) { log.warn('engine unit poll: ' + e); }
             fuelBusy = false;
-            fuelTimer = setTimeout(pollFuel, fast ? 400 : 5000);
+            // hidden (another app on screen): every HIDDEN_MS only - the gateway takes one request at a time, and a
+            // round of ~10 here would slow down the app that is shown (eDrive's power reads); the history thins out meanwhile
+            fuelTimer = setTimeout(pollFuel, fast ? 400 : ui.isVisible('MAIN') ? 5000 : HIDDEN_MS);
         }
+        const HIDDEN_MS = 60000;
         fuelTimer = setTimeout(pollFuel, 1000);
         /** Page opened: don't wait for the slow timer. */
         const kickFuel = () => { if (!fuelBusy && Date.now() - fuelLast > 600) { clearTimeout(fuelTimer); fuelTimer = setTimeout(pollFuel, 0); } };
+        // shown again (any page): a round now rather than up to HIDDEN_MS later
+        ui.onVisible((name, v) => { if (name === 'MAIN' && v) kickFuel(); });
         /** Why a fuel value is missing, for its tile. */
         function fuelWhy(k) {
             if (!link.p) return 'no diagnostic link';
