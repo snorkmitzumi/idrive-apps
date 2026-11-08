@@ -69,13 +69,28 @@ mgu.run({
                 power: values.power(), torque: L.torque, split: values.split(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48 };
         }
 
+        // Reset peaks: the first press asks, a second one within CONFIRM_MS clears them (M Vitals' confirm pattern)
+        const CONFIRM_MS = 6000;
+        let confirmUntil = 0;
+        ui.onClick('BTN_RESET', () => {
+            reads.opened();                                  // a button press counts as using the screen
+            if (Date.now() > confirmUntil) { confirmUntil = Date.now() + CONFIRM_MS; return render(); }
+            confirmUntil = 0;
+            values.resetPeaks(); demoPeaks.resetPeaks();
+            log.info('peaks reset');
+            return render();
+        });
+        // a new boost source: its peak starts over (M Vitals)
+        settings.onChange((k) => { if (k === 'boostSource') { delete values.peaks.boost; delete demoPeaks.peaks.boost; } });
+
         async function render() {
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg), d = data();
             // peaks raised every frame too, so a held peak drops back while the car sends nothing new (M Vitals)
             const pk = d.demo ? demoPeaks : values, now = { rpm: d.rpm, boost: d.boost, power: d.power.kw, torque: d.torque, lmvFront: d.split.nm };
             PEAKS.forEach((k) => pk.raise(k, now[k]));
             if (!d.demo) reads.shown();          // (a frame of the car's values after the demo: a round at once)
-            draw.render(cv, t, d, { settings, peak: (k) => pk.peak(k), why: (k) => reads.why(k), redline: engine.redline(), scaleMax: engine.scaleMax(), has48: d.has48 });
+            draw.render(cv, t, d, { settings, peak: (k) => pk.peak(k), why: (k) => reads.why(k), redline: engine.redline(), scaleMax: engine.scaleMax(), has48: d.has48,
+                note: Date.now() <= confirmUntil ? 'Press again to reset peaks' : null });
             await ui.image('MAIN_GFX', cv);
         }
         ctx.loop('MAIN', 10, render);

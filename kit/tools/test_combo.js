@@ -310,6 +310,47 @@ const checks = [
     }],
 ];
 
+/** Car signals for boot(): the engine speed (rpm) the next statusEngineSpeed2 notification sends. */
+function engineSignal(state) {
+    return (iface, inst, h) => {
+        if (/\.CDS$/.test(iface)) state.send = (rpm) => h.statusEngineSpeed2({ actualValueRPMEngineCrankshaft: rpm * 4 });
+        return Promise.resolve({ iface, available: true });
+    };
+}
+checks.push(
+    ['6. Reset peaks: asks first, the second press within 6 s clears', async () => {
+        const realNow = Date.now;
+        let clock = realNow();
+        Date.now = () => clock;
+        try {
+            const sig = {}, b = await boot(tmp('reset'), { settings: { demo: 'off' }, watch: engineSignal(sig) });
+            sig.send(6000); sig.send(3000);
+            let t = await b.draw();
+            assert(t.includes('6000 rpm'), 'the peak shown: ' + t.join(' | '));
+            await b.clicks.BTN_RESET();
+            t = await b.draw();
+            assert(t.includes('6000 rpm'), 'one press reset it');
+            assert(t.some((x) => /Press again to reset peaks/.test(x)), 'no confirm note: ' + t.join(' | '));
+            clock += 7000; sig.send(3000);
+            await b.clicks.BTN_RESET();                  // too late: only asks again
+            t = await b.draw();
+            assert(t.includes('6000 rpm') || !t.includes('3000 rpm'), 'reset after 7 s');
+            clock += 1000;
+            await b.clicks.BTN_RESET();
+            sig.send(3000);
+            t = await b.draw();
+            assert(t.includes('3000 rpm') && !t.includes('6000 rpm'), 'not reset: ' + t.join(' | '));
+        } finally { Date.now = realNow; }
+    }],
+    ['6. on a car: no demo once a signal arrives', async () => {
+        const sig = {}, b = await boot(tmp('car'), { settings: { demo: 'auto' }, watch: engineSignal(sig) });
+        sig.send(4123);
+        const t = await b.draw();
+        assert(!t.some((x) => /DEMO/.test(x)), 'DEMO shown on a car');
+        assert(t.includes('4123'), 'the car\'s rpm: ' + t.join(' | '));
+    }],
+);
+
 /** A frame of real (not demo) values, as main.js data() hands them to draw.render(). */
 function car() {
     return { demo: false, rpm: 4123, boost: 1.27, boostTarget: 1.35, speed: 188, gear: 4, gearMode: 'D', stage: 'D',
