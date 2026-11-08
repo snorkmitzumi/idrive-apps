@@ -18,7 +18,7 @@ const { Recorder: Canvas } = require(path.join(KIT, 'record'));
 const themes = require(path.join(KIT, 'themes'));
 
 // the app's link: the last ReadOnlyDiag made (tests drive its replies through link.answer)
-let app = null, link = null;
+let app = null, link = null, stubDiag = null;
 class FakeLink extends EventEmitter {
     constructor() { super(); this.available = false; this.ready = false; this.asked = []; this.answer = () => null; link = this; }
     async init() { return this; }
@@ -37,6 +37,8 @@ const stubs = {
 const load = Module._load;
 Module._load = function (req, parent, isMain) {
     if (stubs[req]) return stubs[req];
+    // the read-only link's private Diag (check '4. timing options reach the link')
+    if (req === './diag' && stubDiag && parent && /readonly-diag\.js$/.test(parent.filename)) return Object.assign({}, load.call(this, req, parent, isMain), { Diag: stubDiag });
     if (req.startsWith('./kit/')) return load.call(this, path.join(KIT, req.slice(6)), parent, isMain);
     return load.call(this, req, parent, isMain);
 };
@@ -59,6 +61,8 @@ function settingsOf(over) {
     return { S, get: (k) => S[k], set: (k, v) => { S[k] = v; handlers.forEach((fn) => fn(k, v)); }, onChange: (fn) => handlers.push(fn) };
 }
 
+// every app started by boot(): hidden after each check, so its diagnostic reader stops (it keeps running otherwise)
+const booted = [];
 /** One start of the app; draw() renders a frame and returns its texts. */
 async function boot(dir, opts) {
     opts = opts || {};
@@ -68,6 +72,7 @@ async function boot(dir, opts) {
     require(MAIN);
     const settings = settingsOf(Object.assign({ demo: 'on' }, opts.settings));
     const vis = opts.vis || { shown: true, handlers: [] };
+    booted.push(vis);
     const clicks = {};
     let frame = null, last = null;
     const ctx = {
@@ -199,7 +204,145 @@ const checks = [
         assert.strictEqual(B.state(-6), 'SUPPLYING');
         assert.strictEqual(B.state(null, null), null);
     }],
+    ['4. hidden: no reads', async () => {
+        const r = await rig({ shown: false, driving: true });
+        await r.run(60000);
+        assert.strictEqual(r.asked.length, 0, r.asked.map((q) => q.key).join(' '));
+        r.done();
+    }],
+    ['4. hidden during a round: nothing scheduled', async () => {
+        const r = await rig({ driving: true, hold: true });
+        r.start();
+        const pending = r.step();                   // a round starts, its first read waits
+        r.ui.vis = false;                           // another app opened meanwhile
+        r.release(); await pending; await r.flush();
+        assert(!r.timers.some((x) => x.ms < 60000), 'a round scheduled while hidden: ' + r.timers.map((x) => x.ms));
+        r.done();
+    }],
+    ['4. shown again: a round at once', async () => {
+        const r = await rig({ shown: false, driving: true });
+        r.start(); await r.run(60000);
+        r.ui.vis = true; r.reads.opened();
+        assert(r.timers.some((x) => x.ms === 0), 'no round at once: ' + r.timers.map((x) => x.ms));
+        r.done();
+    }],
+    ['4. parked: reads stop after 10 min', async () => {
+        const r = await rig({ driving: false });
+        r.start(); await r.run(9 * 60000);
+        const n = r.asked.length;
+        assert(n > 0, 'reads in the first 10 min');
+        await r.run(2 * 60000);
+        const late = r.asked.slice(n).filter((q) => q.t > r.t0 + 600000 + 3000);
+        assert.strictEqual(late.length, 0, 'reads after 10 min parked: ' + late.map((q) => q.key).join(' '));
+        assert.strictEqual(r.reads.why('b48'), 'paused - parked');
+        r.done();
+    }],
+    ['4. tiers: the fast values get most of the link', async () => {
+        const r = await rig({ driving: true });
+        r.values.put('boostFes', 0.5); r.values.put('boostFes', 0.6);       // the sport display's boost works
+        r.values.live.awdSeen = true;
+        r.start();
+        for (let s = 0; s < 10; s++) { r.values.put('splitRear', 70); await r.run(1000); }
+        const n = (k) => r.asked.filter((q) => q.key === k).length;
+        assert(n('25:DB32') >= 9 && n('25:DB32') <= 11, 'front-axle torque every 1 s with the car\'s split: ' + n('25:DB32'));
+        assert(n('2:AA56') >= 3 && n('2:AA56') <= 5, '48 V every 2.5 s: ' + n('2:AA56'));
+        assert.strictEqual(n('18:40AD'), 1, '12 V charge every 30 s');
+        assert.strictEqual(n('18:F470'), 0, 'no engine unit boost while the sport display has it');
+        assert(r.reads.bat.b48 && r.reads.bat.b48.soc === 66, JSON.stringify(r.reads.bat.b48));
+        assert.strictEqual(r.values.live.lmvFront, 39.5);
+        r.done();
+    }],
+    ['4. no 48 V: given up, 12 V full column', async () => {
+        const r = await rig({ driving: true, no48: true });
+        r.start(); await r.run(20000);
+        assert.strictEqual(r.reads.bat.has48, false, 'not given up');
+        const n = r.asked.filter((q) => q.key === '2:AA56').length;
+        assert(n <= 4, 'asked ' + n + 'x before giving up (another unit answered: 3)');
+        await r.run(4 * 60000);
+        assert.strictEqual(r.asked.filter((q) => q.key === '2:AA56').length, n, 'asked again within 5 min');
+        assert.strictEqual(r.reads.why('b48'), 'no 48 V battery');
+        r.done();
+    }],
+    ['4. timing options reach the link', async () => {
+        let got = null;
+        stubDiag = class { constructor() { this.p = {}; } async init() {} async physical(target, sid, data, timeoutMs, accept, opts) { got = opts; return [0x62, 0xF4, 0x42, 0x37, 0x14]; } };
+        delete require.cache[path.join(KIT, 'readonly-diag.js')];
+        const { ReadOnlyDiag } = require(path.join(KIT, 'readonly-diag.js'));
+        const l = new ReadOnlyDiag({}, quiet);
+        await l.physical(0x12, 0x22, [0xF4, 0x42], 1000, null, { pendingTimeoutMs: 1500, retryBaseMs: 150, callTimeoutMs: 2000, other: 1 });
+        stubDiag = null;
+        assert.deepStrictEqual(got, { pendingTimeoutMs: 1500, retryBaseMs: 150, callTimeoutMs: 2000 });
+    }],
 ];
+
+/**
+ * The reader with fake timers and clock, a fake link (every unit answers with sample replies unless told otherwise)
+ * and the app's own config. run(ms) fires the timers due within ms, in order, moving the clock.
+ */
+async function rig(o) {
+    const real = { set: global.setTimeout, clear: global.clearTimeout };
+    let clock = 1e9;
+    const t0 = clock, timers = [];
+    global.setTimeout = (fn, ms) => { const tm = { fn, ms, at: clock + (ms || 0) }; timers.push(tm); return tm; };
+    global.clearTimeout = (tm) => { const i = timers.indexOf(tm); if (i >= 0) timers.splice(i, 1); };
+    const flush = async () => { for (let i = 0; i < 20; i++) await new Promise((res) => setImmediate(res)); };
+    const settings = settingsOf(o.settings);
+    const { Values } = appModule('values'), { Reads } = appModule('reads');
+    const { DidReader } = require(path.join(KIT, 'dids.js'));
+    const values = new Values({ settings, log: quiet, now: () => clock, dataDir: tmp('reads') });
+    if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); }
+    const asked = [];
+    let gate = null, release = () => {};
+    const lk = {
+        available: true,
+        async physical(ecu, sid, data) {
+            const key = ecu + ':' + (sid === 0x22 ? data.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join('') : 'OBD ' + data[0].toString(16).toUpperCase());
+            asked.push({ key, t: clock });
+            if (gate) await gate;
+            return answer(ecu, sid, data, o);
+        },
+    };
+    if (o.hold) gate = new Promise((res) => { release = () => { gate = null; res(); }; });
+    const ui = { vis: o.shown !== false, isVisible: (n) => n === 'MAIN' && ui.vis };
+    const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: quiet, now: () => clock, dataDir: tmp('reads-data') });
+    // keep the car driving while time moves (the signals would)
+    const keep = () => { if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); } };
+    const next = () => timers.slice().sort((a, b) => a.at - b.at)[0];
+    return {
+        reads, values, ui, asked, timers, t0, flush,
+        start: () => reads.start(),
+        release: () => release(),
+        step: () => { const tm = next(); timers.splice(timers.indexOf(tm), 1); clock = Math.max(clock, tm.at); return Promise.resolve(tm.fn()); },
+        async run(ms) {
+            const end = clock + ms;
+            for (let guard = 0; guard < 100000; guard++) {
+                const tm = next();
+                if (!tm || tm.at > end) break;
+                timers.splice(timers.indexOf(tm), 1);
+                clock = Math.max(clock, tm.at); keep();
+                await tm.fn(); await flush();
+            }
+            clock = end; keep();
+        },
+        done: () => { global.setTimeout = real.set; global.clearTimeout = real.clear; },
+    };
+}
+
+/** Sample replies: front-axle torque 39.5 Nm, the 48 V battery (66 %), 12.6 V / +1.6 A, the 12 V charge 84 %. */
+function answer(ecu, sid, data, o) {
+    const did = sid === 0x22 ? (data[0] << 8) | data[1] : null;
+    if (ecu === 25 && did === 0xDB32) return [0x62, 0xDB, 0x32, 0x00, 0x9E, 0x00, 0x02, 0x00, 0x98, 0x00, 0x20];
+    if (ecu === 2 && did === 0xAA56) return o.no48 ? null : aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 });
+    if (ecu === 18 && did === 0xF442) return [0x62, 0xF4, 0x42, 12600 >> 8, 12600 & 0xFF];
+    if (ecu === 18 && did === 0x5852) { const raw = Math.round((1.6 + 200) / 0.02); return [0x62, 0x58, 0x52, raw >> 8, raw & 0xFF]; }
+    if (ecu === 18 && did === 0x40AD) return [0x62, 0x40, 0xAD, 84, 0, 80, 0, 79, 0, 78, 0, 77, 0, 76].concat(new Array(12).fill(0));
+    if (ecu === 18 && did === 0x5854) return [0x62, 0x58, 0x54, Math.round((19 + 48) / 0.75)];
+    if (ecu === 18 && did === 0x59AA) return [0x62, 0x59, 0xAA, 92];
+    if (ecu === 18 && did === 0xF433) return [0x62, 0xF4, 0x33, 100];
+    if (ecu === 18 && did === 0x4AB0) { const raw = Math.round(235 / 0.00390625); return [0x62, 0x4A, 0xB0, raw >> 8, raw & 0xFF]; }
+    if (sid === 0x22) return [0x7F, 0x22, 0x31];
+    return null;
+}
 
 /** A 62 AA 56 reply with eDrive's BATT48 layout: v (0, 2 bytes), a (2, s16), temp (4, s16), soc (14), soh (26). */
 function aa56(o) {
@@ -215,8 +358,11 @@ function aa56(o) {
 
 (async () => {
     let failed = 0;
+    const realTimers = { set: global.setTimeout, clear: global.clearTimeout };
     for (const [name, fn] of checks) {
         try { await fn(); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); }
+        global.setTimeout = realTimers.set; global.clearTimeout = realTimers.clear;      // a check that failed half-way
+        booted.forEach((v) => { v.shown = false; });
     }
     if (failed) { console.log(failed + ' of ' + checks.length + ' Combo checks failed'); process.exit(1); }
     console.log('Combo checks passed (' + checks.length + ').');

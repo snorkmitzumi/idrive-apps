@@ -88,15 +88,20 @@ class ReadOnlyDiag {
     /** Drop every request still waiting in the queue: they resolve with undefined (not sent), not null. */
     cancel() { this.gen++; }
 
-    /** Physical request (kit/dids.js calls this): the unit's reply bytes, or null. */
-    physical(target, sid, data, timeoutMs, accept) {
+    /**
+     * Physical request (kit/dids.js calls this): the unit's reply bytes, or null. opts (a candidate's diagOpts): only
+     * the waits go on to the transport - retryBaseMs (busy), pendingTimeoutMs ("response pending"), callTimeoutMs.
+     */
+    physical(target, sid, data, timeoutMs, accept, opts) {
         const d = Array.isArray(data) ? data.slice() : data;          // checked = sent: no change after the check
         try { check(target, sid, d, false); } catch (e) { return this.blocked(e); }
         if (this.silent(target)) return Promise.resolve(null);
+        let waits;
+        if (opts) ['retryBaseMs', 'pendingTimeoutMs', 'callTimeoutMs'].forEach((k) => { if (opts[k] != null) (waits = waits || {})[k] = opts[k]; });
         return this.queue(async () => {
             this.stats.sent++;
             const t0 = Date.now();
-            const uds = await LINKS.get(this).physical(target, sid, d, timeoutMs || 1500, accept);
+            const uds = await LINKS.get(this).physical(target, sid, d, timeoutMs || 1500, accept, waits);
             if (uds) { this.stats.ms += Date.now() - t0; this.stats.timed++; }
             if (!uds) {
                 this.stats.missed++;

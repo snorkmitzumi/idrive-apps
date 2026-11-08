@@ -13,6 +13,9 @@ const draw = require('./draw');
 const Demo = require('./demo');
 const { Values } = require('./values');
 const { watches } = require('./signals');
+const { ReadOnlyDiag } = require('./kit/readonly-diag');
+const { DidReader } = require('./kit/dids');
+const { Reads } = require('./reads');
 
 const W = 1600, H = 520;
 
@@ -36,6 +39,14 @@ mgu.run({
             });
         });
 
+        // the diagnostic link: reading only, connected in the background (the screen must not wait for it)
+        const link = new ReadOnlyDiag(ctx.signals, log);
+        link.init().catch((e) => log.warn('diagnostic link: ' + e));
+        const reads = new Reads({ link, reader: new DidReader(link), values, settings, cfg, ui, log, dataDir: ctx.dataDir });
+        reads.start();
+        // shown again (another app was on screen): a round at once
+        ui.onVisible((name, v) => { if (name === 'MAIN' && v) reads.opened(); });
+
         const demo = new Demo();
         demo.setRedline(engine.redline());
         if (engine.onChange) engine.onChange(() => demo.setRedline(engine.redline()));
@@ -50,16 +61,17 @@ mgu.run({
                     power: { kw: s.powerPct / 100 * settings.get('maxPower'), calc: false }, torque: s.torque,
                     split: { rear: s.splitRear, from: null, nm: s.lmvFront }, awd: s.awd, awdQual: s.awdQual, b48: s.b48, b12: s.b12 };
             }
-            const L = values.live;
+            const L = values.live, bat = reads.fresh();
             return { demo: false, rpm: L.rpm, boost: values.boost().value, boostTarget: L.boostTarget, speed: L.speed,
                 gear: L.gear !== undefined ? L.gear : L.gearGuess, gearMode: L.gearMode || L.program || null,
-                power: values.power(), torque: L.torque, split: values.split(), awd: L.awd, awdQual: L.awdQual, b48: null, b12: null };
+                power: values.power(), torque: L.torque, split: values.split(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48 };
         }
 
         async function render() {
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg), d = data();
             if (!d.demo) values.raise('power', d.power.kw);
-            draw.render(cv, t, d, { settings });
+            reads.shown();
+            draw.render(cv, t, d, { settings, why: (k) => reads.why(k) });
             await ui.image('MAIN_GFX', cv);
         }
         ctx.loop('MAIN', 10, render);
