@@ -174,7 +174,44 @@ const checks = [
         assert.strictEqual(v.live.awdSeen, true, 'all-wheel drive remembered');
         assert(v.carPresent(), 'a value from the car');
     }],
+    ['3. AA56 decode: the 48 V battery, + = charging', async () => {
+        const B = appModule('batteries'), F = SPEC.config.battery.b48[0].fields;
+        const r = aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 });
+        const b = B.b48(B.fields(r, F));
+        assert.deepStrictEqual(Object.assign({}, b, { kw: +b.kw.toFixed(4) }), { soc: 66, v: 47.2, a: 10.5, kw: 0.4956, soh: 96, temp: 24 });
+        assert.strictEqual(B.state(b.a), 'CHARGING');
+    }],
+    ['3. short AA56 reply: missing fields are null, never NaN', async () => {
+        const B = appModule('batteries'), F = SPEC.config.battery.b48[0].fields;
+        const r = aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 }).slice(0, 3 + 4);
+        const f = B.fields(r, F), b = B.b48(f);
+        ['soc', 'soh', 'temp'].forEach((k) => assert.strictEqual(b[k], null, k));
+        assert(Object.keys(f).every((k) => f[k] === null || isFinite(f[k])), JSON.stringify(f));
+        assert(Object.keys(b).every((k) => b[k] === null || isFinite(b[k])), JSON.stringify(b));
+        assert.strictEqual(B.rawShape(r), B.rawShape(r.slice()), 'same shape, same key');
+        assert.notStrictEqual(B.rawShape(r), B.rawShape(aa56({ v: 4720 })), 'a longer reply is a new shape');
+    }],
+    ['3. state: current first, else the 12 V charging voltage', async () => {
+        const B = appModule('batteries');
+        assert.strictEqual(B.state(null, 14.1), 'CHARGING');
+        assert.strictEqual(B.state(null, 12.4), null);
+        assert.strictEqual(B.state(0.5), 'IDLE');
+        assert.strictEqual(B.state(-6), 'SUPPLYING');
+        assert.strictEqual(B.state(null, null), null);
+    }],
 ];
+
+/** A 62 AA 56 reply with eDrive's BATT48 layout: v (0, 2 bytes), a (2, s16), temp (4, s16), soc (14), soh (26). */
+function aa56(o) {
+    const data = new Array(32).fill(0);
+    const w16 = (at, x) => { x = x & 0xFFFF; data[at] = x >> 8; data[at + 1] = x & 0xFF; };
+    if (o.v != null) w16(0, o.v);
+    if (o.a != null) w16(2, o.a);
+    if (o.temp != null) w16(4, o.temp);
+    if (o.soc != null) data[14] = o.soc;
+    if (o.soh != null) data[26] = o.soh;
+    return [0x62, 0xAA, 0x56].concat(data);
+}
 
 (async () => {
     let failed = 0;
