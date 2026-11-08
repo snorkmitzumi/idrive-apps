@@ -263,6 +263,12 @@ const checks = [
         assert.strictEqual(r.reads.why('b48'), 'no 48 V battery');
         r.done();
     }],
+    ['4. demo on screen: no reads', async () => {
+        const r = await rig({ driving: true, active: false });
+        r.start(); await r.run(30000);
+        assert.strictEqual(r.asked.length, 0, r.asked.map((q) => q.key).join(' '));
+        r.done();
+    }],
     ['4. timing options reach the link', async () => {
         let got = null;
         stubDiag = class { constructor() { this.p = {}; } async init() {} async physical(target, sid, data, timeoutMs, accept, opts) { got = opts; return [0x62, 0xF4, 0x42, 0x37, 0x14]; } };
@@ -273,7 +279,53 @@ const checks = [
         stubDiag = null;
         assert.deepStrictEqual(got, { pendingTimeoutMs: 1500, retryBaseMs: 150, callTimeoutMs: 2000 });
     }],
+    ['5. real values: every column shows the car\'s numbers', async () => {
+        const t = await page(car());
+        ['4123', '1.27', 'TARGET', '1.35', 'CHARGE', '66', '84', 'CHARGING', 'FRONT AXLE', '4WD Sport', 'POWER', 'TORQUE'].forEach((x) => assert(has(t, x), x + ' missing: ' + t.join(' | ')));
+        assert(!t.some((x) => /NaN|undefined|null/.test(x)), t.join(' | '));
+    }],
+    ['5. missing values: -- and the reason, never NaN', async () => {
+        const d = car(); d.b48 = null; d.b12 = { soc: null, v: null, a: null, soh: null, temp: null }; d.boost = null; d.split = { rear: null, from: null };
+        const t = await page(d, {}, { why: (k) => (k === 'b48' ? 'reading…' : 'no reply') });
+        assert(t.includes('--'), 'no --: ' + t.join(' | '));
+        assert(t.some((x) => x.indexOf('reading…') >= 0), 'no reason for the 48 V battery: ' + t.join(' | '));
+        assert(!t.some((x) => /NaN|undefined|null/.test(x)), t.join(' | '));
+    }],
+    ['5. units: psi / °F / hp / lb-ft', async () => {
+        const d = car(); d.boost = 1.0; d.b48.temp = 24; d.power = { kw: 100, calc: false }; d.split.nm = 100;
+        const t = await page(d, { pressUnit: 'psi', tempUnit: 'f', powerUnit: 'hp', torqueUnit: 'lbft' });
+        ['14.5', '75', '134', '74'].forEach((x) => assert(has(t, x), x + ' missing: ' + t.join(' | ')));
+        ['psi', 'hp', 'lb-ft'].forEach((x) => assert(has(t, x), x + ' unit missing'));
+        assert(t.some((x) => x.indexOf('°F') >= 0), '°F missing');
+    }],
+    ['5. no 48 V: the 12 V battery takes the column', async () => {
+        const t = await page(car(), {}, { has48: false });
+        assert(!t.includes('48 V battery'), '48 V panel drawn');
+        assert(t.includes('12 V battery'));
+    }],
+    ['5. RWD: xDrive hidden in Settings', async () => {
+        const t = await page(car(), { xdrive: 'off' });
+        assert(t.includes('RWD'), t.join(' | '));
+        assert(!has(t, 'FRONT AXLE'));
+    }],
 ];
+
+/** A frame of real (not demo) values, as main.js data() hands them to draw.render(). */
+function car() {
+    return { demo: false, rpm: 4123, boost: 1.27, boostTarget: 1.35, speed: 188, gear: 4, gearMode: 'D', stage: 'D',
+        power: { kw: 185, calc: false }, torque: 671, split: { rear: 86, from: null, nm: 118 }, awd: '_4WD_ALTERNATIV', awdQual: 'FUNKTION_VERFUEGBAR_AKTIV',
+        b48: { soc: 66, v: 47.2, a: 10.5, kw: 0.4956, soh: 96, temp: 24 }, b12: { soc: 84, v: 14.1, a: 1.6, soh: 92, temp: 19 } };
+}
+/** The texts of one frame drawn by draw.render(d). */
+async function page(d, over, opts) {
+    const draw = appModule('draw'), settings = settingsOf(Object.assign({ demo: 'off' }, over));
+    const cv = new Canvas(1600, 520), t = themes.theme('m_tricolour');
+    const o = Object.assign({ settings, peak: (k) => ({ rpm: 6850, boost: 1.68, power: 241, torque: 702, lmvFront: 433 })[k], why: () => 'reading…',
+        redline: 7000, scaleMax: 8000, has48: true }, opts);
+    return textsOf(() => draw.render(cv, t, d, o));
+}
+/** A number or word shown on its own (not as part of a longer number). */
+const has = (texts, s) => texts.some((x) => new RegExp('(^|[^0-9.])' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^0-9])').test(x));
 
 /**
  * The reader with fake timers and clock, a fake link (every unit answers with sample replies unless told otherwise)
@@ -304,7 +356,8 @@ async function rig(o) {
     };
     if (o.hold) gate = new Promise((res) => { release = () => { gate = null; res(); }; });
     const ui = { vis: o.shown !== false, isVisible: (n) => n === 'MAIN' && ui.vis };
-    const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: quiet, now: () => clock, dataDir: tmp('reads-data') });
+    const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: quiet, now: () => clock, dataDir: tmp('reads-data'),
+        active: o.active === false ? () => false : undefined });
     // keep the car driving while time moves (the signals would)
     const keep = () => { if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); } };
     const next = () => timers.slice().sort((a, b) => a.at - b.at)[0];

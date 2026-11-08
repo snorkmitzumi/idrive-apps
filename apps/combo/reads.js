@@ -15,7 +15,7 @@
  * The 48 V battery (eDrive's read48()): Auto shows it once it answers (kept in battery.json); one that never answers
  * is given up after 6 tries (3 when another unit answered) and asked again only every 5 min.
  *
- *   const r = new Reads({ link, reader, values, settings, cfg, ui, log, now, dataDir })
+ *   const r = new Reads({ link, reader, values, settings, cfg, ui, log, now, dataDir, active })   active(): false = demo, no reads
  *   r.start()  r.shown() (each frame)  r.opened() (screen shown again)  r.inUse()  r.paused()
  *   r.bat = { b48, b48T, b12: { soc, v, a, soh, temp }, b12T, has48 }   r.fresh() -> { b48, b12 } (stale -> null)
  *   r.why(key) -> 'diagnostic link down' | 'paused - parked' | 'no 48 V battery' | 'no reply' | 'reading…'
@@ -35,6 +35,7 @@ class Reads {
     constructor(o) {
         Object.assign(this, { link: o.link, reader: o.reader, values: o.values, settings: o.settings, ui: o.ui, log: o.log });
         this.now = o.now || (() => Date.now());
+        this.active = o.active || (() => true);           // false: nothing to read (the demo is on screen)
         const cfg = o.cfg || {}, dme = cfg.dme || {}, bat = cfg.battery || {};
         // short waits per candidate (M Vitals and eDrive since PR #1); a candidate's own values in app.json win
         const quick = (list, ecu) => (list || []).map((c) => Object.assign({ timeoutMs: 1000, diagOpts: DIAG }, ecu != null && c.ecu == null ? { ecu } : {}, c));
@@ -101,7 +102,7 @@ class Reads {
     schedule(ms) {
         if (this.timer !== null) clearTimeout(this.timer);
         this.timer = null;
-        if (!this.ui.isVisible('MAIN') || !this.inUse()) return;
+        if (!this.active() || !this.ui.isVisible('MAIN') || !this.inUse()) return;
         this.timer = setTimeout(() => { this.timer = null; this.round(); }, ms);
     }
     every(it) { const e = it.every(); return e === null ? null : (this.fails[it.key] || 0) >= 3 ? Math.max(e, BACKOFF) : e; }
@@ -123,7 +124,7 @@ class Reads {
         try {
             if (this.link.available) {
                 for (const it of this.items) {
-                    if (!this.ui.isVisible('MAIN') || !this.inUse()) break;        // hidden or parked meanwhile: stop here
+                    if (!this.active() || !this.ui.isVisible('MAIN') || !this.inUse()) break;        // hidden, parked or demo meanwhile
                     const e = this.every(it);
                     if (e === null || this.now() - (this.last[it.key] || 0) < e) continue;
                     this.last[it.key] = this.now();
