@@ -257,9 +257,25 @@ const checks = [
         lv = startLive(dir, Object.assign(L0(), { climate: 'ac' }), { DD68: 400, DD69: -5, D8D2: 1000 }, { probes });   // 2 kW, compressor 1 kW
         now += 2000; await power();
         lv.draw('battery', new Canvas(1600, 520), themes.theme('m_tricolour'));    // the page shown: the slow reads run
-        await fire((ms) => ms === 5000);
+        await fire((ms) => ms === SPEC.settings.find((s) => s.key === 'slowPoll').default * 1000);     // the slow reads' timer
         // 2 kW - the 0.35 kW baseline - 1 kW compressor
         assert(Math.abs(liveState(dir).otherKw - 0.65) < 1e-9, 'st.otherKw saved: ' + JSON.stringify(liveState(dir)));
+    }],
+    ['4c. the pack voltage from the car\'s signal while it is fresh: no battery unit read for it', async () => {
+        const dir = tmp('lscv'), seen = [];
+        const vals = new Proxy({ DD68: 350, DD69: -30 }, { get: (o, k) => { seen.push(k); return o[k]; } });
+        const L = Object.assign(L0(), { speed: 50, lscV: 360, lscVT: now });
+        const lv = startLive(dir, L, vals);
+        for (let i = 0; i < 3; i++) { now += 2000; L.lscVT = now; await power(); }
+        assert(!seen.includes('DD68'), 'DD68 read with a fresh LSC voltage: ' + seen);
+        assert(seen.includes('DD69'), 'the current still read');
+        const d = lv.draw('battery', new Canvas(1600, 520), themes.theme('m_tricolour'));
+        assert.strictEqual(d.v, 360);
+        assert(Math.abs(d.kw - 10.8) < 1e-9, '360 V x 30 A: ' + d.kw);
+        // the signal stops (older than 5 s): the battery unit's voltage again, and the newer one is used
+        now += 6000; await power();
+        assert(seen.includes('DD68'), 'DD68 not read with a stale LSC voltage');
+        assert.strictEqual(lv.draw('battery', new Canvas(1600, 520), themes.theme('m_tricolour')).v, 350);
     }],
     ['4b. driving saves live.json every 5 min (flash), the rest at shutdown', async () => {
         const dir = tmp('use5'), L = Object.assign(L0(), { speed: 50, climate: 'ac', standSince: 0 });
