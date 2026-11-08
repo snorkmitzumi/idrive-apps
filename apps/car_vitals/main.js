@@ -529,7 +529,8 @@ mgu.run({
             // transfer case: only on the Chassis page with the xDrive card shown, and only while the car's own split is missing
             const onChassis = now - chassisSeen < 1500 && xcfg.front.length > 0 && settings.get('xdrive') !== 'off'
                 && !(G.isNum(live.splitRear) && now - splitAt < SPLIT_STALE);
-            const fast = onFuelPage ? FUEL.filter(want) : now - engineSeen < 1500 && needBoost ? ['boost'] : onChassis ? ['lmv'] : null;
+            // (only while shown: a page drawn just before the app was hidden must not keep the 400 ms rounds going)
+            const fast = !ui.isVisible('MAIN') ? null : onFuelPage ? FUEL.filter(want) : now - engineSeen < 1500 && needBoost ? ['boost'] : onChassis ? ['lmv'] : null;
             // misfire counts change slowly: every 4th fast round on its page (~2 s), every slow round otherwise
             pollFuel.n = (pollFuel.n || 0) + 1;
             const misNow = want('misfire') && (!fast || (onFuelPage && pollFuel.n % 4 === 0));
@@ -562,8 +563,12 @@ mgu.run({
         fuelTimer = setTimeout(pollFuel, 1000);
         /** Page opened: don't wait for the slow timer. */
         const kickFuel = () => { if (!fuelBusy && Date.now() - fuelLast > 600) { clearTimeout(fuelTimer); fuelTimer = setTimeout(pollFuel, 0); } };
-        // shown again (any page): a round now rather than up to HIDDEN_MS later
-        ui.onVisible((name, v) => { if (name === 'MAIN' && v) kickFuel(); });
+        // shown again (any page, also Thermals, which never calls kickFuel): a round now rather than up to HIDDEN_MS
+        // later. Not through kickFuel's 600 ms debounce (that is for the render loop): a hidden round that ended
+        // within it would leave the 60 s timer running. While a round runs, its end schedules at the shown rate.
+        ui.onVisible((name, v) => {
+            if (name === 'MAIN' && v && !fuelBusy) { clearTimeout(fuelTimer); fuelTimer = setTimeout(pollFuel, 0); }
+        });
         /** Why a fuel value is missing, for its tile. */
         function fuelWhy(k) {
             if (!link.p) return 'no diagnostic link';
