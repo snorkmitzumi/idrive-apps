@@ -3,7 +3,7 @@
  * batteries.js - the 48 V and 12 V battery replies as values (pure functions, no I/O).
  *
  *   fields(reply, cfg)  a 62 <DID> <data> reply decoded with app.json fields ({ at, bytes, factor, offset, signed, min, max },
- *                       as eDrive's readFields): all FF = no value, outside min..max = null, past the reply's end = null
+ *                       as eDrive's readFields): all FF = no value (unsigned fields), outside min..max = null, past the reply's end = null
  *   b48(f)              { soc, v, a, kw, soh, temp }: + = into the battery (charging). The 48 V battery sends its current
  *                       negative while charging (eDrive's config note), so it is turned round here.
  *   state(a, v)         'CHARGING' | 'SUPPLYING' | 'IDLE' | null: from the current (over +1 A / under -1 A), or without
@@ -21,7 +21,7 @@ function fields(reply, cfg) {
         if (!reply || reply.length < at + n) { out[k] = null; return; }
         let raw = 0;
         for (let j = 0; j < n; j++) raw = raw * 256 + reply[at + j];
-        if (raw === Math.pow(256, n) - 1) { out[k] = null; return; }                // all FF: no value
+        if (!f.signed && raw === Math.pow(256, n) - 1) { out[k] = null; return; }  // all FF: no value (signed FF..FF is -1)
         if (f.signed && raw >= Math.pow(2, 8 * n - 1)) raw -= Math.pow(2, 8 * n);
         const v = raw * (f.factor == null ? 1 : f.factor) + (f.offset || 0);
         out[k] = (f.min != null && v < f.min) || (f.max != null && v > f.max) ? null : v;

@@ -92,6 +92,7 @@ async function boot(dir, opts) {
 }
 
 const quiet = { info() {}, warn() {}, error() {} };
+const G_isNum = (x) => typeof x === 'number' && isFinite(x);
 const tmp = (name) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'combo-' + name + '-'));
 
 const checks = [
@@ -269,6 +270,48 @@ const checks = [
         assert.strictEqual(r.asked.length, 0, r.asked.map((q) => q.key).join(' '));
         r.done();
     }],
+    ['final: a unit that went silent is woken again for its back-off retry', async () => {
+        // the engine unit doesn't answer for the first 20 s (opened before the engine was started), then does
+        const r = await rig({ driving: true, deadUntil: { 18: 20000 } });
+        r.start(); await r.run(6 * 60000);
+        assert(G_isNum(r.reads.fresh().b12.v), 'the 12 V voltage never came back: ' + JSON.stringify(r.reads.bat.b12));
+        r.done();
+    }],
+    ['final: a 48 V reply in another layout is logged and counts as an answer', async () => {
+        const r = await rig({ driving: true, odd48: true });
+        r.start(); await r.run(30000);
+        assert(r.logged.some((m) => /^raw AA56: 62 AA 56/.test(m)), 'raw reply not logged: ' + r.logged.filter((m) => /AA56/.test(m)));
+        assert.notStrictEqual(r.reads.bat.has48, false, 'a battery that answers was given up');
+        r.done();
+    }],
+    ['final: xDrive on Auto, AWD not seen yet: the transfer case is read slowly and marks AWD', async () => {
+        const r = await rig({ driving: true });
+        r.start(); await r.run(1000);
+        assert(r.asked.some((q) => q.key === '25:DB32'), 'transfer case never read before AWD was seen');
+        assert.strictEqual(r.values.live.awdSeen, true, '39.5 Nm to the front axle: all-wheel drive');
+        r.done();
+    }],
+    ['final: parked, both battery panels say paused, no old numbers', async () => {
+        const r = await rig({ driving: false });
+        r.start(); await r.run(11 * 60000);
+        const f = r.reads.fresh();
+        assert.strictEqual(f.b48, null);
+        assert(Object.keys(f.b12).every((k) => f.b12[k] === null), 'old 12 V values shown parked: ' + JSON.stringify(f.b12));
+        assert.strictEqual(r.reads.why('b12'), 'paused - parked');
+        r.done();
+    }],
+    ['final: a 12 V battery that never answers says no reply', async () => {
+        const r = await rig({ driving: true, dead12: true });
+        r.start(); await r.run(10000);
+        assert.strictEqual(r.reads.why('b12'), 'no reply');
+        r.done();
+    }],
+    ['final: all-FF of a signed field is a real value (-0.1 A), not "no value"', async () => {
+        const B = appModule('batteries'), F = SPEC.config.battery.b48[0].fields;
+        const b = B.b48(B.fields(aa56({ v: 4720, a: -1, temp: 48, soc: 66, soh: 96 }), F));
+        assert(Math.abs(b.a - 0.1) < 1e-9, 'current FFFF: ' + b.a);
+        assert.strictEqual(B.fields([0x62, 0x40, 0xAD, 0xFF], { soc: { at: 0, bytes: 1 } }).soc, null, 'unsigned FF stays no value');
+    }],
     ['4. timing options reach the link', async () => {
         let got = null;
         stubDiag = class { constructor() { this.p = {}; } async init() {} async physical(target, sid, data, timeoutMs, accept, opts) { got = opts; return [0x62, 0xF4, 0x42, 0x37, 0x14]; } };
@@ -386,24 +429,31 @@ async function rig(o) {
     if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); }
     const asked = [];
     let gate = null, release = () => {};
+    // as kit/runtime/readonly-diag.js: a unit that didn't answer 5 times in a row is skipped (null, nothing sent) until wake()
+    const misses = {}, logged = [];
     const lk = {
         available: true,
+        silent: (ecu) => (misses[ecu] || 0) >= 5,
+        wake(ecu) { if (ecu === undefined) Object.keys(misses).forEach((k) => { delete misses[k]; }); else delete misses[ecu]; },
         async physical(ecu, sid, data) {
+            if (lk.silent(ecu)) return null;
             const key = ecu + ':' + (sid === 0x22 ? data.map((b) => b.toString(16).toUpperCase().padStart(2, '0')).join('') : 'OBD ' + data[0].toString(16).toUpperCase());
             asked.push({ key, t: clock });
             if (gate) await gate;
-            return answer(ecu, sid, data, o);
+            const r = clock - t0 < (o.deadUntil && o.deadUntil[ecu] || 0) ? null : answer(ecu, sid, data, o);
+            misses[ecu] = r ? 0 : (misses[ecu] || 0) + 1;
+            return r;
         },
     };
     if (o.hold) gate = new Promise((res) => { release = () => { gate = null; res(); }; });
     const ui = { vis: o.shown !== false, isVisible: (n) => n === 'MAIN' && ui.vis };
-    const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: quiet, now: () => clock, dataDir: tmp('reads-data'),
+    const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: { info: (m) => logged.push(m), warn: (m) => logged.push(m), error() {} }, now: () => clock, dataDir: tmp('reads-data'),
         active: o.active === false ? () => false : undefined });
     // keep the car driving while time moves (the signals would)
     const keep = () => { if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); } };
     const next = () => timers.slice().sort((a, b) => a.at - b.at)[0];
     return {
-        reads, values, ui, asked, timers, t0, flush,
+        reads, values, ui, asked, timers, t0, flush, logged,
         start: () => reads.start(),
         release: () => release(),
         step: () => { const tm = next(); timers.splice(timers.indexOf(tm), 1); clock = Math.max(clock, tm.at); return Promise.resolve(tm.fn()); },
@@ -426,7 +476,8 @@ async function rig(o) {
 function answer(ecu, sid, data, o) {
     const did = sid === 0x22 ? (data[0] << 8) | data[1] : null;
     if (ecu === 25 && did === 0xDB32) return [0x62, 0xDB, 0x32, 0x00, 0x9E, 0x00, 0x02, 0x00, 0x98, 0x00, 0x20];
-    if (ecu === 2 && did === 0xAA56) return o.no48 ? null : aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 });
+    if (ecu === 2 && did === 0xAA56) return o.no48 ? null : o.odd48 ? [0x62, 0xAA, 0x56, 0x00, 0x05, 0x12] : aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 });
+    if (o.dead12 && ecu === 18 && [0xF442, 0x5852, 0x40AD, 0x56F0, 0x402B, 0x5853].indexOf(did) >= 0) return null;
     if (ecu === 18 && did === 0xF442) return [0x62, 0xF4, 0x42, 12600 >> 8, 12600 & 0xFF];
     if (ecu === 18 && did === 0x5852) { const raw = Math.round((1.6 + 200) / 0.02); return [0x62, 0x58, 0x52, raw >> 8, raw & 0xFF]; }
     if (ecu === 18 && did === 0x40AD) return [0x62, 0x40, 0xAD, 84, 0, 80, 0, 79, 0, 78, 0, 77, 0, 76].concat(new Array(12).fill(0));

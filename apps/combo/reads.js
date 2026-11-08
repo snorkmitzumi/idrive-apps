@@ -59,23 +59,27 @@ class Reads {
 
     makeItems() {
         const s = this.settings, v = this.values, c = this.c, r = this.reader;
-        const xdriveOn = () => s.get('xdrive') === 'on' || (s.get('xdrive') === 'auto' && !!v.live.awdSeen);
+        // xDrive: Show, or Auto once all-wheel drive was seen; Auto before that: every 30 s, and torque to the front
+        // axle marks it (M Vitals: over 20 Nm), as the car may send neither its split nor the drive mode
+        const xdriveEvery = () => (s.get('xdrive') === 'off' || !c.front.length ? null
+            : s.get('xdrive') === 'auto' && !v.live.awdSeen ? SLOW : v.carSplit() ? SPLIT : FAST);
+        const ecusOf = (...lists) => { const out = []; lists.forEach((l) => l.forEach((x) => { if (x.ecu != null && out.indexOf(x.ecu) < 0) out.push(x.ecu); })); return out; };
         const keep12 = (k, x) => { if (x === null || x === undefined) return false; this.bat.b12[k] = x; this.bat.b12T[k] = this.now(); return true; };
         return [
-            { key: 'lmvFront', every: () => (xdriveOn() && c.front.length ? (v.carSplit() ? SPLIT : FAST) : null),
-                read: async () => { const x = await r.value('lmvFront', c.front); if (x === null) return false; v.put('lmvFront', x); return true; } },
-            { key: 'boostDme', every: () => (c.boost.length && v.boostFromDme() ? FAST : null),
+            { key: 'lmvFront', every: xdriveEvery, ecus: ecusOf(c.front),
+                read: async () => { const x = await r.value('lmvFront', c.front); if (x === null) return false; v.put('lmvFront', x); if (Math.abs(x) > 20) v.markAwd(); return true; } },
+            { key: 'boostDme', ecus: ecusOf(c.boost, c.baro), every: () => (c.boost.length && v.boostFromDme() ? FAST : null),
                 read: async () => { await this.freshBaro(); const x = await r.value('boost', c.boost); if (x === null) return false; v.put('boostDme', (x - this.baro) / 100); return true; } },
-            { key: 'b48', every: () => (s.get('battery48') === 'off' || !c.b48.length ? null : this.bat.has48 === false && s.get('battery48') === 'auto' ? BACKOFF : BATTERY),
+            { key: 'b48', ecus: ecusOf(c.b48), every: () => (s.get('battery48') === 'off' || !c.b48.length ? null : this.bat.has48 === false && s.get('battery48') === 'auto' ? BACKOFF : BATTERY),
                 read: () => this.read48() },
-            { key: 'v12', every: () => BATTERY, read: () => this.readV12(keep12) },
-            { key: 'i12', every: () => BATTERY, read: async () => keep12('a', await r.value('i12', c.i12)) },
-            { key: 'soc40', every: () => SLOW, read: async () => { const f = await this.readFields('soc40', c.soc40); return !!f && keep12('soc', f.soc); } },
-            { key: 'soc12', every: () => ((this.fails.soc40 || 0) >= 3 ? SLOW : null), read: async () => keep12('soc', await r.value('soc12', c.soc12)) },
-            { key: 'boostTarget', every: () => (c.boostTarget.length ? SLOW : null),
+            { key: 'v12', ecus: ecusOf(c.v12), every: () => BATTERY, read: () => this.readV12(keep12) },
+            { key: 'i12', ecus: ecusOf(c.i12), every: () => BATTERY, read: async () => keep12('a', await r.value('i12', c.i12)) },
+            { key: 'soc40', ecus: ecusOf(c.soc40), every: () => SLOW, read: async () => { const f = await this.readFields('soc40', c.soc40); return !!f && keep12('soc', f.soc); } },
+            { key: 'soc12', ecus: ecusOf(c.soc12), every: () => ((this.fails.soc40 || 0) >= 3 ? SLOW : null), read: async () => keep12('soc', await r.value('soc12', c.soc12)) },
+            { key: 'boostTarget', ecus: ecusOf(c.boostTarget, c.baro), every: () => (c.boostTarget.length ? SLOW : null),
                 read: async () => { await this.freshBaro(); const x = await r.value('boostTarget', c.boostTarget); if (x === null) return false; v.put('boostTarget', (x - this.baro) / 100); return true; } },
-            { key: 't12', every: () => SLOW, read: async () => keep12('temp', await r.value('t12', c.t12)) },
-            { key: 'soh12', every: () => HEALTH, read: async () => keep12('soh', await r.value('soh12', c.soh12)) },
+            { key: 't12', ecus: ecusOf(c.t12), every: () => SLOW, read: async () => keep12('temp', await r.value('t12', c.t12)) },
+            { key: 'soh12', ecus: ecusOf(c.soh12), every: () => HEALTH, read: async () => keep12('soh', await r.value('soh12', c.soh12)) },
         ];
     }
 
@@ -85,7 +89,10 @@ class Reads {
         const now = this.now(), L = this.values.live;
         const engine = typeof L.rpm === 'number' && L.rpm > 400 && now - (L.rpmT || 0) < 5000;
         if ((typeof L.speed === 'number' && L.speed > 1) || engine) this.lastActiveT = now;
-        return now - this.lastActiveT < IDLE_AFTER_MOVE || now - this.lastUserT < IDLE_AFTER_USER;
+        const use = now - this.lastActiveT < IDLE_AFTER_MOVE || now - this.lastUserT < IDLE_AFTER_USER;
+        if (use && this.wasInUse === false) this.wake();          // in use again: units that went quiet get asked again
+        this.wasInUse = use;
+        return use;
     }
     paused() { return !this.inUse(); }
     /** Each frame: a frame after a pause means the screen was just opened. */
@@ -96,7 +103,16 @@ class Reads {
         else if (this.timer === null && !this.busy) this.schedule(0);
     }
     /** The screen was shown again (or a button pressed): counts as use, and a round at once. */
-    opened() { this.lastUserT = this.now(); if (!this.busy) this.schedule(0); }
+    opened() { this.lastUserT = this.now(); this.wake(); if (!this.busy) this.schedule(0); }
+    /**
+     * The read-only link skips a unit that missed 5 replies in a row until it is woken (kit/runtime/readonly-diag.js
+     * silent()): asleep or not up yet - e.g. the screen opened before the engine was started. Woken when the screen is
+     * opened, when the car is in use again, and before each back-off retry of a value (its own units).
+     */
+    wake(ecus) {
+        if (!this.link.wake) return;
+        if (ecus === undefined) this.link.wake(); else ecus.forEach((e) => this.link.wake(e));
+    }
     start() { this.schedule(0); }
     /** The next round in ms - only while shown and in use; else nothing until opened() / shown(). */
     schedule(ms) {
@@ -128,6 +144,7 @@ class Reads {
                     const e = this.every(it);
                     if (e === null || this.now() - (this.last[it.key] || 0) < e) continue;
                     this.last[it.key] = this.now();
+                    if ((this.fails[it.key] || 0) >= 3 && it.ecus) this.wake(it.ecus);      // the back-off retry: really ask
                     let ok = false;
                     try { ok = await it.read(); } catch (err) { this.log.warn(it.key + ': ' + err); }
                     this.fails[it.key] = ok ? 0 : (this.fails[it.key] || 0) + 1;
@@ -152,13 +169,17 @@ class Reads {
         for (let k = 0; k < list.length; k++) {
             const i = (start + k) % list.length, c = list[i], names = Object.keys(c.fields || {});
             const p = Object.assign({ ecu: c.ecu, did: c.did, timeoutMs: c.timeoutMs, diagOpts: c.diagOpts }, c.fields[names[0]]);
-            const v0 = await this.reader.read(p);
-            if (v0 === null) continue;
-            const raw = this.reader.raws[this.reader.key(p)], bytes = raw.bytes.split(' ').map((x) => parseInt(x, 16));
+            await this.reader.read(p);
+            const raw = this.reader.raws[this.reader.key(p)];
+            if (!raw || !raw.bytes) continue;                                  // no reply
+            const bytes = raw.bytes.split(' ').map((x) => parseInt(x, 16));
+            // the 48 V layout is not confirmed on a car: every new reply shape to the log, before any plausibility check
             if (name === 'b48') {
                 const shape = B.rawShape(bytes);
                 if (!this.shapes[shape]) { this.shapes[shape] = 1; this.log.info('raw AA56: ' + raw.bytes); }
             }
+            // a positive reply to this identifier is an answer, even when a field doesn't fit (it is then null)
+            if (bytes[0] !== 0x62 || ((bytes[1] << 8) | bytes[2]) !== parseInt(c.did, 16)) continue;
             this.reader.pick[name] = i;
             return B.fields(bytes, c.fields);
         }
@@ -191,6 +212,8 @@ class Reads {
     /** The values to show now: one too old is null (the panel then shows why). */
     fresh() {
         const now = this.now(), b = this.bat, b12 = {};
+        // parked or no link: nothing old is shown, the panels say why instead
+        if (!this.link.available || !this.inUse()) { Object.keys(b.b12).forEach((k) => { b12[k] = null; }); return { b48: null, b12, has48: b.has48 }; }
         Object.keys(b.b12).forEach((k) => { b12[k] = b.b12T[k] && now - b.b12T[k] < KEEP[k] ? b.b12[k] : null; });
         return { b48: b.b48T && now - b.b48T < KEEP.b48 ? b.b48 : null, b12, has48: b.has48 };
     }
@@ -198,6 +221,8 @@ class Reads {
         if (!this.link.available) return 'diagnostic link down';
         if (!this.inUse()) return 'paused - parked';
         if (key === 'b48' && this.bat.has48 === false) return 'no 48 V battery';
+        // the 12 V panel's values are read as v12 / i12 / soc40: none of them answers
+        if (key === 'b12') return ['v12', 'i12', 'soc40'].every((k) => (this.fails[k] || 0) > 0) ? 'no reply' : 'reading…';
         if ((this.fails[key] || 0) > 0) return 'no reply';
         return 'reading…';
     }
