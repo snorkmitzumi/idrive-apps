@@ -425,10 +425,19 @@ mgu.run({
         // connect in the background: the screen must not wait for the diagnostic link
         const link = new Diag(ctx.signals, log);
         link.quiet = true;
+        // polling: a busy transport is tried again after 150, 300, 450, 600 ms (the kit's 1-4 s are for one-off reads)
+        link.busyMs = 150;
         link.init();
         const rd = new DidReader(link, { ecu: dme.ecu });
         // xDrive front axle torque from the transfer case unit (config.xdrive), read while the Chassis page is on screen
         const xcfg = Object.assign({ front: [], gearRatios: [] }, (ctx.spec.config && ctx.spec.config.xdrive) || {});
+        // short waits per candidate (as eDrive's): one that hangs holds every read behind it. The kit's defaults (4 s
+        // per reply, 10 s "response pending", 8 s transport call) are for one-off reads. A candidate's own
+        // timeoutMs / diagOpts in app.json still win.
+        const POLL_OPTS = { timeoutMs: 1000, diagOpts: { retryBaseMs: 150, pendingTimeoutMs: 1500, callTimeoutMs: 2000 } };
+        const quick = (list) => list.map((c) => Object.assign({}, POLL_OPTS, c));
+        Object.keys(dme).forEach((k) => { if (Array.isArray(dme[k])) dme[k] = quick(dme[k]); });
+        xcfg.front = quick(xcfg.front);
         let chassisSeen = 0, lmvAt = 0;
         const fuelT = {}, fuelFail = {}, fuelTry = {};
         let fuelSeen = 0, engineSeen = 0, fuelTimer = null, fuelBusy = false, fuelLast = 0;
@@ -520,7 +529,8 @@ mgu.run({
             // transfer case: only on the Chassis page with the xDrive card shown, and only while the car's own split is missing
             const onChassis = now - chassisSeen < 1500 && xcfg.front.length > 0 && settings.get('xdrive') !== 'off'
                 && !(G.isNum(live.splitRear) && now - splitAt < SPLIT_STALE);
-            const fast = onFuelPage ? FUEL.filter(want) : now - engineSeen < 1500 && needBoost ? ['boost'] : onChassis ? ['lmv'] : null;
+            // (only while shown: a page drawn just before the app was hidden must not keep the 400 ms rounds going)
+            const fast = !ui.isVisible('MAIN') ? null : onFuelPage ? FUEL.filter(want) : now - engineSeen < 1500 && needBoost ? ['boost'] : onChassis ? ['lmv'] : null;
             // misfire counts change slowly: every 4th fast round on its page (~2 s), every slow round otherwise
             pollFuel.n = (pollFuel.n || 0) + 1;
             const misNow = want('misfire') && (!fast || (onFuelPage && pollFuel.n % 4 === 0));
@@ -545,11 +555,22 @@ mgu.run({
                 }
             } catch (e) { log.warn('engine unit poll: ' + e); }
             fuelBusy = false;
-            fuelTimer = setTimeout(pollFuel, fast ? 400 : 5000);
+            // hidden (another app on screen): every HIDDEN_MS only - the gateway takes one request at a time, and a
+            // round of ~10 here would slow down the app that is shown (eDrive's power reads); the history thins out meanwhile.
+            // Asked now, not at the start of the round: the reads take a while, and an app hidden during them must not
+            // get a full round 400 ms later
+            fuelTimer = setTimeout(pollFuel, !ui.isVisible('MAIN') ? HIDDEN_MS : fast ? 400 : 5000);
         }
+        const HIDDEN_MS = 60000;
         fuelTimer = setTimeout(pollFuel, 1000);
         /** Page opened: don't wait for the slow timer. */
         const kickFuel = () => { if (!fuelBusy && Date.now() - fuelLast > 600) { clearTimeout(fuelTimer); fuelTimer = setTimeout(pollFuel, 0); } };
+        // shown again (any page, also Thermals, which never calls kickFuel): a round now rather than up to HIDDEN_MS
+        // later. Not through kickFuel's 600 ms debounce (that is for the render loop): a hidden round that ended
+        // within it would leave the 60 s timer running. While a round runs, its end schedules at the shown rate.
+        ui.onVisible((name, v) => {
+            if (name === 'MAIN' && v && !fuelBusy) { clearTimeout(fuelTimer); fuelTimer = setTimeout(pollFuel, 0); }
+        });
         /** Why a fuel value is missing, for its tile. */
         function fuelWhy(k) {
             if (!link.p) return 'no diagnostic link';

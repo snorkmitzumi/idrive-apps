@@ -20,8 +20,10 @@ const themes = require(path.join(KIT, 'themes'));
 
 global.setInterval = () => 0;
 let app = null;
-class FakeDiag extends EventEmitter { constructor() { super(); this.available = false; } init() {} }
-class FakeReader { constructor() { this.raws = {}; this.pick = {}; } static label(c) { return c.did; } key(c) { return c.did; } async value() { return null; } }
+// diag: the app's link (the last one made); hold: a promise every read waits for (a slow engine unit), when set
+let diag = null, hold = null;
+class FakeDiag extends EventEmitter { constructor() { super(); this.available = false; diag = this; } init() {} }
+class FakeReader { constructor() { this.raws = {}; this.pick = {}; } static label(c) { return c.did; } key(c) { return c.did; } async value() { if (hold) await hold; return null; } }
 const stubs = {
     './kit/mgu': { run(a) { app = a; } },
     './kit/diag': { Diag: FakeDiag, hex: require(path.join(KIT, 'diag')).hex },
@@ -35,7 +37,7 @@ Module._load = function (req, parent, isMain) {
 };
 
 /** One start of M Vitals in demo mode; draw() renders a frame, as the kit running the screen does (own). */
-async function boot(dir) {
+async function boot(dir, vis) {
     delete require.cache[MAIN];
     require(MAIN);
     const S = {};
@@ -43,8 +45,10 @@ async function boot(dir) {
     S.demo = 'on';
     const texts = [];
     let frame = null, last = null;
+    // vis (optional): { shown, handlers } - the screen hidden / shown as the kit's ui.onVisible reports it
+    vis = vis || { shown: true, handlers: [] };
     const ctx = {
-        ui: { onClick() {}, text() {}, image: async () => {} },
+        ui: { onClick() {}, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn) },
         settings: { get: (k) => S[k], onChange() {} },
         log: { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: () => Promise.resolve({}) },
@@ -92,7 +96,46 @@ async function boot(dir) {
         b = await boot(dir);
         t = await b.page(fuel);
         assert(t.includes('this drive') && !fs.existsSync(path.join(dir, 'misfire.json')), 'a new driving cycle: this drive again');
-        console.log('M Vitals misfire reset checks passed (confirm, since reset, kept across a restart, a new driving cycle).');
+        // hidden: the engine unit's round every 60 s only; shown again right after a hidden round (inside the render
+        // loop's 600 ms debounce): a round at once, the 60 s timer replaced
+        const timers = [], realSet = global.setTimeout, realClear = global.clearTimeout;
+        global.setTimeout = (fn, ms) => { const tm = { fn, ms }; timers.push(tm); return tm; };
+        global.clearTimeout = (tm) => { const i = timers.indexOf(tm); if (i >= 0) timers.splice(i, 1); };
+        const polls = () => timers.filter((x) => x.fn.name === 'pollFuel');
+        try {
+            const vis = { shown: false, handlers: [] };
+            await boot(dir, vis);
+            // the first round: in 1 s, or at once when the first frame (the Engine page) kicked it
+            assert.strictEqual(polls().length, 1, 'one round scheduled');
+            const first = polls()[0];
+            timers.splice(timers.indexOf(first), 1);
+            await first.fn();
+            assert.deepStrictEqual(polls().map((x) => x.ms), [60000], 'hidden: the next round in 60 s');
+            vis.shown = true;
+            vis.handlers.forEach((fn) => fn('MAIN', true));
+            assert.deepStrictEqual(polls().map((x) => x.ms), [0], 'shown again within 600 ms of a round: a round now, the 60 s timer gone');
+            const now = polls()[0];
+            timers.splice(timers.indexOf(now), 1);
+            await now.fn();
+            // shown: the shown rate again (400 ms on the Engine page with boost from the engine unit, else 5 s)
+            assert(polls().length === 1 && polls()[0].ms <= 5000, 'shown: back to the shown rate: ' + polls().map((x) => x.ms));
+            // a fast round (the Engine page, boost from the engine unit) during which the app is hidden: the next one
+            // in 60 s, not 400 ms (that would be a full background round just as the other app opens)
+            const vis2 = { shown: true, handlers: [] };
+            await boot(dir, vis2);
+            diag.available = true;
+            const fastRound = polls().pop();
+            timers.length = 0;
+            let release;
+            hold = new Promise((r) => { release = r; });
+            const running = fastRound.fn();
+            vis2.shown = false;                    // another app opened while the engine unit answers
+            release(); await running; hold = null;
+            assert.deepStrictEqual(polls().map((x) => x.ms), [60000], 'hidden during a fast round: the next one in 60 s');
+        } finally {
+            global.setTimeout = realSet; global.clearTimeout = realClear;
+        }
+        console.log('M Vitals misfire reset checks passed (confirm, since reset, kept across a restart, a new driving cycle); hidden / shown read rate.');
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }

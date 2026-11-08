@@ -232,8 +232,10 @@ module.exports = function live(ctx, sh) {
             const w = Date.now() - queued;
             perf.wait += w; perf.maxWait = Math.max(perf.maxWait, w);
             try {
-                // the pack voltage moves little: every 5 s is enough, so the current gets nearly every read
-                if (!G.isNum(live.v) || Date.now() - live.vT > 5000) {
+                // the pack voltage moves little: every 5 s is enough, so the current gets nearly every read; while the
+                // car's own signal (LSCDataSink) sent one within 5 s, not at all - one request less on the link
+                const lscFresh = G.isNum(L.lscV) && L.lscVT && Date.now() - L.lscVT < 5000;
+                if (!lscFresh && (!G.isNum(live.v) || Date.now() - live.vT > 5000)) {
                     const r = await readGroup('hvV', cfg.fast.hvV);
                     if (r) { live.v = r[fieldsOf(cfg.fast.hvV[pick.hvV])[0]]; live.vT = Date.now(); }
                 }
@@ -251,10 +253,16 @@ module.exports = function live(ctx, sh) {
                 iFail = 0; iOk = true;
                 const a = r[fieldsOf(cfg.fast.hvI[pick.hvI])[0]], now = Date.now();
                 live.a = a;
-                const volts = live.vT && now - live.vT < 60000 ? live.v : L.lscVT && now - L.lscVT < 60000 ? L.lscV : null;
+                const volts = packV(now);
                 if (G.isNum(volts) && G.isNum(a)) onPower(volts * a / 1000 * (cfg.powerSign < 0 ? -1 : 1), now);
             } catch (e) { log.warn('power: ' + e); }
         }, true, 'power');
+    }
+    /** The pack voltage now: the newer of the battery unit's (DDB4 ...) and the car's signal, within 60 s; else null. */
+    function packV(now) {
+        const u = live.vT && now - live.vT < 60000 && G.isNum(live.v) ? live.vT : 0;
+        const s = L.lscVT && now - L.lscVT < 60000 && G.isNum(L.lscV) ? L.lscVT : 0;
+        return !u && !s ? null : u >= s ? live.v : L.lscV;
     }
     /** Power reads in the last 10 s: [time, ms it took]. */
     const rate = [];
@@ -556,7 +564,7 @@ module.exports = function live(ctx, sh) {
         const stale = {}; SLOW.forEach((k) => { stale[k] = !!live.slowT[k] && now - live.slowT[k] > staleAfter ? now - live.slowT[k] : 0; });
         return {
             demo: false, kw: live.kwT && now - live.kwT < KW_KEEP ? live.kw : null, kwAge: live.kwT ? now - live.kwT : null, stale,
-            v: fresh(live.vT, 60) ? live.v : fresh(L.lscVT, 60) ? L.lscV : null, a: fresh(live.kwT, 10) ? live.a : null,
+            v: packV(now), a: fresh(live.kwT, 10) ? live.a : null,
             speed: L.speed, engine: engineOn(), soc: slowOk('soc') ? live.soc : null,
             cellV: slowOk('cellV') ? live.cellV : null, cellT: slowOk('cellT') ? live.cellT : null, carT: L.batt,
             coolant: slowOk('coolant') ? live.coolant : null, limits: slowOk('limits') ? live.limits : null,

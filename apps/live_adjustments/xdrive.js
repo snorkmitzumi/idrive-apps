@@ -101,6 +101,9 @@ const ENGINE_OFF_RPM = 50;              // below this the engine counts as stopp
 const ENGINE_ON_RPM = 400;              // above this it runs (the DSC reports the mode then)
 const POLL_MS = 4000;                   // DBE1 read while the tab is shown
 const TORQUE_MS = 1000;                 // front-axle torque read while the tab is shown and the engine runs
+// reads (polled) only: a busy transport is tried again after 150 .. 600 ms, a "response pending" waited 3 s, not the
+// kit's 1-4 s / 10 s for one-off requests. The writes keep the kit's longer retries.
+const READ_OPTS = { retryBaseMs: 150, pendingTimeoutMs: 3000 };
 const MOVING_KMH = 3;                   // the peak counts only while moving
 const READY = 10, READY_START = 8;      // VehicleCondition: FAHREN (drive-ready), FAHRBEREITSCHAFT_HERSTELLEN
 const IGNITION = 7;                     // VehicleCondition: PRUEFEN_ANALYSE_DIAGNOSE (ignition on, not ready)
@@ -253,7 +256,7 @@ class XDriveControl {
         }, details)));
     }
 
-    async _exchange(ecu, sid, data, timeoutMs, accept) {
+    async _exchange(ecu, sid, data, timeoutMs, accept, opts) {
         const id = ++this._exchangeSequence, started = this.now();
         const attemptId = started <= this._traceUntil ? this._attemptId : null;
         const request = bytesHex([sid].concat(data));
@@ -263,7 +266,7 @@ class XDriveControl {
         if (sid !== 0x22) this._diagnostic('uds_request', details);
         let response;
         try {
-            response = await this.link.diag.physical(ecu, sid, data, timeoutMs, accept);
+            response = await this.link.diag.physical(ecu, sid, data, timeoutMs, accept, opts);
         } catch (e) {
             if (sid === 0x22) {
                 this._readEvidence[hex2(ecu) + ':' + bytesHex(data)] = {
@@ -317,14 +320,17 @@ class XDriveControl {
     tick() {
         if (!this.enabled || this.busy || this.reading || this.supported === false || !this._linkUp()) return null;
         const jobs = [];
-        if (this.now() - this.lastRead >= POLL_MS) jobs.push(this.path === 'vip' ? this._readVip() : this._readLmv());
+        if (this.now() - this.lastRead >= POLL_MS) jobs.push(() => (this.path === 'vip' ? this._readVip() : this._readLmv()));
         if (this.supported === true && this.torqueOk !== false && this.now() - this.lastTorque >= TORQUE_MS) {
-            jobs.push(this._readTorque());
+            jobs.push(() => this._readTorque());
         }
         if (!jobs.length) return null;
         this.reading = true;
         const done = () => { this.reading = false; };          // (no Promise.finally on the car's Node 8)
-        return Promise.all(jobs).then((v) => { done(); return v; }, (e) => { done(); throw e; });
+        // one after the other: the gateway takes one request at a time, and a second one sent meanwhile is
+        // turned away as busy and retried after a pause
+        const run = async () => { const out = []; for (const job of jobs) out.push(await job()); return out; };
+        return run().then((v) => { done(); return v; }, (e) => { done(); throw e; });
     }
 
     _linkUp() { return !!(this.link && this.link.available && this.link.diag); }
@@ -332,7 +338,7 @@ class XDriveControl {
     async _read(did, ecu) {
         try {
             const r = await this._exchange(ecu || DSC, 0x22, did, 2500,
-                (u) => (u[0] === 0x62 && u[1] === did[0] && u[2] === did[1]) || (u[0] === 0x7F && u[1] === 0x22));
+                (u) => (u[0] === 0x62 && u[1] === did[0] && u[2] === did[1]) || (u[0] === 0x7F && u[1] === 0x22), READ_OPTS);
             if (!r || !r.length) return { ok: false, nrc: null };
             if (r[0] === 0x7F) return { ok: false, nrc: r[2] };
             return { ok: true, data: r.slice(3) };

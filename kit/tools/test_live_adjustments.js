@@ -171,6 +171,24 @@ async function xdriveChecks() {
     const n = dbe1();
     await s.x.tick(); clock += 1000; await s.x.tick();
     assert.strictEqual(dbe1(), n);
+    {
+        // one request at a time (the gateway turns a second one away as busy): DBE1 and the torque read in turn,
+        // the reads with the short busy retry, the write with the kit's defaults
+        let open = 0, most = 0;
+        const seen = [];
+        const q = await mk('on', 'g22', { rpm: 700 }, (physical) => async (target, sid, data, timeout, accept, opts) => {
+            open++; most = Math.max(most, open); seen.push([sid, opts]);
+            await new Promise((r) => setImmediate(r));
+            try { return await physical(target, sid, data, timeout, accept); } finally { open--; }
+        });
+        q.d.engine = true; clock += 5000;
+        await q.x.tick();
+        assert.strictEqual(most, 1, 'xDrive sent two requests at once');
+        assert(seen.filter(([sid]) => sid === 0x22).every(([, o]) => o && o.retryBaseMs === 150), 'reads without the short busy retry');
+        q.d.engine = false; q.car.v.rpm = 0;
+        await q.x.requestOff(); await q.x.requestOff();
+        assert(seen.some(([sid, o]) => sid === 0x2E && o === undefined), 'the write got the reads\' short retry');
+    }
 
     // front-axle torque from the LMV: every second with the engine running, decoded as BMW's LMV_MOMENT
     // (ezl0l's AWD sample 00 9E 00 02 00 98 00 20 = 39.5 Nm actual / 38.0 Nm requested)

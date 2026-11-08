@@ -7,6 +7,14 @@ dist/
 # keys / local stuff
 *.pem
 *.key
+.env
+.env.*
+# editor and tool folders (Serena MCP, VS Code, JetBrains), editor swap files, Windows thumbnails
+.serena/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
 node_modules/
 __pycache__/
 *.pyc
