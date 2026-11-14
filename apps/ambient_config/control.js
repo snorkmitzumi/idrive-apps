@@ -21,6 +21,7 @@
  * the driver's side on a left-hand drive car.
  */
 const fs = require('fs');
+const { groupOf } = require('./ambient');
 
 const FLASH_FILE = process.env.MGU_AMBIENT_FLASH || '/dev/shm/mgu-ambient-flash.json';
 const FAVS = 6;
@@ -58,16 +59,27 @@ class Control {
 
     look() { const l = this.settings.get('look'); return valid(l) ? copy(l) : copy(DEFAULT_LOOK); }
     on() { return !!this.settings.get('on'); }
+    /** A mode's (variant's) own look, or null. */
     modeLook(m) { const l = this.settings.get('mode_' + m); return valid(l) ? copy(l) : null; }
+    /** The mode's own setting is BMW's original colour. */
     modeOriginal(m) { return this.settings.get('mode_' + m) === 'original'; }
+    /** The group a variant takes its look from, when it has nothing of its own (Sport+ -> 'sport'), else null. */
+    inherits(m) {
+        const g = groupOf(m), own = this.settings.get('mode_' + m);
+        return g !== m && !valid(own) && own !== 'original' ? g : null;
+    }
+    /** The look a mode shows: its own, else its group's (null: none picked). */
+    lookFor(m) { const g = this.inherits(m); return this.modeLook(g || m); }
+    /** The mode shows BMW's original colour: its own setting, else its group's. */
+    originalFor(m) { const g = this.inherits(m); return this.modeOriginal(g || m); }
     favs() { const f = this.settings.get('favs'); return Array.isArray(f) ? f.filter(valid).slice(0, FAVS) : []; }
 
     /** The look on now (null: the car's colour), and why: 'mode' or 'own'. */
     target() {
         if (this._away) return { look: null, why: 'away' };
         const follow = this.settings.get('follow') !== false && this._mode;
-        if (follow && this.modeOriginal(this._mode)) return { look: null, why: 'mode' };
-        const m = follow ? this.modeLook(this._mode) : null;
+        if (follow && this.originalFor(this._mode)) return { look: null, why: 'mode' };
+        const m = follow ? this.lookFor(this._mode) : null;
         if (m) return { look: m, why: 'mode' };
         return this.on() ? { look: this.look(), why: 'own' } : { look: null, why: 'car' };
     }
@@ -90,7 +102,8 @@ class Control {
         const was = this._mode;
         this._mode = m;
         const t = this.target();
-        if (m === 'sport' && was && was !== 'sport' && this.settings.get('sportPulse')) {
+        // into any Sport variant from another group (Comfort to Sport+, not Sport to Sport+)
+        if (groupOf(m) === 'sport' && was && groupOf(was) !== 'sport' && this.settings.get('sportPulse')) {
             this._show(Object.assign(copy(t.look || this.look()), { kind: 'pulse', then: t.look }));
             return;
         }

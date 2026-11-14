@@ -36,7 +36,11 @@ const S = require('./scenes');
 
 const W = 1600, H = 520;
 const TABS = ['Colour', 'Animations', 'Driving modes', 'Favourites'];
-const MODE_NAMES = { sport: 'Sport', comfort: 'Comfort', eco: 'Eco Pro', adaptive: 'Adaptive', hybrid: 'Hybrid', electric: 'Electric' };
+const { rows } = require('./modes_tab');
+const MODE_NAMES = { sport: 'Sport', sportPlus: 'Sport+', sportInd: 'Sport Individual', boost: 'XtraBoost', comfort: 'Comfort',
+    comfortPlus: 'Comfort+', comfortInd: 'Comfort Individual', eco: 'Eco Pro', ecoPlus: 'Eco Pro+', ecoInd: 'Eco Pro Individual',
+    adaptive: 'Adaptive', hybrid: 'Hybrid', hybridEco: 'Hybrid Eco Pro', hybridComfort: 'Hybrid Comfort', electric: 'Electric',
+    electricInd: 'Electric Individual' };
 const QUICK = [['Red', [255, 0, 0]], ['Orange', [255, 100, 0]], ['Amber', [255, 170, 0]], ['Yellow', [255, 235, 0]], ['Green', [0, 255, 60]],
     ['Cyan', [0, 230, 255]], ['Blue', [0, 70, 255]], ['Violet', [120, 60, 255]], ['Pink', [255, 40, 170]], ['White', [255, 255, 255]]];
 const RING = { cx: 290, cy: 288, R: 186, r: 136 }, DIAL = { cx: 655, cy: 400, R: 54, r: 43 };
@@ -314,25 +318,28 @@ mgu.run({
 
         function drawModes(cv, t) {
             G.panel(cv, t, 24, 44, 1552, 468, 'By driving mode');
+            // two columns of compact rows (modes_tab.js): every mode this car has sent, at once. A variant without a look
+            // of its own uses its group's (Sport+ Sport's): its swatch faded
             const mine = control.look(), cur = ambient.mode();
-            ambient.modes().forEach((m, i) => {
-                const y = 92 + i * 72, ml = control.modeLook(m);
-                if (m === cur) cv.roundRect(40, y - 6, 1520, 62, 10, withAlpha(t.accent, 0.14));
-                cv.text(MODE_NAMES[m], 60, y + 34, 28, t.text, { font: 'bold' });
-                const orig = control.modeOriginal(m);
-                if (ml) { cv.roundRect(250, y + 6, 38, 38, 9, ml.upper.rgb); cv.text(nearest(ml.upper.rgb) + (ml.kind !== 'solid' ? ', ' + S.NAMES[ml.kind] : ''), 304, y + 33, 22, t.text); }
-                else cv.text(orig ? 'BMW\'s original colour' : 'The Colour tab\'s colour', 250, y + 33, 22, t.dim);
-                // any colour: the Colour and Animations tabs change this mode's look
-                G.button(cv, t, 760, y + 1, 250, 48, 'Choose colour', () => { editing = m; page = 0; return redraw(); }, { primary: !!ml, key: m + '-any' });
-                // the animation, one tap each: Solid, Breathing, Rainbow, Smooth fade, Colour wave
-                const kind = ml ? ml.kind : 'solid', next = S.KINDS[(S.KINDS.indexOf(kind) + 1) % S.KINDS.length];
-                G.button(cv, t, 1026, y + 1, 250, 48, S.NAMES[kind], () => { control.setModeLook(m, Object.assign(ml || mine, { kind: next })); return redraw(); },
-                    { primary: !!ml && kind !== 'solid', key: m + '-anim' });
-                // Original colour: BMW's colour in this mode; tapped again, the Colour tab's colour back
-                G.button(cv, t, 1292, y + 1, 250, 48, 'Original colour', () => { control.setModeLook(m, orig ? null : 'original'); return redraw(); },
+            rows(ambient.modes()).forEach(({ m, x, y, w, h }) => {
+                if (m === cur) cv.roundRect(x - 8, y - 2, w + 16, h + 2, 10, withAlpha(t.accent, 0.14));
+                const own = control.modeLook(m), shown = control.lookFor(m), from = control.inherits(m), orig = control.originalFor(m);
+                if (shown) cv.roundRect(x + 4, y + 13, 34, 34, 8, from ? withAlpha(shown.upper.rgb, 0.35) : shown.upper.rgb);
+                else cv.strokeRoundRect(x + 4, y + 13, 34, 34, 8, 2, orig ? t.text : t.tick);
+                const name = MODE_NAMES[m] || m;
+                cv.text(name, x + 52, y + 39, name.length > 14 ? 22 : 26, t.text, { font: 'bold' });
+                const bw = 140, gap = 12, bx = x + w - 3 * bw - 2 * gap;
+                // Colour: the Colour and Animations tabs change this mode's look
+                G.button(cv, t, bx, y + 7, bw, 48, 'Colour', () => { editing = m; page = 0; return redraw(); }, { primary: !!own, key: m + '-any' });
+                // the animation, one tap each: Solid, Breathing, Rainbow, Smooth fade, Colour wave (from the look it shows)
+                const kind = shown ? shown.kind : 'solid', next = S.KINDS[(S.KINDS.indexOf(kind) + 1) % S.KINDS.length];
+                G.button(cv, t, bx + bw + gap, y + 7, bw, 48, S.NAMES[kind], () => { control.setModeLook(m, Object.assign(shown || mine, { kind: next })); return redraw(); },
+                    { primary: !!own && kind !== 'solid', key: m + '-anim' });
+                // BMW: BMW's original colour in this mode; tapped again, back to the group's / the Colour tab's colour
+                G.button(cv, t, bx + 2 * (bw + gap), y + 7, bw, 48, 'BMW', () => { control.setModeLook(m, control.modeOriginal(m) ? null : 'original'); return redraw(); },
                     { primary: orig, key: m + '-orig' });
             });
-            cv.text('Nothing chosen: the Colour tab\'s colour. Tap Original colour again to undo it.', 60, 412, 18, t.dim);
+            cv.text('Faded: uses its group\'s look. Nothing chosen: the Colour tab\'s colour. BMW: BMW\'s original colour (tap again to undo).', 60, 434, 16, t.dim);
             const tog = (key, label, x) => x + 16 + G.button(cv, t, x, 440, 0, 48, label, () => { settings.set(key, !settings.get(key)); return redraw(); },
                 { primary: ON_BY_DEFAULT.indexOf(key) >= 0 ? settings.get(key) !== false : !!settings.get(key), key: 'tog-' + key });
             let x = 60;

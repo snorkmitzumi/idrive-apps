@@ -11,6 +11,9 @@
  * petrol and diesel cars Comfort and Eco Pro, on plug-in hybrids Hybrid (with Hybrid Eco Pro) and Electric, and
  * Adaptive. A plug-in hybrid is known from the first PHEV mode the car reports (setting carKind, kept). Each mode
  * value the car sends is logged once.
+ * Each variant (Sport+, Comfort+, Eco Pro Individual, ...) can have a look of its own; one without uses its group's
+ * (Sport+ Sport's). The variants the car has sent are remembered (setting modesSeen): the Driving modes tab lists only
+ * those, so a mode this car doesn't have never shows; before the first one, the groups as before.
  * Driving mode (FES statusFESVehicleDynamicSwitchHMI): when it changes to a mode with a colour set, that colour;
  * to one set to "Leave as is", the driver's own colour back (setting "restore"). The driver's own colour is the
  * last one not set by this app's driving modes: one chosen in BMW's menu or by hand here. One write at a time, at
@@ -18,7 +21,8 @@
  *
  *   const a = new Ambient({ settings, signals, log });
  *   await a.start();
- *   a.slot() -> 1..12 | null        a.mode() -> one of MODES, or null        a.modes() -> this car's
+ *   a.slot() -> 1..12 | null        a.mode() -> the variant now (one of VARIANTS), or null        a.modes() -> this car's
+ *   groupOf(variant) -> its group (one of MODES)
  *   a.own() -> the driver's own colour | null       a.setSlot(n) by hand       a.on('change', fn)
  */
 const EventEmitter = require('events');
@@ -38,11 +42,22 @@ const BY_NAME = {
     PHEV_HYBRID_STANDARD: 17, PHEV_HYBRID_ECO: 18, PHEV_HYBRID_COMFORT: 19, PHEV_ELECTRIC_STANDARD: 20, PHEV_ELECTRIC_INDIVIDUAL: 21,
     PHEV_SPORT_PLUS: 23, BOOST: 28,
 };
-const BY_NUMBER = { 1: 'sport', 2: 'sport', 3: 'sport', 4: 'comfort', 5: 'comfort', 6: 'comfort', 7: 'eco', 8: 'eco', 9: 'eco', 10: 'adaptive',
-    15: 'sport', 16: 'sport', 23: 'sport', 28: 'sport', 17: 'hybrid', 18: 'hybrid', 19: 'hybrid', 20: 'electric', 21: 'electric' };
+// the variant each number is; the groups (MODES) are what a variant without a look of its own falls back to
+const VARIANT_BY_NUMBER = { 1: 'sport', 2: 'sportPlus', 3: 'sportInd', 4: 'comfort', 5: 'comfortPlus', 6: 'comfortInd', 7: 'eco', 8: 'ecoPlus',
+    9: 'ecoInd', 10: 'adaptive', 15: 'sport', 16: 'sportInd', 23: 'sportPlus', 28: 'boost', 17: 'hybrid', 18: 'hybridEco', 19: 'hybridComfort',
+    20: 'electric', 21: 'electricInd' };
+const GROUP = { sport: 'sport', sportPlus: 'sport', sportInd: 'sport', boost: 'sport', comfort: 'comfort', comfortPlus: 'comfort', comfortInd: 'comfort',
+    eco: 'eco', ecoPlus: 'eco', ecoInd: 'eco', adaptive: 'adaptive', hybrid: 'hybrid', hybridEco: 'hybrid', hybridComfort: 'hybrid',
+    electric: 'electric', electricInd: 'electric' };
+/** Every variant, in the order the Driving modes tab lists them. */
+const VARIANTS = ['sport', 'sportPlus', 'sportInd', 'boost', 'comfort', 'comfortPlus', 'comfortInd', 'hybrid', 'hybridEco', 'hybridComfort',
+    'electric', 'electricInd', 'eco', 'ecoPlus', 'ecoInd', 'adaptive'];
+const MAX_SHOWN = 10;                // rows on the Driving modes tab (two columns of five)
+const groupOf = (v) => GROUP[v] || v;
 const PHEV = [15, 16, 17, 18, 19, 20, 21, 22, 23];
 
-/* actualValueModeDrivingExperience: a name or its wire number -> { mode (one of MODES or null), phev }, or null. */
+/* actualValueModeDrivingExperience: a name or its wire number -> { mode (its group, one of MODES, or null), variant, phev },
+ * or null. */
 function modeOf(raw) {
     if (raw === undefined || raw === null || raw === '') return null;
     const n = typeof raw === 'number' || /^\d+$/.test(String(raw)) ? Number(raw) : BY_NAME[String(raw).toUpperCase()];
@@ -51,9 +66,10 @@ function modeOf(raw) {
         const w = String(raw).toUpperCase();
         const mode = /ADAPTIV/.test(w) ? 'adaptive' : /ELECTRIC|ELEKTR/.test(w) ? 'electric' : /HYBRID/.test(w) ? 'hybrid' : /SPORT|BOOST/.test(w) ? 'sport'
             : /COMFORT/.test(w) ? 'comfort' : /ECO/.test(w) ? 'eco' : null;
-        return mode ? { mode, phev: /PHEV|HYBRID|ELECTRIC/.test(w) } : null;
+        return mode ? { mode, variant: mode, phev: /PHEV|HYBRID|ELECTRIC/.test(w) } : null;
     }
-    return { mode: BY_NUMBER[n] || null, phev: PHEV.indexOf(n) >= 0 };
+    const variant = VARIANT_BY_NUMBER[n] || null;
+    return { mode: variant && groupOf(variant), variant, phev: PHEV.indexOf(n) >= 0 };
 }
 
 /* statusMenuAmbientePanoramicRoofInteriorLighting: FARBAUSWAHL_n or n -> n (1..SLOTS), or null. */
@@ -99,7 +115,12 @@ class Ambient extends EventEmitter {
     }
 
     slot() { return this._slot; }
-    modes() { return KIND_MODES[this.settings.get('carKind') === 'hybrid' ? 'hybrid' : 'ice']; }
+    /** The variants this car has sent (in VARIANTS' order, at most MAX_SHOWN); before the first, its kind's groups. */
+    modes() {
+        const seen = this.settings.get('modesSeen');
+        if (Array.isArray(seen) && seen.length) return VARIANTS.filter((v) => seen.indexOf(v) >= 0).slice(0, MAX_SHOWN);
+        return KIND_MODES[this.settings.get('carKind') === 'hybrid' ? 'hybrid' : 'ice'];
+    }
     mode() { return this._mode; }
     own() { return this._own; }
 
@@ -137,8 +158,11 @@ class Ambient extends EventEmitter {
             this.log.info('ambient: a plug-in hybrid\'s driving modes');
             this.settings.set('carKind', 'hybrid');
         }
-        const m = got.mode;
-        if (m === null || m === this._mode) return;
+        const m = got.variant;
+        if (m === null) return;
+        const seen = Array.isArray(this.settings.get('modesSeen')) ? this.settings.get('modesSeen') : [];
+        if (seen.indexOf(m) < 0) { this.settings.set('modesSeen', seen.concat([m])); this.log.info('ambient: a new driving mode for this car: ' + m); }
+        if (m === this._mode) return;
         this._mode = m;
         this.log.info('ambient: driving mode ' + m);
         this.follow();
@@ -149,7 +173,8 @@ class Ambient extends EventEmitter {
      * is possible (slotsOff: the driving modes have looks of their own then, main.js). */
     follow() {
         if (this.slotsOff || !this.settings.get('follow') || !this._mode) return;
-        const n = Number(this.settings.get(this._mode)) || 0;
+        // the variant's own colour slot, else its group's
+        const n = Number(this.settings.get(this._mode)) || Number(this.settings.get(groupOf(this._mode))) || 0;
         if (n >= 1 && n <= SLOTS) this._write(n, 'mode');
         else if (this.settings.get('restore') !== false && this._ours !== null && this._own !== null) this._write(this._own, 'own');
     }
@@ -191,4 +216,4 @@ class Ambient extends EventEmitter {
     stop() { clearTimeout(this._timer); this._timer = null; }
 }
 
-module.exports = { Ambient, modeOf, slotOf, request, MODES, KIND_MODES, SLOTS, MIN_GAP_MS };
+module.exports = { Ambient, modeOf, slotOf, request, groupOf, MODES, VARIANTS, KIND_MODES, SLOTS, MIN_GAP_MS, MAX_SHOWN };

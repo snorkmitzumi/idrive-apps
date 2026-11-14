@@ -70,11 +70,12 @@ const tick = () => new Promise((res) => setImmediate(res));
     t += 2000;
     mode('ECO_PRO_EFFICIENT'); await tick();
     ok(writes.length === 5, 'not following: the mode changes nothing');
-    ok(a.modes().join() === 'sport,comfort,eco,adaptive', 'a petrol or diesel car\'s modes');
+    // (2.6.0: the modes the car has sent, not every group; test_ambient_modes.js has the rest)
+    ok(a.modes().join() === 'sport,comfort,eco', 'a petrol or diesel car\'s modes: the ones it sent');
     values.follow = true;
     t += 2000;
     mode('PHEV_ELECTRIC_STANDARD'); await tick();
-    ok(values.carKind === 'hybrid' && a.modes().join() === 'sport,hybrid,electric,adaptive', 'a PHEV mode: the hybrid\'s modes (no Comfort, Eco Pro in Hybrid)');
+    ok(values.carKind === 'hybrid' && a.modes().join() === 'sport,comfort,electric,eco', 'a PHEV mode: the hybrid known, its mode added to the ones sent');
     ok(writes[writes.length - 1] === 9, 'Electric: its colour');
     t += 2000;
     mode('ADAPTIVE'); await tick();
