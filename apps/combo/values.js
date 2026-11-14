@@ -7,20 +7,24 @@
  *   const v = new Values({ settings, log, now, dataDir, gearRatios })
  *   v.put(key, value)   v.raise(key, value)   v.peak(key)   v.resetPeaks()
  *   v.boost() -> { value, from }   v.power() -> { kw, calc }   v.split() -> { rear, from, nm }
- *   v.carPresent()   v.live (raw fields)   v.subs (signal subscriptions, for carPresent)
+ *   v.slip() -> % | null   v.carPresent()   v.live (raw fields)   v.subs (signal subscriptions, for carPresent)
  */
 const fs = require('fs');
 const path = require('path');
 const { GearGuess } = require('./kit/car');
+const { writeWhole } = require('./store');
 
 const isNum = (x) => typeof x === 'number' && isFinite(x);
 // plausible ranges: outside = the car's "no data" marker (M Vitals' RANGE, the keys used here)
-const RANGE = { rpm: [0, 12000], boostFes: [-1, 4], boostDme: [-1, 4], boostTarget: [-1, 4] };
+// speed: over 400 km/h is what the car sends while it wakes up, not a real one (eDrive 2.9.1)
+const RANGE = { rpm: [0, 12000], speed: [0, 400], boostFes: [-1, 4], boostDme: [-1, 4], boostTarget: [-1, 4] };
 // sources some cars never fill (stuck at one number): they count once they changed this much (M Vitals' MOVE)
 const MOVE = { boostFes: 0.03, boostDme: 0.03 };
 const SPLIT_STALE = 10000;            // the car's split this old no longer counts (M Vitals)
 const LMV_FRESH = 3000;               // a front-axle torque this old no longer counts (M Vitals)
 const PEAKS = ['rpm', 'boost', 'power', 'torque', 'lmvFront'];
+const WHEELS_FRESH = 3000;           // wheel speeds this old no longer count (Engine Config's xDrive live)
+const SLIP_KMH = 5;                  // wheel slip only above this (Engine Config's SLIP_KMH)
 
 class Values {
     constructor(opts) {
@@ -73,14 +77,14 @@ class Values {
         if (this.seen[k]) return;
         this.seen[k] = true;
         this.log.info('real data from the car: ' + k);
-        try { if (this.seenFile) fs.writeFileSync(this.seenFile, JSON.stringify(this.seen)); } catch (e) { this.log.warn('seen save: ' + e); }
+        try { if (this.seenFile) writeWhole(this.seenFile, JSON.stringify(this.seen)); } catch (e) { this.log.warn('seen save: ' + e); }
     }
     /** All-wheel drive seen (M Vitals' markAwd): kept, so Auto shows xDrive from the start next time. */
     markAwd() {
         if (this.live.awdSeen) return;
         this.live.awdSeen = true;
         this.log.info('all-wheel drive detected');
-        try { if (this.awdFile) fs.writeFileSync(this.awdFile, JSON.stringify({ seen: true })); } catch (e) { this.log.warn('awd save: ' + e); }
+        try { if (this.awdFile) writeWhole(this.awdFile, JSON.stringify({ seen: true })); } catch (e) { this.log.warn('awd save: ' + e); }
     }
 
     /** M Vitals' raise(): a peak follows new highs; peakHold s after it was last raised it drops back (0 = until reset). */
@@ -131,6 +135,19 @@ class Values {
         }
         if (L.awd === '_2WD') return { rear: 100, from: '2WD mode' };
         return { rear: null, from: null };
+    }
+
+    /** The four wheels' speeds (Powertrain.ActualValueRPMWheel, raw: only their ratios are used). */
+    wheels(w) { this.live.wheels = w; this.live.wheelsT = this.now(); }
+    /**
+     * Wheel slip: the front axle's wheels against the rear's, in % (+ = the front turns faster), above 5 km/h; null
+     * without fresh wheel speeds (Engine Config's xdrive_live.js view().axle).
+     */
+    slip() {
+        const L = this.live, w = L.wheels;
+        if (!w || this.now() - (L.wheelsT || 0) > WHEELS_FRESH || !(isNum(L.speed) && L.speed > SLIP_KMH)) return null;
+        const front = (w.FL + w.FR) / 2, rear = (w.RL + w.RR) / 2;
+        return rear > 0 ? (front / rear - 1) * 100 : null;
     }
 
     /** The car is there: a value arrived, or a signal's provider is available (M Vitals' carPresent()). */

@@ -515,3 +515,95 @@ function aa56(o) {
 })().catch((e) => { console.error(e); process.exit(1); });
 
 module.exports = { boot, settingsOf, appModule, textsOf, tmp, getLink: () => link, Canvas, themes };
+
+/* ---------- Combo 1.1.0: what the source apps learned since 1.0 ---------- */
+/** The signal handlers by interface (last name part), on a Values with a log that is kept. */
+function signalRig(over) {
+    const { Values } = appModule('values'), { watches } = appModule('signals');
+    const logged = [], log = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error() {} };
+    const v = new Values({ settings: settingsOf(over), log, now: () => 1e6, dataDir: tmp('sig11') });
+    const S = SPEC.config.scaling;
+    const sc = (k, raw) => { const c = S[k]; if (!c || raw == null || raw === c.invalid || (c.invalidFrom != null && raw >= c.invalidFrom)) return null; return raw * c.factor + (c.offset || 0); };
+    const w = {};
+    watches(v, { handlers: () => ({}) }, sc, log).forEach(([iface, h]) => { w[iface.split('.').pop()] = h; });
+    return { v, w, logged };
+}
+checks.push(
+    ['1.1 #1 locked and left: the car\'s own state stops every read', async () => {
+        const { v, w } = signalRig();
+        w.VehicleCondition.VehicleCondition({ statusConditionVehicle: 'PARKEN_BN_IO' });
+        assert.strictEqual(v.live.left, true, 'parked (2): left');
+        w.VehicleCondition.VehicleCondition({ statusConditionVehicle: 'FAHREN' });
+        assert.strictEqual(v.live.left, false, 'drive-ready: in use');
+        const r = await rig({ driving: true });
+        r.values.live.left = true;
+        r.start(); await r.run(30000);
+        assert.strictEqual(r.asked.length, 0, 'read while locked and left: ' + r.asked.map((q) => q.key).join(' '));
+        assert.strictEqual(r.reads.why('b48'), 'paused - car locked');
+        r.done();
+    }],
+    ['1.1 #2 a speed over 400 km/h (the car waking up) is not taken', async () => {
+        const { v } = signalRig();
+        v.put('speed', 120); v.put('speed', 1023.98);
+        assert.strictEqual(v.live.speed, 120);
+    }],
+    ['1.1 #3 the split only between 0 and 100 %', async () => {
+        const { v, w } = signalRig();
+        w.BasicDataSet.basicDataSet({ valueDistributionLongitudinalTorqueRearAxisFrontAxis: 10500, qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis: 2 });
+        assert.strictEqual(v.live.splitRear, undefined, '105 % taken');
+        w.BasicDataSet.basicDataSet({ valueDistributionLongitudinalTorqueRearAxisFrontAxis: 6500, qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis: 2 });
+        assert(Math.abs(v.live.splitRear - 65) < 1e-9);
+    }],
+    ['1.1 #4 kPa: boost in kPa, the scale to 250', async () => {
+        assert(SPEC.settings.find((s) => s.key === 'pressUnit').options.some((o) => o[0] === 'kpa'), 'no kPa choice');
+        const d = car(); d.boost = 1.0; d.boostTarget = 1.2;
+        const t = await page(d, { pressUnit: 'kpa' });
+        ['100', '120', '250', 'kPa'].forEach((x) => assert(has(t, x), x + ' missing: ' + t.join(' | ')));
+        assert(!t.some((x) => /^ ?(bar|psi)$/.test(x.trim())), 'another pressure unit shown');
+    }],
+    ['1.1 #5 #6 settings: limits in the unit chosen, speed rate 3 fps', async () => {
+        const S = {}; SPEC.settings.forEach((s) => { S[s.key] = s; });
+        assert.strictEqual(S.maxPower.unitBy, 'powerUnit');
+        assert.deepStrictEqual(S.maxPower.units, { hp: { unit: 'hp', mul: 1.34102 }, ps: { unit: 'PS', mul: 1.35962 } });
+        assert.strictEqual(S.torqueMax.unitBy, 'torqueUnit');
+        assert.deepStrictEqual(S.torqueMax.units, { lbft: { unit: 'lb-ft', mul: 0.737562 } });
+        assert(S.speedRate.steps.indexOf(3) >= 0, 'no 3 fps');
+    }],
+    ['1.1 #7 power and torque peaks as numbers beside their labels (the kit\'s bar)', async () => {
+        const t = await page(car());
+        assert(t.includes('PEAK 241') && t.includes('PEAK 702'), 'no PEAK numbers: ' + t.filter((x) => /PEAK/.test(x)).join(' | '));
+        assert(!t.some((x) => /^PEAK {2}/.test(x)), 'the old PEAK lines under the bars still drawn');
+    }],
+    ['1.1 #8 saved files are written whole (temp file renamed), none left behind', async () => {
+        const { writeWhole } = appModule('store');
+        const dir = tmp('whole'), f = path.join(dir, 'x.json');
+        writeWhole(f, '{"a":1}');
+        assert.strictEqual(fs.readFileSync(f, 'utf8'), '{"a":1}');
+        const { v } = signalRig();
+        v.markAwd(); v.remember('boostFes');
+        const r = await rig({ driving: true }); r.start(); await r.run(3000); r.done();
+        [v.awdFile, v.seenFile].forEach((x) => assert(fs.existsSync(x), x));
+        [path.dirname(v.awdFile)].forEach((d) => assert(!fs.readdirSync(d).some((n) => /\.tmp$/.test(n)), 'a temp file left'));
+        ['values.js', 'reads.js'].forEach((n) => assert(!/fs\.writeFileSync\(/.test(fs.readFileSync(path.join(APP, n), 'utf8')), n + ' writes in place'));
+    }],
+    ['1.1 #9 the eDRIVE needle logged once (does a mild hybrid send it?)', async () => {
+        const { w, logged } = signalRig();
+        const n = { statusPowerRelativHybrid: { displayActualValuePowerRelativeDrivingElectric: 12, displayActualValuePowerRelativeRecuperation: 0 } };
+        w.Efficiencytainment2.statusPowerRelativHybrid(n); w.Efficiencytainment2.statusPowerRelativHybrid(n);
+        assert.strictEqual(logged.filter((m) => /eDRIVE needle: drive 12, regen 0/.test(m)).length, 1, logged.join(' | '));
+    }],
+    ['1.1 #10 wheel slip: front axle against rear, above 5 km/h', async () => {
+        const { v, w } = signalRig();
+        v.put('speed', 50);
+        w.Powertrain.ActualValueRPMWheel({ actualValueRPMWheelFLH: 1010, actualValueRPMwheelFRH: 1010, actualValueRPMWheelRLH: 1000, actualValueRPMWheelRRH: 1000 });
+        assert(Math.abs(v.slip() - 1) < 1e-9, 'front 1 % faster: ' + v.slip());
+        v.put('speed', 3);
+        assert.strictEqual(v.slip(), null, 'below 5 km/h');
+        w.Powertrain.ActualValueRPMWheel({ actualValueRPMWheelFLH: 65535, actualValueRPMwheelFRH: 1010, actualValueRPMWheelRLH: 1000, actualValueRPMWheelRRH: 1000 });
+        const d = car(); d.slip = 1.04;
+        const t = await page(d);
+        assert(t.includes('AXLE SLIP') && t.some((x) => /\+1\.0 %/.test(x)), 'slip not drawn: ' + t.join(' | '));
+        const t2 = await page(Object.assign(car(), { slip: null }));
+        assert(t2.includes('AXLE SLIP') && !t2.some((x) => /NaN|undefined/.test(x)));
+    }],
+);

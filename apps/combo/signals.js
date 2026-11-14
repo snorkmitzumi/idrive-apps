@@ -6,7 +6,7 @@
  *   watches(values, engine, sc, log) -> [[interface, { field: fn(value) }], ...]
  *   sc(key, raw) = raw scaled with app.json config.scaling (null for the car's "no value")
  */
-const { selectionOf } = require('./kit/car');
+const { selectionOf, conditionOf } = require('./kit/car');
 
 // gearbox enum: names or wire numbers (G1 = 3 ... G10 = 12, R = 1, N_OR_P = 2), as in kit/car.js
 const GEARS = { G1: 1, G2: 2, G3: 3, G4: 4, G5: 5, G6: 6, G7: 7, G8: 8, G9: 9, G10: 10, R: -1, N_OR_P: 0 };
@@ -34,6 +34,16 @@ function modeOf(o) {
         if (/DRIVE|^D$|^D_|_D$/.test(x)) return 'D';
     }
     return null;
+}
+
+/** Every object in v (however deeply wrapped) that has key (eDrive's entries()). */
+function entries(v, key, out) {
+    out = out || [];
+    if (v && typeof v === 'object') {
+        if (key in v) out.push(v);
+        else Object.keys(v).forEach((k) => entries(v[k], key, out));
+    }
+    return out;
 }
 
 function watches(values, engine, sc, log) {
@@ -73,7 +83,9 @@ function watches(values, engine, sc, log) {
             basicDataSet: (v) => {
                 const rawSplit = v.valueDistributionLongitudinalTorqueRearAxisFrontAxis, q = v.qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis;
                 logRaw('torque split [value, qualifier]', [rawSplit, q]);
-                const split = SPLIT_OK(q) ? sc('torqueSplitRear', rawSplit) : null;
+                // valid qualifier, not the car's "no value" (0, 65535) and a real share (Engine Config's xdrive_live.js split())
+                const split0 = SPLIT_OK(q) && rawSplit !== 0 ? sc('torqueSplitRear', rawSplit) : null;
+                const split = typeof split0 === 'number' && split0 >= 0 && split0 <= 100 ? split0 : null;
                 if (typeof split === 'number' && split > 0) put('splitRear', split);
                 if (typeof split === 'number' && split > 1 && split < 97) values.markAwd();     // torque going to the front axle
             },
@@ -84,6 +96,35 @@ function watches(values, engine, sc, log) {
                 if (/^_4WD|SAND/.test(String(L.awd))) values.markAwd();
             },
             dataDisplayGearbox: (v) => { L.program = PROGRAMS[v && v.displayProgramGearbox] || null; },
+        }],
+        // the car locked and left (its own state: parked or standby, nobody in it, 1-3): nothing is read, so it can sleep
+        // (eDrive 2.9.1); a state this table doesn't know (15: no value) changes nothing
+        ['de.bmw.infrastructure.VehicleCondition', {
+            VehicleCondition: (v) => {
+                const n = conditionOf(v && v.statusConditionVehicle);
+                if (n === undefined || L.left === (n <= 3)) return;
+                L.left = n <= 3;
+                log.info(L.left ? 'the car is locked and left: no reads, so it can sleep' : 'the car is in use again');
+            },
+        }],
+        // the cluster's eDRIVE needle (eDrive's fast power on plug-in hybrids): only logged once, to see whether a mild
+        // hybrid sends it at all - if it does, the 48 V power could follow it as fast (apps/edrive/fastkw.js)
+        ['de.bmw.infotainment.drivingexcitement.Efficiencytainment2', {
+            statusPowerRelativHybrid: (v) => {
+                const e = entries(v, 'displayActualValuePowerRelativeDrivingElectric')[0];
+                if (!e || L.needleSeen) return;
+                L.needleSeen = true;
+                log.info('eDRIVE needle: drive ' + e.displayActualValuePowerRelativeDrivingElectric + ', regen ' + e.displayActualValuePowerRelativeRecuperation);
+            },
+        }],
+        // the four wheels' speeds: wheel slip, front axle against rear (Engine Config's xdrive_live.js wheels())
+        ['de.bmw.powertrain.Powertrain', {
+            ActualValueRPMWheel: (v) => {
+                if (!v) return;
+                const ok = (x) => typeof x === 'number' && x < 65534;
+                const w = { FL: v.actualValueRPMWheelFLH, FR: v.actualValueRPMwheelFRH, RL: v.actualValueRPMWheelRLH, RR: v.actualValueRPMWheelRRH };
+                if (Object.keys(w).every((k) => ok(w[k]))) values.wheels(w);
+            },
         }],
     ];
 }

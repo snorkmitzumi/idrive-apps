@@ -20,6 +20,7 @@ class Demo {
             boost: Math.max(0, pull * 1.7 - 0.15 + 0.05 * Math.sin(t * 3)), boostTarget: Math.max(0, pull * 1.75 - 0.1),
             powerPct: Math.round(pull * 100), torque, powerCalc: torque * rpm / 9549,
             splitRear: 62 + 25 * pull, awd: pull > 0.9 ? '_4WD_ALTERNATIV' : '_4WD_STANDARD', awdQual: 'FUNKTION_VERFUEGBAR_AKTIV',
+            slip: pull > 0.8 ? 1.5 * Math.sin(t * 2) : 0.2 * Math.sin(t),     // front axle against rear, %
             lmvFront: Math.round(40 + 380 * pull * (1 - (62 + 25 * pull) / 100) * 2),
             b48: { soc: 66 + 4 * Math.sin(t / 40), v: 47.4 + a48 * 0.02, a: a48, kw: (47.4 + a48 * 0.02) * a48 / 1000, soh: 96, temp: 24 + 2 * Math.sin(t / 200) },
             b12: { soc: 84, v: lift ? 14.6 : 14.1, a: lift ? 18 : 1.6, soh: 92, temp: 19 },
