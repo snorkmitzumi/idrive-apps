@@ -61,12 +61,12 @@ mgu.run({
                 const s = demo.sample();
                 return { demo: true, rpm: s.rpm, boost: s.boost, boostTarget: s.boostTarget, speed: s.speed, gear: s.gear, gearMode: s.gearMode, stage: 'D',
                     power: { kw: s.powerPct / 100 * settings.get('maxPower'), calc: false }, torque: s.torque,
-                    split: { rear: s.splitRear, from: null, nm: s.lmvFront }, awd: s.awd, awdQual: s.awdQual, b48: s.b48, b12: s.b12 };
+                    split: { rear: s.splitRear, from: null, nm: s.lmvFront }, slip: s.slip, awd: s.awd, awdQual: s.awdQual, b48: s.b48, b12: s.b12 };
             }
             const L = values.live, bat = reads.fresh();
             return { demo: false, rpm: L.rpm, boost: values.boost().value, boostTarget: L.boostTarget, speed: L.speed,
                 gear: L.gear !== undefined ? L.gear : L.gearGuess, gearMode: L.gearMode || L.program || null, stage: L.stage,
-                power: values.power(), torque: L.torque, split: values.split(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48 };
+                power: values.power(), torque: L.torque, split: values.split(), slip: values.slip(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48 };
         }
 
         // Reset peaks: the first press asks, a second one within CONFIRM_MS clears them (M Vitals' confirm pattern)

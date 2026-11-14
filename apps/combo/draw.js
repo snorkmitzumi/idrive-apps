@@ -15,8 +15,10 @@ const { withAlpha } = require('./kit/canvas');
 const LEFT = 24, RIGHT = 1576, GAP = 24, HALF_GAP = 16;
 const COL_W = (RIGHT - LEFT - 3 * GAP) / 4;           // 370
 const GO = '#2fd27a';
-/** boostMax setting -> the boost bar's top in bar and in psi (M Vitals' BOOST_MAX) */
-const BOOST_MAX = { '2.0': [2, 30], '2.5': [2.5, 36], '3.0': [3, 44], '3.5': [3.5, 50] };
+/** boostMax setting -> the boost bar's top in bar, in psi and in kPa (M Vitals' BOOST_MAX) */
+const BOOST_MAX = { '2.0': [2, 30, 200], '2.5': [2.5, 36, 250], '3.0': [3, 44, 300], '3.5': [3.5, 50, 350] };
+/** Pressure units (values arrive in bar): [factor from bar, label, boost decimals] (M Vitals' PRESS; kPa reads whole) */
+const PRESS = { bar: [1, 'bar', 2], psi: [14.5038, 'psi', 1], kpa: [100, 'kPa', 0] };
 const AWD = { _4WD_STANDARD: '4WD', _4WD_ALTERNATIV: '4WD Sport', _2WD: '2WD', AWDSAND: 'Sand' };
 
 /** The four columns, left to right: same width and height. */
@@ -33,9 +35,9 @@ function halves(c) {
 
 /** Unit conversions for the settings (M Vitals'). */
 function units(s) {
-    const psi = s.get('pressUnit') === 'psi', f = s.get('tempUnit') === 'f', pu = s.get('powerUnit'), tu = s.get('torqueUnit');
+    const pk = s.get('pressUnit'), pr = PRESS[pk] || PRESS.bar, psi = pk === 'psi', kpa = pk === 'kpa', f = s.get('tempUnit') === 'f', pu = s.get('powerUnit'), tu = s.get('torqueUnit');
     return {
-        psi, P: (b) => (G.isNum(b) ? (psi ? b * 14.5038 : b) : null), pU: psi ? 'psi' : 'bar',
+        psi, kpa, P: (b) => (G.isNum(b) ? b * pr[0] : null), pU: pr[1], pDec: pr[2],
         T: (c) => (G.isNum(c) ? (f ? c * 9 / 5 + 32 : c) : null), tU: f ? '°F' : '°C',
         PW: (kw) => (G.isNum(kw) ? kw * ({ kw: 1, hp: 1.34102, ps: 1.35962 }[pu] || 1) : null), pwU: { kw: 'kW', hp: 'hp', ps: 'PS' }[pu] || 'kW',
         TQ: (nm) => (G.isNum(nm) ? nm * ({ nm: 1, lbft: 0.737562, kgm: 1 / 9.80665 }[tu] || 1) : null), tqU: { nm: 'Nm', lbft: 'lb-ft', kgm: 'kgm' }[tu] || 'Nm',
@@ -77,13 +79,13 @@ function engineColumn(cv, t, d, u, pk, s, opts, c) {
         panel: false, value: d.rpm, min: 0, max, step: 500, scale: { every: 2000, div: 1000, size: 20, labelY: 30 }, ramp: 'hot', limit: red,
         marks: [{ value: red, color: 'crit' }], peak: pk('rpm'),
     });
-    const bmax = BOOST_MAX[s.get('boostMax')] || BOOST_MAX['2.5'], top = u.psi ? bmax[1] : bmax[0], dec = u.psi ? 1 : 2;
+    const bmax = BOOST_MAX[s.get('boostMax')] || BOOST_MAX['2.5'], top = u.psi ? bmax[1] : u.kpa ? bmax[2] : bmax[0], dec = u.pDec;
     G.panel(cv, t, b.x, b.y, b.w, b.h, 'Boost');
     bigValue(cv, t, b.x, b.y, b.w, G.fmt(u.P(d.boost), dec), u.pU);
     kv(cv, t, b.x + 22, b.y + 88, b.w - 44, 'TARGET', withUnit(u.P(d.boostTarget), dec, u.pU));
     kv(cv, t, b.x + 22, b.y + 112, b.w - 44, 'PEAK', withUnit(u.P(pk('boost')), dec, u.pU));
     G.segBar(cv, t, b.x + 22, b.y + 126, b.w - 44, 46, {
-        panel: false, value: u.P(d.boost), min: 0, max: top, step: u.psi ? 2 : 0.125, scale: { every: u.psi ? 10 : 0.5, decimals: u.psi ? 0 : 1, size: 20, labelY: 30 },
+        panel: false, value: u.P(d.boost), min: 0, max: top, step: u.psi ? 2 : u.kpa ? 12.5 : 0.125, scale: { every: u.psi ? 10 : u.kpa ? 50 : 0.5, decimals: u.psi || u.kpa ? 0 : 1, size: 20, labelY: 30 },
         ramp: 'hot', limit: top * 0.85, marks: [{ value: top * 0.85, color: 'warn' }], peak: u.P(pk('boost')),
     });
 }
@@ -109,10 +111,8 @@ function speedColumn(cv, t, d, u, pk, s, c) {
     if (gr) cv.text(gr, c.x + c.w - 22, c.y + 160, 96, gr[0] === 'M' ? t.crit : gr[0] === 'S' ? t.accent : t.text, { align: 'right', font: 'gear' });
     const pw = d.power || {}, tq = s.get('torqueUnit') === 'kgm' ? (s.get('maxTorqueKgm') || 100) : u.TQ(s.get('torqueMax') || 900);
     const py = c.y + ph + 24, gap = 132;
-    G.bar(cv, t, c.x, py, c.w, 92, { label: pw.calc ? 'Power (calc)' : 'Power', value: u.PW(pw.kw), unit: u.pwU, max: u.PW(s.get('maxPower')), niceMax: true, ramp: 'hot', peak: u.PW(pk('power')) });
-    cv.text('PEAK  ' + withUnit(u.PW(pk('power')), 0, u.pwU), c.x, py + 118, 18, t.dim, { font: 'bold', spacing: 1 });
-    G.bar(cv, t, c.x, py + gap, c.w, 92, { label: 'Torque', value: u.TQ(d.torque), unit: u.tqU, decimals: s.get('torqueUnit') === 'kgm' ? 1 : 0, max: tq, niceMax: false, ramp: 'hot', peak: u.TQ(pk('torque')) });   // ends at the setting
-    cv.text('PEAK  ' + withUnit(u.TQ(pk('torque')), 0, u.tqU), c.x, py + gap + 118, 18, t.dim, { font: 'bold', spacing: 1 });
+    G.bar(cv, t, c.x, py, c.w, 92, { label: pw.calc ? 'Power (calc)' : 'Power', value: u.PW(pw.kw), unit: u.pwU, max: u.PW(s.get('maxPower')), niceMax: true, ramp: 'hot', peak: u.PW(pk('power')), peakText: true });
+    G.bar(cv, t, c.x, py + gap, c.w, 92, { label: 'Torque', value: u.TQ(d.torque), unit: u.tqU, decimals: s.get('torqueUnit') === 'kgm' ? 1 : 0, max: tq, niceMax: false, ramp: 'hot', peak: u.TQ(pk('torque')), peakText: true });   // ends at the setting
 }
 
 /* ---------- 3: xDrive ---------- */
@@ -127,11 +127,13 @@ function xdriveColumn(cv, t, d, u, pk, s, c) {
     cv.text(AWD[d.awd] || '--', c.x + 22, c.y + 104, 44, hot ? t.crit : AWD[d.awd] ? t.text : t.dim, { font: 'bold' });
     if (hot) cv.text('DERATED / OFF', c.x + 22, c.y + 134, 20, t.crit, { font: 'bold', spacing: 1.5 });
     else if (sp.from) cv.text(sp.from, c.x + 22, c.y + 134, 18, t.dim);
-    kv(cv, t, c.x + 22, c.y + 176, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(sp.nm), 0, u.tqU));
-    kv(cv, t, c.x + 22, c.y + 204, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(pk('lmvFront')), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(sp.nm), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(pk('lmvFront')), 0, u.tqU));
+    // wheel slip: the front axle's wheels against the rear's (+ = the front turns faster), above 5 km/h
+    kv(cv, t, c.x + 22, c.y + 220, c.w - 44, 'AXLE SLIP', G.isNum(d.slip) ? (d.slip > 0 ? '+' : '') + G.fmt(d.slip, 1) + ' %' : '--');
     const rear = sp.rear;
-    G.bar(cv, t, c.x + 22, c.y + 236, c.w - 44, 92, { label: 'Rear', value: rear, unit: '%', ramp: 'hot' });
-    G.bar(cv, t, c.x + 22, c.y + 352, c.w - 44, 92, { label: 'Front', value: G.isNum(rear) ? 100 - rear : null, unit: '%', ramp: 'hot' });
+    G.bar(cv, t, c.x + 22, c.y + 240, c.w - 44, 92, { label: 'Rear', value: rear, unit: '%', ramp: 'hot' });
+    G.bar(cv, t, c.x + 22, c.y + 350, c.w - 44, 92, { label: 'Front', value: G.isNum(rear) ? 100 - rear : null, unit: '%', ramp: 'hot' });
 }
 
 /* ---------- 4: 48 V battery over 12 V battery ---------- */

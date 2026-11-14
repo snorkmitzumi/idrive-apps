@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "One screen: engine speed and boost, speed / power / torque, xDrive, and the 48 V and 12 V batteries, in M Vitals' look",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -37,6 +37,18 @@
     "de.bmw.infotainment.misc.MDrive": {
       "statusMSystem": "rs",
       "dataDisplayGearbox": "s"
+    },
+    "de.bmw.infrastructure.VehicleCondition": {
+      "_optional": "the car locked and left: nothing read, so it can sleep",
+      "VehicleCondition": "s"
+    },
+    "de.bmw.infotainment.drivingexcitement.Efficiencytainment2": {
+      "_optional": "the cluster's eDRIVE needle: logged once, to see whether a mild hybrid sends it",
+      "statusPowerRelativHybrid": "rs"
+    },
+    "de.bmw.powertrain.Powertrain": {
+      "_optional": "xDrive column: wheel slip, front axle against rear",
+      "ActualValueRPMWheel": "s"
     },
     "com.harman.infotainment.systemfunctions.tasu.tasu.InternalTasu": {
       "_instances": "SystemFunctionsInternalTasuInst1",
@@ -184,6 +196,17 @@
       "label": "Max power (100% on sport display)",
       "type": "number",
       "unit": "kW",
+      "unitBy": "powerUnit",
+      "units": {
+        "hp": {
+          "unit": "hp",
+          "mul": 1.34102
+        },
+        "ps": {
+          "unit": "PS",
+          "mul": 1.35962
+        }
+      },
       "default": 215,
       "steps": [
         100,
@@ -241,6 +264,13 @@
       "label": "Torque gauge max",
       "type": "number",
       "unit": "Nm",
+      "unitBy": "torqueUnit",
+      "units": {
+        "lbft": {
+          "unit": "lb-ft",
+          "mul": 0.737562
+        }
+      },
       "default": 900,
       "steps": [
         400,
@@ -365,6 +395,10 @@
         [
           "psi",
           "psi"
+        ],
+        [
+          "kpa",
+          "kPa"
         ]
       ]
     },
@@ -499,6 +533,7 @@
       "reset": 1,
       "markDefault": true,
       "steps": [
+        3,
         5,
         10,
         15,

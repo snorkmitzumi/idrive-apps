@@ -6,7 +6,7 @@
  *   - only while the screen is shown (checked again before each read and when the next round is scheduled; a round
  *     at once when it is shown again: opened()),
  *   - only while the car is in use: driving (over 1 km/h or the engine running) and 3 min after, or 10 min after the
- *     screen was opened (as eDrive), so a parked car can sleep,
+ *     screen was opened (as eDrive), so a parked car can sleep; never while the car is locked and left,
  *   - the fast values most often: front-axle torque every 0.5 s (1 s when the car sends its own split), boost from
  *     the engine unit every 0.5 s (only when the sport display has none); the batteries every 2.5 s; the 12 V
  *     charge, boost target and temperature every 30 s; the 12 V health every 30 min,
@@ -23,6 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const B = require('./batteries');
+const { writeWhole } = require('./store');
 
 const DIAG = { retryBaseMs: 150, pendingTimeoutMs: 1500, callTimeoutMs: 2000 };
 const IDLE_AFTER_MOVE = 3 * 60000, IDLE_AFTER_USER = 10 * 60000, OPENED_GAP = 5000;
@@ -89,7 +90,8 @@ class Reads {
         const now = this.now(), L = this.values.live;
         const engine = typeof L.rpm === 'number' && L.rpm > 400 && now - (L.rpmT || 0) < 5000;
         if ((typeof L.speed === 'number' && L.speed > 1) || engine) this.lastActiveT = now;
-        const use = now - this.lastActiveT < IDLE_AFTER_MOVE || now - this.lastUserT < IDLE_AFTER_USER;
+        // the car locked and left (its own vehicle state, signals.js): never, so it can sleep (eDrive 2.9.1)
+        const use = !L.left && (now - this.lastActiveT < IDLE_AFTER_MOVE || now - this.lastUserT < IDLE_AFTER_USER);
         if (use && this.wasInUse === false) this.wake();          // in use again: units that went quiet get asked again
         this.wasInUse = use;
         return use;
@@ -206,7 +208,7 @@ class Reads {
     }
     save() {
         this.st.has48 = this.bat.has48;
-        try { if (this.file) fs.writeFileSync(this.file, JSON.stringify(this.st)); } catch (e) { this.log.warn('save: ' + e); }
+        try { if (this.file) writeWhole(this.file, JSON.stringify(this.st)); } catch (e) { this.log.warn('save: ' + e); }
     }
 
     /** The values to show now: one too old is null (the panel then shows why). */
@@ -219,6 +221,7 @@ class Reads {
     }
     why(key) {
         if (!this.link.available) return 'diagnostic link down';
+        if (this.values.live.left) return 'paused - car locked';
         if (!this.inUse()) return 'paused - parked';
         if (key === 'b48' && this.bat.has48 === false) return 'no 48 V battery';
         // the 12 V panel's values are read as v12 / i12 / soc40: none of them answers
