@@ -41,11 +41,13 @@ function draw(cv, G, t, v, act) {
     // the buttons (where the kit runs the screen) end G.MARGIN over it, as the other apps' last lines
     const bottom = G.pageBottom(cv) - (cv.own ? G.MARGIN : 0);
 
+    if (v.pin && (page === 'Engine Map' || page === 'Burbles')) return drawPin(cv, G, t, v.pin, act || {}, bottom);
     if (page === 'Engine Map') return drawMap(cv, G, t, v.tune || {}, act || {}, bottom);
     if (page === 'Max Cooling') return drawCooling(cv, G, t, v.tune || {}, act || {}, bottom);
     if (page === 'Burbles') return drawBurbles(cv, G, t, v.tune || {}, act || {}, bottom);
     if (page === 'Active Sound') return drawAsd(cv, G, t, v.tune || {}, act || {}, bottom);
     if (page === 'xDrive') return drawXDrive(cv, G, t, v.xdrive || {}, act || {}, bottom);
+    if (page === 'xDrive live') return drawXDriveLive(cv, G, t, v.xlive || {}, v.xdrive || {}, bottom);
 
     // --- the rear silencer, the flap's butterfly in the right tailpipe ---
     drawMuffler(cv, G, t, 100, G.TOP + 12, W - 200, bottom - 142 - G.TOP, v);
@@ -150,6 +152,40 @@ function drawMap(cv, G, t, m, act, bottom) {
     return cv;
 }
 
+/**
+ * Engine Map / Burbles behind the PIN (pin.js): what to do, a dot for each digit, the message, and the keypad
+ * (1-5 over 6-0 and Delete) where the kit runs the screen; elsewhere only the words (the tabs' buttons
+ * aren't there either).
+ */
+function drawPin(cv, G, t, p, act, bottom) {
+    const rowH = 56, rowGap = 18, padTop = bottom - 2 * rowH - rowGap;
+    const cy = G.TOP + (padTop - G.TOP) / 2 - 40;
+    cv.text(p.title, W / 2, cy, 30, t.text, { align: 'center', font: 'bold', spacing: 1 });
+    const r = 11, gap = 40, x0 = W / 2 - ((p.len - 1) * gap) / 2;
+    for (let i = 0; i < p.len; i++) {
+        if (i < p.digits) cv.circle(x0 + i * gap, cy + 46, r, t.text);
+        else cv.strokeRoundRect(x0 + i * gap - r, cy + 46 - r, 2 * r, 2 * r, r, 2, G.withAlpha('#ffffff', 0.4));
+    }
+    if (p.msg) cv.text(p.msg, W / 2, cy + 96, 18, p.warn ? (t.warn || '#d29922') : t.dim, { align: 'center', font: 'label' });
+    if (!cv.own) {
+        cv.text('Enter the PIN on the touchscreen', W / 2, cy + 130, 16, t.dim, { align: 'center', font: 'label' });
+        return cv;
+    }
+    const bw = 150, bg = 20, busy = p.wait > 0;
+    const row = (keys, y) => {
+        let bx = (W - (keys.length * bw + (keys.length - 1) * bg)) / 2;
+        keys.forEach((k) => {
+            const del = k === 'del';
+            G.button(cv, t, bx, y, bw, rowH, del ? 'Delete' : String(k), del ? act.pinBack : act.pinDigit && act.pinDigit(k),
+                { key: 'la_pin_' + k, busy: busy && !del });
+            bx += bw + bg;
+        });
+    };
+    row([1, 2, 3, 4, 5], padTop);
+    row([6, 7, 8, 9, 0, 'del'], padTop + rowH + rowGap);
+    return cv;
+}
+
 /** Max Cooling: a fan that lights up when on, ON / OFF. */
 function drawCooling(cv, G, t, m, act, bottom) {
     const on = m.cooling === 'ON';
@@ -241,6 +277,56 @@ function drawXDrive(cv, G, t, x, act, bottom) {
         buttonRow(cv, G, t, [offBtn, [x.confirmWhat === 'on' ? 'Confirm xDrive on' : 'xDrive on', act.xdriveOn, x.confirmWhat === 'on']],
             bottom, 300, x.busy, 'la_xd');
     } else buttonRow(cv, G, t, [offBtn], bottom, 360, x.busy, 'la_xd');
+    return cv;
+}
+
+/**
+ * xDrive live (read only, xdrive_live.js): the car from above with the split between its axles and each wheel's slip,
+ * and the readings beside it. Slip within 3 % is shown plain, up to 8 % amber, above that red.
+ */
+function drawXDriveLive(cv, G, t, x, xd, bottom) {
+    const pct = (v, d) => (G.isNum(v) ? (v > 0 && d ? '+' : '') + v.toFixed(d || 0) + ' %' : '--');
+    const slipCol = (v) => (!G.isNum(v) ? t.dim : Math.abs(v) > 8 ? RED(t) : Math.abs(v) > 3 ? (t.warn || '#d29922') : t.text);
+    // the car from above, front up
+    const top = G.TOP + 30, h = Math.max(300, bottom - top - 40), cx = 420, bw = 170;
+    cv.strokeRoundRect(cx - bw / 2, top, bw, h, 60, 3, G.withAlpha('#ffffff', 0.35));
+    const wy = [top + h * 0.2, top + h * 0.8], ww = 34, wh = 74;
+    [['FL', -1, 0], ['FR', 1, 0], ['RL', -1, 1], ['RR', 1, 1]].forEach(([k, side, axle]) => {
+        const slip = x.wheels ? x.wheels[k] : null, col = slipCol(slip);
+        const wx = cx + side * (bw / 2 + 8) - (side < 0 ? ww : 0);
+        cv.roundRect(wx, wy[axle] - wh / 2, ww, wh, 8, G.withAlpha(col, 0.55));
+        cv.text(pct(slip, 1), side < 0 ? wx - 14 : wx + ww + 14, wy[axle] + 8, 24, col, { align: side < 0 ? 'right' : 'left', font: 'bold' });
+    });
+    // the split: a bar along the car, front share lit from the top
+    const rear = G.isNum(x.rear) ? x.rear : null, front = rear === null ? null : 100 - rear;
+    const by = wy[0] + 10, bh = wy[1] - wy[0] - 20;
+    cv.roundRect(cx - 14, by, 28, bh, 10, t.track || G.withAlpha('#ffffff', 0.1));
+    if (front !== null) {
+        cv.roundRect(cx - 14, by, 28, Math.max(10, bh * front / 100), 10, t.accent2 || '#81c4ff');
+        cv.roundRect(cx - 14, by + bh * front / 100, 28, Math.max(10, bh * rear / 100), 10, RED(t));
+    }
+    cv.text(front === null ? '--' : Math.round(front) + ' %', cx, top - 4, 22, front === null ? t.dim : t.text, { align: 'center', font: 'bold' });
+    cv.text(rear === null ? '--' : Math.round(rear) + ' %', cx, top + h + 28, 22, rear === null ? t.dim : t.text, { align: 'center', font: 'bold' });
+
+    // the readings
+    const nm = xd && xd.torque ? xd.torque.actual.toFixed(0) + ' Nm' : '--';
+    const rows = [
+        ['FRONT / REAR', front === null ? '--' : Math.round(front) + ' / ' + Math.round(rear) + ' %'],
+        ['FRONT AXLE TORQUE', nm],
+        ['FRONT AXLE AGAINST REAR', pct(x.axle, 1)],
+        ['STEERING WHEEL', G.isNum(x.steer) ? Math.round(x.steer) + '°' : '--'],
+        ['YAW RATE', G.isNum(x.yaw) ? x.yaw.toFixed(1) + ' °/s' : '--'],
+        ['LATERAL', G.isNum(x.gLat) ? x.gLat.toFixed(2) + ' g' : '--'],
+        ['LONGITUDINAL', G.isNum(x.gLong) ? x.gLong.toFixed(2) + ' g' : '--'],
+    ];
+    const step = Math.max(44, Math.min(60, (bottom - G.TOP - 80) / rows.length));
+    rows.forEach(([label, value], i) => {
+        const y = G.TOP + 56 + i * step;
+        cv.text(label, 820, y, 20, t.dim, { font: 'bold', spacing: 1.2 });
+        cv.text(value, 1520, y, 28, value === '--' ? t.dim : t.text, { font: 'bold', align: 'right' });
+    });
+    cv.text('Read only · wheel slip compared between the wheels, above 5 km/h' + (xd && xd.torque ? '' : ' · front axle torque with the xDrive tab\'s setting'),
+        820, bottom - 16, 16, t.dim, { font: 'label' });
     return cv;
 }
 

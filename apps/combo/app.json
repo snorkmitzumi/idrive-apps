@@ -2,10 +2,17 @@
   "id": "combo",
   "title": "Combo",
   "description": "One screen: engine speed and boost, speed / power / torque, xDrive, and the 48 V and 12 V batteries, in M Vitals' look",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
+  "mguHmi": [
+    "ID7"
+  ],
+  "requires": {
+    "idrive7-renderd": "2.1.18",
+    "mgu-inputgate": "1.1.0"
+  },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
       "statusEngineSpeed2": "rs"
