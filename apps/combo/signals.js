@@ -56,6 +56,11 @@ function watches(values, engine, sc, log) {
     };
     return [
         ['de.bmw.infotainment.vehicle.CDS', { statusEngineSpeed2: (v) => put('rpm', sc('rpm', v.actualValueRPMEngineCrankshaft)) }],
+        // the Performance tab: the dyno's acceleration, in g (Virtual Dyno's and Drag Timer's)
+        ['de.bmw.infotainment.vehicle.CDS2', { statusLongitudinalAccelerationMassCenter: (v) => {
+            const a = sc('accel', v.longitudinalAccelerationCentreOfGravity);
+            if (a !== null) put('gLong', a / 9.80665);
+        } }],
         ['de.bmw.infotainment.vehicle.Vehicle2', Object.assign({ statusCarSpeed2: (v) => put('speed', sc('speed', v.speedVehicleCentreOfGravity)) }, engine.handlers())],
         ['de.bmw.infotainment.drivingexcitement.FES', {
             statusSwitchDriveDynamicSport2: (v) => { logRaw('FES boost', v.displayBoostPressure); put('boostFes', sc('boost', v.displayBoostPressure)); },

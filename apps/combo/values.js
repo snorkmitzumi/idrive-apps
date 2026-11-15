@@ -8,6 +8,7 @@
  *   v.put(key, value)   v.raise(key, value)   v.peak(key)   v.resetPeaks()
  *   v.boost() -> { value, from }   v.power() -> { kw, calc }   v.split() -> { rear, from, nm }
  *   v.slip() -> % | null   v.carPresent()   v.live (raw fields)   v.subs (signal subscriptions, for carPresent)
+ *   v.onPut = fn(key, value): each plausible value as it is kept (the Performance tab)
  */
 const fs = require('fs');
 const path = require('path');
@@ -58,6 +59,8 @@ class Values {
         L[k] = v;
         if (k === 'rpm') L.rpmT = this.now();
         if (k === 'lmvFront') L.lmvT = this.now();
+        // (the Performance tab follows the car's values as they come: perf.js)
+        if (this.onPut) this.onPut(k, v);
         if (k === 'splitRear') this.splitAt = this.now();
         if (k === 'rpm' || k === 'torque') {
             // crankshaft torque x speed, when the car sends no sport-display power (M Vitals)

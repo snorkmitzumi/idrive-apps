@@ -6,7 +6,8 @@
  *
  *   columns() -> [{ x, y, w, h }] x 4
  *   render(cv, t, d, opts)   d: the frame's values (main.js data()); opts: { settings, peak(k), why(k), redline,
- *                            scaleMax, has48, note (a line in the header, e.g. the Reset peaks confirm) }. A missing value shows "--" and, on the battery panels, why.
+ *                            scaleMax, has48, note (a line in the header, e.g. the Reset peaks confirm), tabs, sel (the
+ *                            tab bar's names and the one shown) }. A missing value shows "--" and, on the battery panels, why.
  * Units as M Vitals (P, T, PW, TQ, V there): the car's bar, deg C, kW, Nm and km/h converted for the settings.
  */
 const G = require('./kit/gauges');
@@ -59,8 +60,10 @@ function bigValue(cv, t, x, y, w, text, unit, color) {
 
 function render(cv, t, d, opts) {
     const s = opts.settings, u = units(s), pk = (k) => (s.get('peaks') ? opts.peak(k) : undefined);
-    G.frame(cv, t, [], 0, [d.demo && { text: 'DEMO' }]);
-    if (opts.note) cv.text(opts.note, 800, 25, 20, t.warn, { align: 'center', font: 'bold', spacing: 1 });
+    // the tabs (Driving, Performance, the ambient light's): the note a badge beside them, else centred in the bar
+    const tabs = opts.tabs || [];
+    G.frame(cv, t, tabs, opts.sel || 0, [d.demo && { text: 'DEMO' }, tabs.length && opts.note && { text: opts.note, color: 'warn' }]);
+    if (opts.note && !tabs.length) cv.text(opts.note, 800, 25, 20, t.warn, { align: 'center', font: 'bold', spacing: 1 });
     const [c1, c2, c3, c4] = columns();
     engineColumn(cv, t, d, u, pk, s, opts, c1);
     speedColumn(cv, t, d, u, pk, s, c2);

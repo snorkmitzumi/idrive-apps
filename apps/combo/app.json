@@ -1,8 +1,8 @@
 {
   "id": "combo",
   "title": "Combo",
-  "description": "One screen: engine speed and boost, speed / power / torque, xDrive, and the 48 V and 12 V batteries, in M Vitals' look",
-  "version": "1.1.0",
+  "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer) and Ambient config's colours, animations, driving modes and favourites",
+  "version": "2.0.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -12,6 +12,21 @@
   "requires": {
     "idrive7-renderd": "2.1.18",
     "mgu-inputgate": "1.1.0"
+  },
+  "autostart": true,
+  "include": {
+    "ambient_config": [
+      "ambient_page.js",
+      "ambient.js",
+      "cabin.js",
+      "control.js",
+      "lights.js",
+      "lin.js",
+      "modes_tab.js",
+      "others.js",
+      "owner.js",
+      "scenes.js"
+    ]
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
@@ -24,7 +39,8 @@
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusSwitchDriveDynamicSport2": "rs",
       "statusVehicleDynamicEngine": "rs",
-      "statusActualValueTorque2": "rs"
+      "statusActualValueTorque2": "rs",
+      "statusFESVehicleDynamicSwitchHMI": "rs"
     },
     "de.bmw.infrastructure.VehicleInformation": {
       "statusGearboxDrive": "s",
@@ -58,6 +74,26 @@
       "_broadcasts": [
         "sendTasuResponse"
       ]
+    },
+    "de.bmw.infotainment.vehicle.CDS2": {
+      "_optional": "Performance tab: the car's acceleration (dyno power, peak g)",
+      "statusLongitudinalAccelerationMassCenter": "rs"
+    },
+    "de.bmw.infotainment.misc.ComfortFunctionIuK": {
+      "ambientLightInteriorColour": "w",
+      "statusAmbientLightInteriorColour": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle": {
+      "_optional": "day or night: dimmer at night",
+      "statusDayNightChangeOver": "rs"
+    },
+    "de.bmw.body.Light": {
+      "_optional": "the turn signals: that side's lights breathe green",
+      "StatusFunctionsIndicators": "s"
+    },
+    "de.bmw.body.DoorsWindowsRoofMirrors": {
+      "_optional": "an open door: its lights red",
+      "CentralLockingSystemAndPanelStatus": "s"
     }
   },
   "screens": [
@@ -363,6 +399,195 @@
         [
           "off",
           "Hide"
+        ]
+      ]
+    },
+    {
+      "key": "weight",
+      "label": "Dyno: weight with driver + fuel",
+      "type": "number",
+      "unit": "kg",
+      "default": 1750,
+      "steps": [
+        1300,
+        1400,
+        1500,
+        1550,
+        1600,
+        1650,
+        1700,
+        1750,
+        1800,
+        1850,
+        1900,
+        1950,
+        2000,
+        2100,
+        2200,
+        2300,
+        2400,
+        2500
+      ]
+    },
+    {
+      "key": "body",
+      "label": "Dyno: body shape (air drag)",
+      "type": "choice",
+      "default": "coupe",
+      "options": [
+        [
+          "coupe",
+          "Coupe / sedan"
+        ],
+        [
+          "wagon",
+          "Touring / hatch"
+        ],
+        [
+          "suv",
+          "SUV"
+        ]
+      ]
+    },
+    {
+      "key": "loss",
+      "label": "Dyno: drivetrain loss",
+      "type": "number",
+      "unit": "%",
+      "default": 15,
+      "steps": [
+        0,
+        10,
+        12,
+        15,
+        18,
+        20,
+        25
+      ]
+    },
+    {
+      "key": "ecuTorque",
+      "label": "Dyno: overlay ECU torque",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "distance",
+      "label": "Drag: distance split",
+      "type": "choice",
+      "default": "qm",
+      "options": [
+        [
+          "qm",
+          "1/4 mile"
+        ],
+        [
+          "em",
+          "1/8 mile"
+        ],
+        [
+          "m1000",
+          "1000 m"
+        ]
+      ]
+    },
+    {
+      "key": "rollout",
+      "label": "Drag: one-foot rollout",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "key": "carKind",
+      "label": "Car type",
+      "type": "choice",
+      "default": "ice",
+      "hidden": true,
+      "options": [
+        [
+          "ice",
+          "Petrol or diesel"
+        ],
+        [
+          "hybrid",
+          "Plug-in hybrid"
+        ]
+      ]
+    },
+    {
+      "key": "follow",
+      "label": "Look by driving mode",
+      "type": "bool",
+      "default": true,
+      "hidden": true
+    },
+    {
+      "key": "welcome",
+      "label": "Welcome sweep at start",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "sportPulse",
+      "label": "Sport pulse",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "nightDim",
+      "label": "Ambient: dimmer at night",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "keep",
+      "label": "Ambient: my colour back at each start",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "flashAlerts",
+      "label": "Redline shift flash",
+      "type": "bool",
+      "default": true,
+      "hidden": true
+    },
+    {
+      "key": "turnGlow",
+      "label": "Turn signal glow",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "doorRed",
+      "label": "Open door red",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "hazardRed",
+      "label": "Hazard red",
+      "type": "bool",
+      "default": false,
+      "hidden": true
+    },
+    {
+      "key": "drive",
+      "label": "Ambient: steering wheel",
+      "type": "choice",
+      "default": "lhd",
+      "options": [
+        [
+          "lhd",
+          "Left"
+        ],
+        [
+          "rhd",
+          "Right"
         ]
       ]
     },
