@@ -30,8 +30,19 @@ class FakeLink extends EventEmitter {
         return this.answer(ecu, sid, data);
     }
 }
+// Ambient config's tabs (apps/ambient_config/ambient_page.js, taken at build time): a stand-in that records what the
+// app asks of it; test_ambient_*.js check the real one
+const fakeAmb = {
+    calls: [], page: 0,
+    tabs: () => ['Ambient', 'Animations', 'Modes', 'Favourites'],
+    draw(cv, t) { cv.text('AMBIENT TAB ' + this.page, 100, 100, 20, t.text); },
+    select(i) { this.page = i; this.calls.push('select ' + i); }, tap(x, y) { this.calls.push('tap ' + x + ',' + y); },
+    wants: () => true, leave() { this.calls.push('leave'); }, dirty() {}, original() { this.calls.push('original'); },
+};
 const stubs = {
     './kit/mgu': { run(a) { app = a; } },
+    './ambient_page': { background: async (bg, o) => { fakeAmb.calls.push('background ' + JSON.stringify(o)); return {}; },
+        mount: (ctx, parts, o) => { fakeAmb.calls.push('mount ' + JSON.stringify({ strobe: o.strobe, names: o.names })); fakeAmb.page = 0; return fakeAmb; } },
     './kit/readonly-diag': { ReadOnlyDiag: FakeLink, MAX_DIDS: 8 },
 };
 const load = Module._load;
@@ -74,12 +85,12 @@ async function boot(dir, opts) {
     const vis = opts.vis || { shown: true, handlers: [] };
     booted.push(vis);
     const clicks = {};
-    let frame = null, last = null;
+    let frame = null, last = null, tab = null, tap = null;
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
-        onTab() {}, hideButton() {}, onScroll() {}, onTap() {}, loop(n, fps, fn) { frame = fn; },
+        onTab(fn) { tab = fn; }, hideButton() {}, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
         theme: () => themes.theme('m_tricolour'),
         canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = true; last = cv; return cv; },
     };
@@ -87,6 +98,7 @@ async function boot(dir, opts) {
     return {
         ctx, settings, vis, clicks,
         draw: () => textsOf(() => frame()),
+        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y),
         canvas: () => last,
     };
 }
@@ -114,7 +126,8 @@ const checks = [
             .map((d) => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', d, 'app.json'), 'utf8')).loggingId);
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
-            'xdrive', 'battery48', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
+            'carKind', 'follow', 'welcome', 'sportPulse', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'hazardRed', 'drive', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
@@ -605,5 +618,99 @@ checks.push(
         assert(t.includes('AXLE SLIP') && t.some((x) => /\+1\.0 %/.test(x)), 'slip not drawn: ' + t.join(' | '));
         const t2 = await page(Object.assign(car(), { slip: null }));
         assert(t2.includes('AXLE SLIP') && !t2.some((x) => /NaN|undefined/.test(x)));
+    }],
+    ['2.0 #1 tabs: Driving, Performance, then Ambient config\'s four (no Strobe); each tab drawn', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('tabs'));
+        assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0, 'the ambient service without the strobe: ' + fakeAmb.calls.join(' | '));
+        assert(fakeAmb.calls.some((c) => /^mount .*"strobe":false.*"names":\["Ambient","Animations","Modes","Favourites"\]/.test(c)), fakeAmb.calls.join(' | '));
+        const t0 = await b.draw();
+        ['DRIVING', 'PERFORMANCE', 'AMBIENT', 'ANIMATIONS', 'MODES', 'FAVOURITES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        assert(t0.includes('Engine speed'), 'Driving first');
+        const t1 = await b.tab(1);
+        assert(t1.includes('Dyno') && t1.includes('Drag timer'), 'Performance: ' + t1.join(' | '));
+        assert(!t1.includes('Engine speed'), 'Driving still drawn on Performance');
+        const t3 = await b.tab(3);
+        assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
+        b.tap(300, 300);
+        assert(fakeAmb.calls.indexOf('tap 300,300') >= 0, 'a tap on an ambient tab goes to it');
+        await b.tab(0);
+        assert(fakeAmb.calls.indexOf('leave') >= 0, 'leaving the ambient tabs is told');
+        assert.deepStrictEqual(SPEC.screens[0].buttons.map((x) => x[0]), ['BTN_RESET', 'BTN_SETTINGS']);
+        assert.strictEqual(SPEC.autostart, true, 'autostart: the ambient light runs with the app closed');
+        assert(!SPEC.settings.some((x) => /^strobe|^police|showRate/.test(x.key)), 'no strobe settings');
+    }],
+    ['2.0 #2 the diagnostic link reads only on the Driving tab', async () => {
+        const b = await boot(tmp('reads'), { settings: { demo: 'off' } });
+        link.available = true; link.ready = true;
+        await b.draw();
+        await new Promise((r) => setTimeout(r, 1200));
+        assert(link.asked.length > 0, 'nothing read on the Driving tab (the check below would prove nothing)');
+        await b.tab(1);
+        await new Promise((r) => setTimeout(r, 1500));      // (a read under way when the tab changed ends)
+        const before = link.asked.length;
+        await new Promise((r) => setTimeout(r, 1200));
+        assert.strictEqual(link.asked.length, before, 'read on the Performance tab: ' + link.asked.slice(before).map((a) => a.ecu).join());
+        await b.tab(2);
+        await new Promise((r) => setTimeout(r, 600));
+        assert.strictEqual(link.asked.length, before, 'read on an ambient tab');
+    }],
+    ['2.0 #3 the bar\'s Reset by tab: peaks, the drag run, the car\'s colour', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('reset'));
+        await b.tab(1);
+        b.clicks.BTN_RESET();
+        await b.tab(2);
+        b.clicks.BTN_RESET();
+        assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
+    }],
+    ['2.0 #4 dyno: a pull in one gear makes a run (power from m*a*v, torque from power), saved; demo runs not', async () => {
+        const { Perf } = appModule('perf');
+        const dir = tmp('dyno'), s = settingsOf({ demo: 'off' });
+        const p = new Perf({ settings: s, log: quiet, dataDir: dir, engine: null });
+        let t = 1000;
+        // 3rd gear: 45 rpm per km/h, 0.4 g from 50 km/h
+        for (let v = 50; v < 150; v += 0.4 * 9.80665 * 3.6 * 0.05) { p.sample({ rpm: v * 45, speed: v, gLong: 0.4, torque: 400 }, t); t += 50; }
+        p.sample({ rpm: 6000, speed: 150, gLong: 0, torque: 0 }, t + 600);
+        p.sample({ rpm: 6000, speed: 150, gLong: 0, torque: 0 }, t + 1200);
+        const r = p.current();
+        assert(r && r.curve.length > 10, 'no run');
+        assert(r.peakPrpm >= 6000 && r.peakP > 150000 && r.peakP < 400000, 'peak power ' + r.peakP + ' @ ' + r.peakPrpm);
+        const saved = JSON.parse(fs.readFileSync(path.join(dir, 'perf.json'), 'utf8'));
+        assert.strictEqual(saved.dyno.runs.length, 1);
+        p.baseline();
+        assert(p.store.dyno.baseline && p.store.dyno.baseline.at === r.at, 'baseline pinned');
+        p.demo(true);
+        assert(!p.current(), 'the demo has its own runs');
+        p.demo(false);
+        assert.strictEqual(p.current().at, r.at);
+    }],
+    ['2.0 #5 drag: stop, launch, 0-100 timed and kept as the best', async () => {
+        const { Perf } = appModule('perf');
+        const dir = tmp('drag'), p = new Perf({ settings: settingsOf({ demo: 'off' }), log: quiet, dataDir: dir, engine: null });
+        let t = 1000;
+        for (let i = 0; i < 30; i++) { p.speed(t, 0); p.idle(t); t += 50; }
+        assert.strictEqual(p.timer.state, 'ready');
+        // 0-100 in 5 s, then on to 120 and lift
+        for (let i = 1; i <= 120; i++) { t += 50; p.speed(t, Math.min(120, i * 1)); }
+        for (let i = 0; i < 20; i++) { t += 50; p.speed(t, 110 - i); }
+        const best = p.store.drag.best['0-100'];
+        assert(best && Math.abs(best.s - 5) < 0.1, 'best 0-100: ' + JSON.stringify(best));
+        assert(JSON.parse(fs.readFileSync(path.join(dir, 'perf.json'), 'utf8')).drag.best['0-100'], 'saved');
+    }],
+    ['2.0 #6 build: every "include" file exists, and the included ambient service has no strobe on board', async () => {
+        Object.keys(SPEC.include).forEach((a) => SPEC.include[a].forEach((f) => assert(fs.existsSync(path.join(ROOT, 'apps', a, f)), a + '/' + f)));
+        const src = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', 'ambient_page.js'), 'utf8');
+        assert(!/^const .*require\('\.\/strobe'\)/m.test(src), 'strobe.js required at the top: Combo leaves it out');
+        // every module the included files require is included too
+        const have = new Set(SPEC.include.ambient_config.map((f) => './' + f.replace(/\.js$/, '')));
+        SPEC.include.ambient_config.forEach((f) => {
+            const code = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', f), 'utf8');
+            (code.match(/^(?!\s*\/\/).*require\('\.\/[a-z_]+'\)/gm) || []).forEach((line) => {
+                const m = line.match(/require\('(\.\/[a-z_]+)'\)/)[1];
+                if (m === './strobe') return;
+                assert(have.has(m), f + ' needs ' + m + ', which "include" leaves out');
+            });
+        });
     }],
 );

@@ -618,7 +618,9 @@ function build() {
     App.waiting = null;
     setStatus('building');
     let outText = '';
-    const p = App.building = spawn('python3', [path.join(ROOT, 'kit', 'tools', 'build.py'), id], { cwd: ROOT });
+    // without BMW's SDK (oap-sdk, extracted from a head unit): the offline preview build, which the stubbed head unit runs too
+    const noSdk = !fs.existsSync(path.join(ROOT, 'oap-sdk', 'index.js'));
+    const p = App.building = spawn('python3', [path.join(ROOT, 'kit', 'tools', 'build.py'), id].concat(noSdk ? ['--preview-only'] : []), { cwd: ROOT });
     p.stdout.on('data', (d) => { outText += d; });
     p.stderr.on('data', (d) => { outText += d; });
     p.on('error', (e) => { outText += String(e); });
@@ -719,7 +721,10 @@ function watch() {
         clearTimeout(t);
         t = setTimeout(() => { appLog('info', 'emu: ' + path.relative(ROOT, path.join(dir, String(f || ''))) + ' changed'); build(); }, 150);
     };
-    watchers = [path.join(ROOT, 'apps', appId), path.join(ROOT, 'kit', 'runtime')].map((d) => {
+    // (and the apps whose modules app.json "include" takes, e.g. Combo's apps/ambient_config)
+    let inc = [];
+    try { inc = Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', appId, 'app.json'), 'utf8')).include || {}); } catch (e) { inc = []; }
+    watchers = [path.join(ROOT, 'apps', appId), path.join(ROOT, 'kit', 'runtime')].concat(inc.map((a) => path.join(ROOT, 'apps', a))).map((d) => {
         let w;
         try { w = fs.watch(d, { recursive: true }, kick(d)); } catch (e) { w = fs.watch(d, kick(d)); }   // (recursive: macOS, Windows, Linux on Node 20+)
         w.on('error', (e) => appLog('warn', 'emu: watching ' + path.relative(ROOT, d) + ': ' + e.message));

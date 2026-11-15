@@ -652,6 +652,16 @@ def build(app_id, language='en', preview_only=False):
             # a committed pack (e.g. dtc_scanner/dtc_db.pack); a local folder of the same name replaces it
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', f))
             print('  %s (committed)' % f)
+    # app.json "include": { "<other app>": ["file.js", ...] } - another app's modules, beside this app's own (Combo
+    # hosts Ambient config's tabs from apps/ambient_config, one copy of that code); a name of the app's own wins
+    for other, names in (spec.get('include') or {}).items():
+        for name in names:
+            src_file = os.path.join(APPS, other, name)
+            if not os.path.isfile(src_file):
+                raise SystemExit('%s: "include" names %s/%s, which does not exist' % (app_id, other, name))
+            if os.path.exists(os.path.join(adir, name)):
+                continue
+            shutil.copy(src_file, os.path.join(src, 'javascript', name))
     # kit runtime
     if app_id == 'dtc_scanner' and language in ('zh-CN', 'ru'):
         module = 'build_diagnostic_zh' if language == 'zh-CN' else 'build_diagnostic_ru'
