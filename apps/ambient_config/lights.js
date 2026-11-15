@@ -8,7 +8,7 @@
  * number of writes is what counts: NAD 0 reaches every light of a bus at once (car-tested, G20 BDC_G05), so a bus
  * gets one write for the colour most of its lights want, then single writes only for the lights that differ - a
  * whole-car colour is 2 writes instead of 19. The 6E answer does not prove a light took it: after a still colour the
- * buses are read back once and a light that missed it is written again. A still colour holds 60 s and is written
+ * buses are read back once and a light that missed it is written again. A still colour holds 150 s and is written
  * again every 40 s, a moving one holds 5 s. carColour() gives every light back to the car (NAD 0 off, read back).
  * flash(rgb, ms) lays a colour over everything for a moment; overlay(key, test, at) lays one over the lights test(light)
  * picks until overlay(key, null) - at(ms, on) with on flipping each frame, so a blink is as fast as the writes go (the turn signal's glow, an open door; the rest keep the scene, or the car's own
@@ -25,7 +25,9 @@ const EventEmitter = require('events');
 const { BDC, BUSES, parseStatus, writeFrame, releaseFrame } = require('./lin');
 const S = require('./scenes');
 
-const HOLD_S = 60, RENEW_MS = 40000, MOVE_HOLD_S = 5, MOVE_RENEW_MS = 3000;
+// a still colour holds 150 s, renewed every 40 s: a body module busy with other apps' requests for up to ~2 min,
+// or this app restarting, no longer gives the car's own colour back in between (it held 60 s until 2.7.0)
+const HOLD_S = 150, RENEW_MS = 40000, MOVE_HOLD_S = 5, MOVE_RENEW_MS = 3000;
 const PAUSE_MS = 10000, FAILS = 4, RELEASE_TRIES = 3;
 const ALL = 0;                 // NAD 0: every light of the bus
 const CHECK_MS = 1500;         // a still colour's read-back, this long after its last write

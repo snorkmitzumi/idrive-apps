@@ -102,7 +102,7 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     await sleep(100);
     const fw = writes.find((w) => w[0] === 0xe3 && w[2] === 2);
     ok(writes.length === 2 && writes.every((w) => w[2] !== 0), 'from all red to lower blue: only the two lower lights written, the red ones left as they are (' + writes.map((w) => w[2]).join() + ')');
-    ok(fw && fw[4] === 40 && fw[7] === 0xfe && fw[8] === 60, 'the footwell (lower): blue at 40 %, held 60 s');
+    ok(fw && fw[4] === 40 && fw[7] === 0xfe && fw[8] === 150, 'the footwell (lower): blue at 40 %, held 150 s');
     ok(lit[1][1].join() === '0,0,254' && lit[1][0].join() === '254,0,0', 'the footwell blue, the dash red');
     await sleep(300);
     ok(writes.length === 2, 'a still colour: read back, nothing more until the renewal');
