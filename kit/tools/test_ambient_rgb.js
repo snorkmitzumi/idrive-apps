@@ -13,7 +13,7 @@ const A = path.join(__dirname, '..', '..', 'apps', 'ambient_config');
 const L = require(path.join(A, 'lin'));
 const S = require(path.join(A, 'scenes'));
 const { Lights } = require(path.join(A, 'lights'));
-const { Control, DEFAULT_LOOK } = require(path.join(A, 'control'));
+const { Control, DEFAULT_LOOK, BLINK_MS } = require(path.join(A, 'control'));
 
 let fails = 0, checks = 0;
 const ok = (c, msg) => { checks++; if (!c) { fails++; console.log('FAIL ' + msg); } };
@@ -245,8 +245,10 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     c.turn('left');
     ok(fake.overs.turn && fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x19)) && !fake.overs.turn.test(pl(0x0c)) && !fake.overs.turn.test(pl(0x01)),
         'left turn signal: the driver\'s side lights (left-hand drive), not the footwells nor the other side');
-    const g = [true, false].map((on) => fake.overs.turn.at(0, on));
-    ok(g[0].rgb.join() === '0,230,60' && g[0].bright === 100 && g[1].bright === 0 && g[1].rgb.join() === '0,0,0', 'its blink: green fully on, then dark');
+    const g = [0, BLINK_MS / 2 + 10].map((ms) => fake.overs.turn.at(ms, true));
+    ok(g[0].rgb.join() === '0,230,60' && g[0].bright === 100 && g[1].bright === 0 && g[1].rgb.join() === '0,0,0', 'its blink: green fully on, then dark, on its own clock');
+    ok(BLINK_MS >= 500 && BLINK_MS <= 900 && fake.overs.turn.at(BLINK_MS + 5, false).bright === 100 && fake.overs.turn.at(BLINK_MS / 2 + 10, true).bright === 0,
+        'the blink keeps its own clock (' + BLINK_MS + ' ms), whatever the frame flag says');
     values.drive = 'rhd'; c.turn('left');
     ok(fake.overs.turn.test(pl(0x0c)) && !fake.overs.turn.test(pl(0x05)), 'right-hand drive: left is the passenger\'s side');
     values.drive = 'lhd'; c.turn('both');
@@ -255,7 +257,7 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     settings.set('hazardRed', true); c.signals();
     const hz = fake.overs.hazard;
     ok(hz && hz.test(pl(0x05)) && hz.test(pl(0x01)) && hz.test(pl(0x13)) && !fake.overs.turn, 'Hazard red on: every light, in place of the green glow');
-    const hp = [true, false].map((on) => hz.at(0, on));
+    const hp = [0, BLINK_MS / 2 + 10].map((ms) => hz.at(ms, true));
     ok(hp[0].rgb.join() === '255,0,0' && hp[0].bright === 100 && hp[1].rgb.join() === '255,0,0' && hp[1].bright > 0 && hp[1].bright < 50, 'its pulse: red bright, then dim');
     c.turn('left');
     ok(!fake.overs.hazard && fake.overs.turn && fake.overs.turn.test(pl(0x05)), 'a plain turn signal: no red, the green glow');
@@ -273,7 +275,7 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     ok(!fake.overs.turn, 'Turn signal glow off: none');
     c.doors(['passenger rear']);
     ok(fake.overs.doors && fake.overs.doors.test(pl(0x10)) && fake.overs.doors.test(pl(0x22)) && fake.overs.doors.test(pl(0x45)) && !fake.overs.doors.test(pl(0x0c))
-        && fake.overs.doors.at(0, true).rgb.join() === '255,0,0' && fake.overs.doors.at(0, false).bright === 0, 'the passenger rear door open: its lights blink red, the front door\'s not');
+        && fake.overs.doors.at(0, false).rgb.join() === '255,0,0' && fake.overs.doors.at(BLINK_MS / 2 + 10, true).bright === 0, 'the passenger rear door open: its lights blink red, the front door\'s not');
     c.away(true);
     ok(!fake.overs.doors, 'the car locked and left with a door open: no red, so the body module can sleep');
     c.away(false);
@@ -352,6 +354,30 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
         await sleep(100);
         ok(writes.some((w) => w[0] === 0xe3 && (w[2] === 3 || w[2] === 0) && w[8] === 150), 'a colour held 5 s: renewed before it runs out, now held 150 s (' + writes.map((w) => w[2] + '/' + w[8]).join() + ')');
         lt.stop();
+        await sleep(50);
+    }
+
+    // the blink on its own clock with the car's own colour on (no scene): it goes on, on then dark each half period,
+    // with nothing else to wake the writing
+    {
+        refuse = false; asleep = false; drop = null;
+        const { blink } = require(path.join(A, 'control'));
+        let t = 5e6;
+        const lb = new Lights({ diag, log, checkMs: 40, now: () => t });
+        await lb.find();
+        writes.length = 0;
+        lb.overlay('turn', (l) => l.name === 'Driver front door line', blink([0, 230, 60]));
+        const seen = [];
+        for (let k = 0; k < 6; k++) {
+            await sleep(80);
+            const w = writes.filter((x) => x[0] === 0xe3 && x[2] === 3).slice(-1)[0];
+            seen.push(w ? w[4] : null);
+            t += BLINK_MS / 2;
+        }
+        ok(seen.every((b, i) => b !== null && (i === 0 || b !== seen[i - 1])), 'a blink on its own clock: on, dark, on ... with nothing else written (' + seen.join() + ')');
+        ok(writes.length <= 12, 'one write a half period, not one a frame (' + writes.length + ')');
+        lb.overlay('turn', null);
+        lb.stop();
         await sleep(50);
     }
 

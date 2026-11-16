@@ -11,7 +11,7 @@
  * buses are read back once and a light that missed it is written again. A still colour holds 150 s and is written
  * again every 40 s, a moving one holds 5 s. carColour() gives every light back to the car (NAD 0 off, read back).
  * flash(rgb, ms) lays a colour over everything for a moment; overlay(key, test, at) lays one over the lights test(light)
- * picks until overlay(key, null) - at(ms, on) with on flipping each frame, so a blink is as fast as the writes go (the turn signal's glow, an open door; the rest keep the scene, or the car's own
+ * picks until overlay(key, null) - at(ms since it began, on) (on flips each frame; Control's blinks keep their own clock from ms) (the turn signal's glow, an open door; the rest keep the scene, or the car's own
  * colour); dim(f) scales the brightness (night). Writes that fail
  * in a row (the car switched off, the BDC asleep) pause the writing for 10 s. hold(key, true) stops the writing while
  * something else talks to the body controller (the strobe: the gateway takes one request at a time, and ours in
@@ -293,7 +293,8 @@ class Lights extends EventEmitter {
                     // all written: a still colour (or giving back) read back once a little later
                     if (this._checks > 0 && !this._checkAt) { this._checks--; this._checkAt = this.now() + (this.checkMs || CHECK_MS); }
                     // nothing due: a moving scene looks again soon, a still one when its next renewal is due
-                    const moving = S.moves(this.scene) || !!(this._flash && this.now() < this._flash.until);
+                    // (an overlay too: a blink on its own clock changes colour without a write that would wake this)
+                    const moving = S.moves(this.scene) || !!(this._flash && this.now() < this._flash.until) || !!(this._overs && this._overs.size);
                     const next = this._checkAt ? Math.max(20, this._checkAt - this.now()) : moving ? 40 : 1000;
                     if (this.scene || moving || this._checkAt) this._timer = setTimeout(() => this._kick(), next);
                     return;

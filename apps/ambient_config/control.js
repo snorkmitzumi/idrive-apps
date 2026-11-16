@@ -28,11 +28,14 @@ const FAVS = 6;
 const DEFAULT_LOOK = { kind: 'solid', upper: { rgb: [120, 60, 255], bright: 80 }, lower: { rgb: [120, 60, 255], bright: 80 }, speed: 2 };
 const NIGHT = 0.5;
 const GLOW = [0, 230, 60], RED = [255, 0, 0];
-/* On one frame, dark the next (the light on at no brightness: black, not the car's own colour). */
-const blink = (rgb) => (t, on) => (on ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 });
-/* Bright one frame, dim the next (every light one colour: one write a bus, so it keeps about the hazards' pace). */
-const PULSE_DIM = 15;
-const pulse = (rgb) => (t, on) => ({ rgb, bright: on ? 100 : PULSE_DIM });
+/* The blinks keep their own clock (not the car's indicator, nor the pace of the writes, which varies with how many
+ * lights a frame has): on for the first half of each BLINK_MS from when they began, about the car's 90 a minute
+ * (each frame flipping it until 2.7.2). A blink: on, then dark (the light on at no brightness: black, not the car's
+ * own colour); a pulse (the hazards' red on every light): bright, then dim. */
+const BLINK_MS = 660, PULSE_DIM = 15;
+const lit = (t) => ((t % BLINK_MS) + BLINK_MS) % BLINK_MS < BLINK_MS / 2;
+const blink = (rgb) => (t) => (lit(t) ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 });
+const pulse = (rgb) => (t) => ({ rgb, bright: lit(t) ? 100 : PULSE_DIM });
 const DOORS = ['driver front', 'driver rear', 'passenger front', 'passenger rear'];
 /* The lights by a side of the car (x across the cabin picture: the driver's side 0) and by a door. */
 const sideOf = (l) => (l.x <= 0.15 ? 'driver' : l.x >= 0.85 ? 'passenger' : null);
@@ -203,4 +206,4 @@ class Control {
     }
 }
 
-module.exports = { Control, DEFAULT_LOOK, FLASH_FILE, FAVS, NIGHT, DOORS, GLOW, RED, sideOf, doorOf };
+module.exports = { Control, DEFAULT_LOOK, FLASH_FILE, FAVS, NIGHT, DOORS, GLOW, RED, BLINK_MS, blink, pulse, sideOf, doorOf };
