@@ -28,6 +28,10 @@ const S = require('./scenes');
 // a still colour holds 150 s, renewed every 40 s: a body module busy with other apps' requests for up to ~2 min,
 // or this app restarting, no longer gives the car's own colour back in between (it held 60 s until 2.7.0)
 const HOLD_S = 150, RENEW_MS = 40000, MOVE_HOLD_S = 5, MOVE_RENEW_MS = 3000;
+// a colour is renewed this long before its own hold runs out at the latest (one written with the short hold while
+// something moved stays renewed until written again with the long one: else, once the turn signal stopped, the
+// lights it did not blink went back to the car's own colour for up to ~35 s, before 2.7.1)
+const RENEW_BEFORE_MS = 2000;
 const PAUSE_MS = 10000, FAILS = 4, RELEASE_TRIES = 3;
 const ALL = 0;                 // NAD 0: every light of the bus
 const CHECK_MS = 1500;         // a still colour's read-back, this long after its last write
@@ -46,7 +50,7 @@ class Lights extends EventEmitter {
         this.scene = null; this.t0 = 0;
         this._flash = null;
         this._dim = 1;
-        this._last = new Map();        // light -> { rgb, bright, at }
+        this._last = new Map();        // light -> { rgb, bright, at, hold (s) }
         this._release = [];            // [{ bus } (every light of it) | { light }] to give back to the car
         this._sent = new Map();        // light -> the rgb last written to it (the read-back after giving back)
         this._checkAt = 0; this._checks = 0; this._checkOff = false;
@@ -173,7 +177,11 @@ class Lights extends EventEmitter {
         }
         const now = this.now(), flashing = !!(this._flash && now < this._flash.until + 50), over = !!(this._overs && this._overs.size);
         if (!this.scene && !flashing && !over) return null;
-        const moving = S.moves(this.scene) || flashing || over, renew = moving ? MOVE_RENEW_MS : RENEW_MS, hold = moving ? MOVE_HOLD_S : HOLD_S;
+        // the short hold only where the colour changes: a moving scene or a flash (every light), an overlay (its lights:
+        // the turn signal's door lines blink, the others keep their still colour and its long hold)
+        const sceneMoves = S.moves(this.scene) || flashing;
+        const overlaid = (l) => over && Array.from(this._overs.values()).some((o) => o.test(l));
+        const moves = (lights) => sceneMoves || lights.some(overlaid);
         for (let tries = 0; tries < 2; tries++) {
             if (!this._frame || !this._frame.todo.length) {
                 if (this._frame && this._frame.wrote) this._frames.push(now);
@@ -182,10 +190,14 @@ class Lights extends EventEmitter {
             }
             while (this._frame.todo.length) {
                 const it = this._frame.todo.shift();
-                const due = it.need.some((l) => { const had = this._last.get(l); return !same(it.want, had) || now - had.at > renew; });
+                const moving = moves(it.lights), renew = moving ? MOVE_RENEW_MS : RENEW_MS, hold = moving ? MOVE_HOLD_S : HOLD_S;
+                const due = it.need.some((l) => {
+                    const had = this._last.get(l);
+                    return !same(it.want, had) || now - had.at > Math.min(renew, (had.hold || HOLD_S) * 1000 - RENEW_BEFORE_MS);
+                });
                 if (!due) continue;
                 this._frame.wrote = true;
-                return { lights: it.lights, want: it.want, frame: writeFrame(it.lights[0].bus, it.nad, it.want.rgb, it.want.bright, hold) };
+                return { lights: it.lights, want: it.want, hold, frame: writeFrame(it.lights[0].bus, it.nad, it.want.rgb, it.want.bright, hold) };
             }
         }
         return null;
@@ -293,7 +305,7 @@ class Lights extends EventEmitter {
                     this._fails = 0; this.writes++; this._times.push(this.now());
                     w.lights.forEach((l) => {
                         if (w.off) { this._last.delete(l); return; }
-                        this._last.set(l, { rgb: w.want.rgb, bright: w.want.bright, at: this.now() });
+                        this._last.set(l, { rgb: w.want.rgb, bright: w.want.bright, at: this.now(), hold: w.hold });
                         this._sent.set(l, w.want.rgb);
                     });
                     if (this.error) { this.error = null; this.emit('change'); }

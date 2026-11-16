@@ -30,7 +30,10 @@ const IDLE_AFTER_MOVE = 3 * 60000, IDLE_AFTER_USER = 10 * 60000, OPENED_GAP = 50
 const FAST = 500, SPLIT = 1000, BATTERY = 2500, SLOW = 30000, HEALTH = 30 * 60000, BACKOFF = 5 * 60000, LINK_RETRY = 2000;
 const BARO_MS = 60000;
 // a value this old is not shown any more (the battery panels show the reason instead)
-const KEEP = { b48: 15000, v: 15000, a: 15000, soc: 10 * 60000, temp: 2 * 60000, soh: Infinity };
+// (the 12 V voltage and current a minute: one missed round no longer blanks them; 15 s before 2.1.0)
+const KEEP = { b48: 15000, v: 60000, a: 60000, soc: 10 * 60000, temp: 2 * 60000, soh: Infinity };
+// the 12 V voltage and current, the 12 V panel's main values, asked again after 30 s (not 5 min) once they failed 3 times
+const BACKOFF_12 = 30000, RETRY_SOON = { v12: BACKOFF_12, i12: BACKOFF_12 };
 
 class Reads {
     constructor(o) {
@@ -74,7 +77,7 @@ class Reads {
             { key: 'b48', ecus: ecusOf(c.b48), every: () => (s.get('battery48') === 'off' || !c.b48.length ? null : this.bat.has48 === false && s.get('battery48') === 'auto' ? BACKOFF : BATTERY),
                 read: () => this.read48() },
             { key: 'v12', ecus: ecusOf(c.v12), every: () => BATTERY, read: () => this.readV12(keep12) },
-            { key: 'i12', ecus: ecusOf(c.i12), every: () => BATTERY, read: async () => keep12('a', await r.value('i12', c.i12)) },
+            { key: 'i12', ecus: ecusOf(c.i12), every: () => BATTERY, read: async () => { const a = await r.value('i12', c.i12); this.logRaws('i12', c.i12); return keep12('a', a); } },
             { key: 'soc40', ecus: ecusOf(c.soc40), every: () => SLOW, read: async () => { const f = await this.readFields('soc40', c.soc40); return !!f && keep12('soc', f.soc); } },
             { key: 'soc12', ecus: ecusOf(c.soc12), every: () => ((this.fails.soc40 || 0) >= 3 ? SLOW : null), read: async () => keep12('soc', await r.value('soc12', c.soc12)) },
             { key: 'boostTarget', ecus: ecusOf(c.boostTarget, c.baro), every: () => (c.boostTarget.length ? SLOW : null),
@@ -123,7 +126,7 @@ class Reads {
         if (!this.active() || !this.ui.isVisible('MAIN') || !this.inUse()) return;
         this.timer = setTimeout(() => { this.timer = null; this.round(); }, ms);
     }
-    every(it) { const e = it.every(); return e === null ? null : (this.fails[it.key] || 0) >= 3 ? Math.max(e, BACKOFF) : e; }
+    every(it) { const e = it.every(); return e === null ? null : (this.fails[it.key] || 0) >= 3 ? Math.max(e, RETRY_SOON[it.key] || BACKOFF) : e; }
     nextDelay() {
         if (!this.link.available) return LINK_RETRY;
         const now = this.now();
@@ -150,7 +153,7 @@ class Reads {
                     let ok = false;
                     try { ok = await it.read(); } catch (err) { this.log.warn(it.key + ': ' + err); }
                     this.fails[it.key] = ok ? 0 : (this.fails[it.key] || 0) + 1;
-                    if (this.fails[it.key] === 3) this.log.warn(it.key + ': no answer 3 times, asked every 5 min');
+                    if (this.fails[it.key] === 3) this.log.warn(it.key + ': no answer 3 times, asked every ' + ((RETRY_SOON[it.key] || BACKOFF) / 1000) + ' s');
                 }
             }
         } catch (err) { this.log.warn('reads: ' + err); }
@@ -203,8 +206,25 @@ class Reads {
     /** The 12 V voltage: the candidate that answered is asked first, remembered across restarts (eDrive's v12Pick). */
     async readV12(keep12) {
         const v = await this.reader.value('v12', this.c.v12);
+        this.logRaws('v12', this.c.v12);
         if (v !== null && this.reader.pick.v12 !== this.st.v12Pick) { this.st.v12Pick = this.reader.pick.v12; this.save(); }
         return keep12('v', v);
+    }
+    /**
+     * Each candidate's reply (or why there was none) to the log, once per candidate and outcome: which unit gives the
+     * 12 V voltage and current differs from car to car, and a car's log then says which answered and with what.
+     */
+    logRaws(name, list) {
+        (list || []).forEach((c) => {
+            const raw = this.reader.raws && this.reader.raws[this.reader.key(c)];
+            if (!raw) return;
+            const what = raw.bytes ? 'reply ' + raw.bytes : 'none' + (raw.why ? ' (' + raw.why + ')' : '');
+            const seen = this.rawsSeen || (this.rawsSeen = {}), k = name + ' ' + this.reader.key(c);
+            const shape = raw.bytes ? 'reply:' + raw.bytes.split(' ').length : what;
+            if (seen[k] === shape) return;
+            seen[k] = shape;
+            this.log.info(name + ' 0x' + (c.ecu || 0).toString(16) + ' ' + (c.did || 'OBD ' + c.obd) + ': ' + what);
+        });
     }
     save() {
         this.st.has48 = this.bat.has48;

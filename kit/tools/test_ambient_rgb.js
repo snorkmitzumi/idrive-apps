@@ -326,6 +326,35 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
         await sleep(50);
     }
 
+    // a turn signal over a still look: only the door line takes the short hold, the other lights keep the long one; a
+    // light last written with the short hold is renewed before it runs out (else, the signal off, the car's own
+    // colour came back on it for up to ~35 s)
+    {
+        refuse = false; asleep = false; drop = null;
+        let t = 1e6;
+        const lt = new Lights({ diag, log, checkMs: 40, now: () => t });
+        await lt.find();
+        lt.show(look('solid', { upper: { rgb: [255, 0, 0], bright: 80 }, lower: { rgb: [255, 0, 0], bright: 80 } }));
+        await sleep(150);
+        writes.length = 0;
+        lt.overlay('turn', (l) => l.name === 'Driver front door line', (ms, on) => (on ? { rgb: [0, 230, 60], bright: 100 } : { rgb: [0, 0, 0], bright: 0 }));
+        await sleep(150);
+        ok(writes.length > 0 && writes.every((w) => w[0] === 0xe3 && w[2] === 3 && w[8] === 5), 'turn glow: only the door line written, held 5 s (' + writes.map((w) => w[2] + '/' + w[8]).join() + ')');
+        lt.overlay('turn', null);
+        await sleep(100);
+        const back = writes.slice(-1)[0];
+        ok(back && back[0] === 0xe3 && (back[2] === 3 || back[2] === 0) && back[8] === 150 && lit[1][2].join() === '254,0,0', 'turn off: the door line back to the look, held 150 s');
+        // force a short-held light: as if the last write before the look was still came while something moved
+        const l3 = lt.lights.find((l) => l.name === 'Driver front door line');
+        lt._last.set(l3, Object.assign({}, lt._last.get(l3), { hold: 5 }));
+        writes.length = 0;
+        t += 3500; lt._frame = null; lt._kick();
+        await sleep(100);
+        ok(writes.some((w) => w[0] === 0xe3 && (w[2] === 3 || w[2] === 0) && w[8] === 150), 'a colour held 5 s: renewed before it runs out, now held 150 s (' + writes.map((w) => w[2] + '/' + w[8]).join() + ')');
+        lt.stop();
+        await sleep(50);
+    }
+
     fs.unlinkSync(process.env.MGU_AMBIENT_FLASH); fs.rmdirSync(TMP);
     console.log('ambient rgb: ' + checks + ' checks, ' + fails + ' failed');
     process.exit(fails ? 1 : 0);

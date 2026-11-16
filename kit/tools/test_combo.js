@@ -319,6 +319,34 @@ const checks = [
         assert.strictEqual(r.reads.why('b12'), 'no reply');
         r.done();
     }],
+    ['2.1: the 12 V voltage that failed 3 times is asked again after 30 s, not 5 min', async () => {
+        const r = await rig({ driving: true, dead12: true });
+        r.start(); await r.run(2 * 60000);
+        const n = r.asked.filter((q) => q.key === '18:F442').length;
+        assert(n >= 4, 'the engine unit\'s F442 asked only ' + n + 'x in 2 min');
+        assert(r.logged.some((m) => /^v12 0x12 F442: none/.test(m)), 'no candidate logged: ' + r.logged.filter((m) => /^v12/.test(m)).join(' | '));
+        r.done();
+    }],
+    ['2.1: each 12 V candidate\'s reply logged once; the voltage kept a minute', async () => {
+        const r = await rig({ driving: true });
+        r.start(); await r.run(30000);
+        const v = r.logged.filter((m) => /^v12 0x12 F442: reply/.test(m));
+        assert.strictEqual(v.length, 1, 'logged ' + v.length + 'x: ' + v.join(' | '));
+        const R = r.reads;
+        R.bat.b12T.v = R.now() - 40000;
+        assert(G_isNum(R.fresh().b12.v), 'a voltage 40 s old not shown');
+        R.bat.b12T.v = R.now() - 70000;
+        assert.strictEqual(R.fresh().b12.v, null, 'a voltage 70 s old still shown');
+        r.done();
+    }],
+    ['2.1: the 12 V panel shows the power into the battery in W, as the 48 V one in kW', async () => {
+        const t = await page(car());
+        assert(t.some((x) => /14\.10 V\s+·\s+\+23 W/.test(x)), 'no 12 V power: ' + t.filter((x) => / V /.test(x)).join(' | '));
+        assert(t.some((x) => /\+0\.50 kW/.test(x)), '48 V kW gone');
+        const d = car(); d.b12.a = null;
+        const t2 = await page(d);
+        assert(t2.some((x) => /14\.10 V\s+·\s+--/.test(x)), 'no current: the power shows --');
+    }],
     ['final: all-FF of a signed field is a real value (-0.1 A), not "no value"', async () => {
         const B = appModule('batteries'), F = SPEC.config.battery.b48[0].fields;
         const b = B.b48(B.fields(aa56({ v: 4720, a: -1, temp: 48, soc: 66, soh: 96 }), F));
