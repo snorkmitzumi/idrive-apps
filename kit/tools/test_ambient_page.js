@@ -73,6 +73,13 @@ const checks = [
             assert(tx.length > 3 && !tx.some((x) => /undefined|NaN/.test(x)), 'tab ' + i + ': ' + tx.join(' | '));
         }
         assert(page.wants() === false || page.wants() === true);
+        // a finger on the colour ring (Colour tab): the colour follows it, the gesture is the page's; off the ring: not
+        page.select(0);
+        assert.strictEqual(page.touch(1, 290 + 160, 288), true, 'a finger down on the ring taken');
+        assert.strictEqual(page.touch(3, 290, 288 + 160), true, 'its lift taken');
+        const hue = (rgb) => require(path.join(APP, 'scenes')).hueOf(rgb);
+        assert(Math.abs(hue(parts.control.look().upper.rgb) - 180) < 20, 'the colour where the finger let go: ' + JSON.stringify(parts.control.look().upper));
+        assert.strictEqual(page.touch(1, 20, 20), false, 'a finger off the ring and dial: the kit has it');
         page.original();
         assert.strictEqual(parts.control.on(), false, 'Original colour: the car\'s own');
         assert(parts.owner && parts.owner.peer === null, 'the only one of ours: it has the lights');

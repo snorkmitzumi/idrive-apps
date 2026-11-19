@@ -23,7 +23,9 @@ mgu.run({
             G.frame(cv, t, page.tabs(), page.page, []);
             await ui.image('MAIN_GFX', cv);
         }
-        if (ctx.onTap) ctx.onTap((x, y) => page.tap(x, y));
+        // a finger dragged on the colour ring or the brightness dial (kit's onTouch); a tap where there is none
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => page.touch(phase, x, y));
+        if (ctx.onTap) ctx.onTap((x, y) => page.tap(x, y));          // (no tap follows a gesture onTouch took)
         ctx.onTab((i) => { page.select(i); return render(); });
         // the frame's place changed (the GPU renderer came after the first frame, the layout setting): draw it again,
         // as the tabs draw only when they move or changed

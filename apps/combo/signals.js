@@ -47,6 +47,13 @@ function entries(v, key, out) {
 }
 
 function watches(values, engine, sc, log) {
+    // the car locked and left (its own state: parked or standby, nobody in it, 1-3) or in use again
+    const leftFrom = (v) => {
+        const n = conditionOf(v && v.statusConditionVehicle);
+        if (n === undefined || L.left === (n <= 3)) return;
+        L.left = n <= 3;
+        log.info(L.left ? 'the car is locked and left: no reads, so it can sleep' : 'the car is in use again');
+    };
     const L = values.live, put = (k, v) => values.put(k, v), seen = {};
     // the first raw values of the doubtful fields go to the log, as M Vitals' logRaw()
     const logRaw = (name, raw) => {
@@ -104,13 +111,10 @@ function watches(values, engine, sc, log) {
         }],
         // the car locked and left (its own state: parked or standby, nobody in it, 1-3): nothing is read, so it can sleep
         // (eDrive 2.9.1); a state this table doesn't know (15: no value) changes nothing
+        // (from either of the car's two copies: some cars send only the one without a CRC, Ambient config 2.6.2)
         ['de.bmw.infrastructure.VehicleCondition', {
-            VehicleCondition: (v) => {
-                const n = conditionOf(v && v.statusConditionVehicle);
-                if (n === undefined || L.left === (n <= 3)) return;
-                L.left = n <= 3;
-                log.info(L.left ? 'the car is locked and left: no reads, so it can sleep' : 'the car is in use again');
-            },
+            VehicleCondition: (v) => leftFrom(v),
+            vehicleConditionNoCrc: (v) => leftFrom(v),
         }],
         // the cluster's eDRIVE needle (eDrive's fast power on plug-in hybrids): only logged once, to see whether a mild
         // hybrid sends it at all - if it does, the 48 V power could follow it as fast (apps/edrive/fastkw.js)

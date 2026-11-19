@@ -127,7 +127,7 @@ const checks = [
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
-            'carKind', 'follow', 'welcome', 'sportPulse', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'hazardRed', 'drive', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'carKind', 'follow', 'welcome', 'sportPulse', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
@@ -729,14 +729,14 @@ checks.push(
     ['2.0 #6 build: every "include" file exists, and the included ambient service has no strobe on board', async () => {
         Object.keys(SPEC.include).forEach((a) => SPEC.include[a].forEach((f) => assert(fs.existsSync(path.join(ROOT, 'apps', a, f)), a + '/' + f)));
         const src = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', 'ambient_page.js'), 'utf8');
-        assert(!/^const .*require\('\.\/strobe'\)/m.test(src), 'strobe.js required at the top: Combo leaves it out');
+        assert(!/^const .*require\('\.\/(strobe|lever)'\)/m.test(src), 'strobe.js or lever.js required at the top: Combo leaves them out');
         // every module the included files require is included too
         const have = new Set(SPEC.include.ambient_config.map((f) => './' + f.replace(/\.js$/, '')));
         SPEC.include.ambient_config.forEach((f) => {
             const code = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', f), 'utf8');
             (code.match(/^(?!\s*\/\/).*require\('\.\/[a-z_]+'\)/gm) || []).forEach((line) => {
                 const m = line.match(/require\('(\.\/[a-z_]+)'\)/)[1];
-                if (m === './strobe') return;
+                if (m === './strobe' || m === './lever') return;          // (only with the strobe, which Combo leaves out)
                 assert(have.has(m), f + ' needs ' + m + ', which "include" leaves out');
             });
         });

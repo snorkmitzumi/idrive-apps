@@ -158,7 +158,9 @@ mgu.run({
         ctx.onTab((i) => pick(i));
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
-        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb ? amb.tap(x, y) : null));
+        // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb ? amb.touch(phase, x, y) : false));
+        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
 
         function drawDriving(cv, t) {
             const d = data();
