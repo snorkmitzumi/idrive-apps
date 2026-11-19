@@ -8,7 +8,7 @@
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
  *   Ambient, Animations, Modes, Favourites
  *                Ambient config's tabs (its Colour, Animations, Driving modes and Favourites; not the Strobe), the
- *                same code, taken from apps/ambient_config at build time (app.json "include", ambient_page.js)
+ *                same code, taken from shared/ambient_config at build time (app.json "include", ambient_page.js)
  *
  * The ambient light runs from the platform's start (app.json "autostart"), as Ambient config does: the look and the
  * driving modes work with the app closed. With Ambient config installed too, the one started first drives the

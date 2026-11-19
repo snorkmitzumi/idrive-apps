@@ -23,6 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 KIT = os.path.join(ROOT, 'kit')
 APPS = os.path.join(ROOT, 'apps')
+# code apps take with app.json "include" without being apps of their own (the Store lists only apps/*)
+SHARED = os.path.join(ROOT, 'shared')
 DIST = os.path.join(ROOT, 'dist')
 SDK = os.path.join(ROOT, 'oap-sdk')
 NS = uuid.UUID('6b1d3a52-8f0e-4c4b-9a77-0d0c4d4e5f10')
@@ -653,10 +655,12 @@ def build(app_id, language='en', preview_only=False):
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', f))
             print('  %s (committed)' % f)
     # app.json "include": { "<other app>": ["file.js", ...] } - another app's modules, beside this app's own (Combo
-    # hosts Ambient config's tabs from apps/ambient_config, one copy of that code); a name of the app's own wins
+    # hosts Ambient config's tabs from shared/ambient_config, one copy of that code), from apps/<other> or
+    # shared/<other>; a name of the app's own wins
     for other, names in (spec.get('include') or {}).items():
+        base = os.path.join(APPS, other) if os.path.isdir(os.path.join(APPS, other)) else os.path.join(SHARED, other)
         for name in names:
-            src_file = os.path.join(APPS, other, name)
+            src_file = os.path.join(base, name)
             if not os.path.isfile(src_file):
                 raise SystemExit('%s: "include" names %s/%s, which does not exist' % (app_id, other, name))
             if os.path.exists(os.path.join(adir, name)):

@@ -30,7 +30,7 @@ class FakeLink extends EventEmitter {
         return this.answer(ecu, sid, data);
     }
 }
-// Ambient config's tabs (apps/ambient_config/ambient_page.js, taken at build time): a stand-in that records what the
+// Ambient config's tabs (shared/ambient_config/ambient_page.js, taken at build time): a stand-in that records what the
 // app asks of it; test_ambient_*.js check the real one
 const fakeAmb = {
     calls: [], page: 0,
@@ -727,13 +727,13 @@ checks.push(
         assert(JSON.parse(fs.readFileSync(path.join(dir, 'perf.json'), 'utf8')).drag.best['0-100'], 'saved');
     }],
     ['2.0 #6 build: every "include" file exists, and the included ambient service has no strobe on board', async () => {
-        Object.keys(SPEC.include).forEach((a) => SPEC.include[a].forEach((f) => assert(fs.existsSync(path.join(ROOT, 'apps', a, f)), a + '/' + f)));
-        const src = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', 'ambient_page.js'), 'utf8');
+        Object.keys(SPEC.include).forEach((a) => SPEC.include[a].forEach((f) => assert(fs.existsSync(path.join(ROOT, 'shared', a, f)), a + '/' + f)));
+        const src = fs.readFileSync(path.join(ROOT, 'shared', 'ambient_config', 'ambient_page.js'), 'utf8');
         assert(!/^const .*require\('\.\/(strobe|lever)'\)/m.test(src), 'strobe.js or lever.js required at the top: Combo leaves them out');
         // every module the included files require is included too
         const have = new Set(SPEC.include.ambient_config.map((f) => './' + f.replace(/\.js$/, '')));
         SPEC.include.ambient_config.forEach((f) => {
-            const code = fs.readFileSync(path.join(ROOT, 'apps', 'ambient_config', f), 'utf8');
+            const code = fs.readFileSync(path.join(ROOT, 'shared', 'ambient_config', f), 'utf8');
             (code.match(/^(?!\s*\/\/).*require\('\.\/[a-z_]+'\)/gm) || []).forEach((line) => {
                 const m = line.match(/require\('(\.\/[a-z_]+)'\)/)[1];
                 if (m === './strobe' || m === './lever') return;          // (only with the strobe, which Combo leaves out)

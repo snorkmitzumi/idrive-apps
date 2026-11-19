@@ -1,5 +1,5 @@
 'use strict';
-// Ambient config's service and tabs as a host gets them (apps/ambient_config/ambient_page.js: Ambient config and Combo),
+// Ambient config's service and tabs as a host gets them (shared/ambient_config/ambient_page.js: Ambient config and Combo),
 // and owner.js (one of our ambient apps at a time on the lights). No car: the diagnostic link and the signals stubbed.
 //   node kit/tools/test_ambient_page.js
 
@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const Module = require('module');
 
-const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'apps', 'ambient_config');
+const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'shared', 'ambient_config');
 const OWNERS = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ambient-owner-'));
 process.env.MGU_AMBIENT_OWNER_DIR = OWNERS;
 process.env.MGU_AMBIENT_FLASH = path.join(OWNERS, 'flash.json');

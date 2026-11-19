@@ -1,5 +1,5 @@
 'use strict';
-// Ambient config's any colour (apps/ambient_config: lin.js, scenes.js, lights.js, control.js): the body controller's
+// Ambient config's any colour (shared/ambient_config: lin.js, scenes.js, lights.js, control.js): the body controller's
 // status read and writes, the animations, one write at a time with the lights renewed and given back, the
 // driving modes' looks, favourites and the flash file.
 //   node kit/tools/test_ambient_rgb.js
@@ -9,7 +9,7 @@ const path = require('path');
 const EventEmitter = require('events');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ambient-rgb-'));
 process.env.MGU_AMBIENT_FLASH = path.join(TMP, 'flash.json');
-const A = path.join(__dirname, '..', '..', 'apps', 'ambient_config');
+const A = path.join(__dirname, '..', '..', 'shared', 'ambient_config');
 const L = require(path.join(A, 'lin'));
 const S = require(path.join(A, 'scenes'));
 const { Lights } = require(path.join(A, 'lights'));

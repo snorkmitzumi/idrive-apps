@@ -1,5 +1,5 @@
 'use strict';
-// Ambient config (apps/ambient_config/others.js): IterioDev's Comfort tool counts as writing the lights only while its
+// Ambient config (shared/ambient_config/others.js): IterioDev's Comfort tool counts as writing the lights only while its
 // control socket is there (a socket, not any file) AND its own ambient colour or drive-mode colours are on in its
 // data.json (unreadable settings: stand aside, as before). Comfort for the Seats app alone leaves the lights to us.
 // Said once each way in the log, with a change event each time.
@@ -13,7 +13,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'others-'));
 const sock = path.join(dir, 'ctl.sock'), data = path.join(dir, 'data.json');
 process.env.MGU_AMBIENT_COMFORT = sock;
 process.env.MGU_AMBIENT_COMFORT_DATA = data;
-const { Others } = require(path.join(__dirname, '..', '..', 'apps', 'ambient_config', 'others'));
+const { Others } = require(path.join(__dirname, '..', '..', 'shared', 'ambient_config', 'others'));
 
 let fails = 0, checks = 0;
 const ok = (c, msg) => { checks++; if (!c) { fails++; console.log('FAIL ' + msg); } };

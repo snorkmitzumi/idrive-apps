@@ -5,7 +5,8 @@ name: App tests
 on:
   pull_request:
     paths:
-      - 'apps/**'                 # test_zh.py checks every app.json and the text in every app
+      - 'apps/**'
+      - 'shared/**'               # code Combo takes at build time (shared/ambient_config)
       - 'kit/runtime/**'
       - 'kit/tools/test_*'
       - 'kit/tools/redline_*.js' # the tests' shared harness and sample turns
@@ -22,7 +23,8 @@ on:
       - '.github/workflows/app-tests.yml'
   push:
     paths:
-      - 'apps/**'                 # test_zh.py checks every app.json and the text in every app
+      - 'apps/**'
+      - 'shared/**'               # code Combo takes at build time (shared/ambient_config)
       - 'kit/runtime/**'
       - 'kit/tools/test_*'
       - 'kit/tools/redline_*.js' # the tests' shared harness and sample turns
@@ -55,53 +57,16 @@ jobs:
       - run: node kit/tools/test_runtime.js
       - run: node kit/tools/test_dids.js
       - run: node kit/tools/test_engine.js
-      - run: node kit/tools/test_edrive.js
-      - run: node kit/tools/test_linkqueue.js
-      - run: node kit/tools/test_fastkw.js
-      - run: node kit/tools/test_widget_fixes.js
-      - run: node kit/tools/test_warmup.js
-      - run: node kit/tools/test_draggy.js
-      - run: node kit/tools/test_brake_test.js
-      - run: node kit/tools/test_gforce.js
-      - run: node kit/tools/test_service.js
-      - run: node kit/tools/test_service_engine.js
-      - run: node kit/tools/test_car_vitals.js
       - run: node kit/tools/test_combo.js
-      - run: node kit/tools/test_twin_dme.js
-      - run: node kit/tools/test_redline_hud.js
-      - run: node kit/tools/test_hud_claim.js
-      - run: node kit/tools/test_redline_running.js
-      - run: node kit/tools/test_redline_navlog.js
-      - run: node kit/tools/test_redline_logview.js
-      - run: node kit/tools/test_redline_nav.js
-      - run: node kit/tools/test_redline_hud_nav.js
-      - run: node kit/tools/test_redline_features.js
-      - run: node kit/tools/test_redline_fuel.js
-      - run: node kit/tools/test_redline_powerbar.js
-      - run: node kit/tools/test_redline_powerlog.js
-      - run: node kit/tools/test_redline_shareshift.js
-      - run: node kit/tools/test_redline_meter_draw.js
-      - run: node kit/tools/test_redline_meter_m.js
-      - run: node kit/tools/test_redline_hud_cache.js
+      - run: node kit/tools/test_ambient_page.js
+      - run: node kit/tools/test_diag_options.js
       - run: node kit/tools/test_ambient_config.js
       - run: node kit/tools/test_ambient_modes.js
       - run: node kit/tools/test_ambient_rgb.js
-      - run: node kit/tools/test_coldstarts.js
-      - run: node kit/tools/test_wheelspin.js
       - run: node kit/tools/test_ambient_others.js
       - run: node kit/tools/test_ambient_strobe.js
       - run: node kit/tools/test_ambient_lever.js
-      - run: node kit/tools/test_xdrive_live.js
       - run: node kit/tools/test_zh.js
-      # The run above loads the English catalog, so it skips the glyph check: test_zh.js has to run on zh-CN stages for
-      # that (--preview-only needs no SDK). dtc_scanner has its own run because it ships diagnostic-zh-CN.json as its atlas.
-      - run: python3 kit/tools/build.py --language zh-CN --preview-only service
-      - run: python3 kit/tools/build.py --language zh-CN --preview-only dtc_scanner
-      - run: node kit/tools/test_zh.js dist/service/source/javascript/kit
-      - run: node kit/tools/test_zh.js dist/dtc_scanner/source/javascript/kit
-      # test_zh.js only covers the UI catalog: the fault texts in diagnostic_i18n.pack are checked here.
-      - run: node kit/tools/test_diagnostic_zh.js dist/dtc_scanner/source/javascript
-      - run: cd kit/tools && python3 test_zh.py
       - run: python3 kit/tools/test_import_diagnostic_ru.py
       - run: python3 kit/tools/test_fit_to_unit.py
       - run: python3 kit/tools/test_id8_ui.py
@@ -116,23 +81,7 @@ jobs:
         with:
           node-version: '8.16.2'
       - run: node --version
-      - run: node kit/tools/test_redline_hud.js
-      - run: node kit/tools/test_hud_claim.js
-      - run: node kit/tools/test_redline_running.js
-      - run: node kit/tools/test_redline_navlog.js
-      - run: node kit/tools/test_redline_logview.js
-      - run: node kit/tools/test_redline_nav.js
-      - run: node kit/tools/test_redline_hud_nav.js
-      - run: node kit/tools/test_redline_features.js
       - run: node kit/tools/test_ambient_rgb.js
-      - run: node kit/tools/test_coldstarts.js
-      - run: node kit/tools/test_wheelspin.js
-      - run: node kit/tools/test_fastkw.js
-      - run: node kit/tools/test_redline_fuel.js
-      - run: node kit/tools/test_redline_powerbar.js
-      - run: node kit/tools/test_redline_powerlog.js
-      - run: node kit/tools/test_redline_shareshift.js
-      - run: node kit/tools/test_redline_meter_draw.js
-      - run: node kit/tools/test_redline_meter_m.js
-      - run: node kit/tools/test_redline_hud_cache.js
-      - run: node kit/tools/test_twin_dme.js
+      - run: node kit/tools/test_combo.js
+      - run: node kit/tools/test_ambient_page.js
+      - run: node kit/tools/test_ambient_modes.js

@@ -721,10 +721,10 @@ function watch() {
         clearTimeout(t);
         t = setTimeout(() => { appLog('info', 'emu: ' + path.relative(ROOT, path.join(dir, String(f || ''))) + ' changed'); build(); }, 150);
     };
-    // (and the apps whose modules app.json "include" takes, e.g. Combo's apps/ambient_config)
+    // (and the apps whose modules app.json "include" takes, e.g. Combo's shared/ambient_config)
     let inc = [];
     try { inc = Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', appId, 'app.json'), 'utf8')).include || {}); } catch (e) { inc = []; }
-    watchers = [path.join(ROOT, 'apps', appId), path.join(ROOT, 'kit', 'runtime')].concat(inc.map((a) => path.join(ROOT, 'apps', a))).map((d) => {
+    watchers = [path.join(ROOT, 'apps', appId), path.join(ROOT, 'kit', 'runtime')].concat(inc.map((a) => (fs.existsSync(path.join(ROOT, 'apps', a)) ? path.join(ROOT, 'apps', a) : path.join(ROOT, 'shared', a)))).map((d) => {
         let w;
         try { w = fs.watch(d, { recursive: true }, kick(d)); } catch (e) { w = fs.watch(d, kick(d)); }   // (recursive: macOS, Windows, Linux on Node 20+)
         w.on('error', (e) => appLog('warn', 'emu: watching ' + path.relative(ROOT, d) + ': ' + e.message));
