@@ -1,11 +1,11 @@
 'use strict';
-// Ambient config's high beam strobe and light show (apps/ambient_config/strobe.js) against a fake car: FLM01 headlight
+// Ambient config's high beam strobe and light show (shared/ambient_config/strobe.js) against a fake car: FLM01 headlight
 // units (0x43 / 0x44, as on a car: 22 D667, 31 01 3000), FLE ones (high beam learned), and the body controller of each
 // kind (BDC: 22 4500 / 2F 4501, BDC_G05: 22 E3B9 / 2F E3B5). Which one it is (reads only), the exact requests, the first
 // flash checked, the session kept with 3E 00, and the lamps handed back however it ends.
 //   node kit/tools/test_ambient_strobe.js
 const path = require('path');
-const { Strobe, MAX_MS, gateChecks, gateWhy } = require(path.join(__dirname, '..', '..', 'apps', 'ambient_config', 'strobe'));
+const { Strobe, MAX_MS, gateChecks, gateWhy } = require(path.join(__dirname, '..', '..', 'shared', 'ambient_config', 'strobe'));
 
 let fails = 0, checks = 0;
 const ok = (c, msg) => { checks++; if (!c) { fails++; console.log('FAIL ' + msg); } };

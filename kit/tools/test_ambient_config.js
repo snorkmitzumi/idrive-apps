@@ -1,10 +1,10 @@
 'use strict';
-// Ambient config (apps/ambient_config/ambient.js): the colour by driving mode, the driver's own colour back on
+// Ambient config (shared/ambient_config/ambient.js): the colour by driving mode, the driver's own colour back on
 // "Leave as is", a colour chosen in BMW's menu kept as the driver's own, one write at a time with a gap, nothing
 // written for a colour the car shows already, and the set struct naming only the slot.
 //   node kit/tools/test_ambient_config.js
 const path = require('path');
-const { Ambient, modeOf, slotOf, request } = require(path.join(__dirname, '..', '..', 'apps', 'ambient_config', 'ambient'));
+const { Ambient, modeOf, slotOf, request } = require(path.join(__dirname, '..', '..', 'shared', 'ambient_config', 'ambient'));
 
 let fails = 0, checks = 0;
 const ok = (c, msg) => { checks++; if (!c) { fails++; console.log('FAIL ' + msg); } };

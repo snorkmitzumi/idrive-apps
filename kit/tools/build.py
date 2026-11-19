@@ -23,6 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 KIT = os.path.join(ROOT, 'kit')
 APPS = os.path.join(ROOT, 'apps')
+# code apps take with app.json "include" without being apps of their own (the Store lists only apps/*)
+SHARED = os.path.join(ROOT, 'shared')
 DIST = os.path.join(ROOT, 'dist')
 SDK = os.path.join(ROOT, 'oap-sdk')
 NS = uuid.UUID('6b1d3a52-8f0e-4c4b-9a77-0d0c4d4e5f10')
@@ -653,10 +655,12 @@ def build(app_id, language='en', preview_only=False):
             shutil.copy(os.path.join(adir, f), os.path.join(src, 'javascript', f))
             print('  %s (committed)' % f)
     # app.json "include": { "<other app>": ["file.js", ...] } - another app's modules, beside this app's own (Combo
-    # hosts Ambient config's tabs from apps/ambient_config, one copy of that code); a name of the app's own wins
+    # hosts Ambient config's tabs from shared/ambient_config, one copy of that code), from apps/<other> or
+    # shared/<other>; a name of the app's own wins
     for other, names in (spec.get('include') or {}).items():
+        base = os.path.join(APPS, other) if os.path.isdir(os.path.join(APPS, other)) else os.path.join(SHARED, other)
         for name in names:
-            src_file = os.path.join(APPS, other, name)
+            src_file = os.path.join(base, name)
             if not os.path.isfile(src_file):
                 raise SystemExit('%s: "include" names %s/%s, which does not exist' % (app_id, other, name))
             if os.path.exists(os.path.join(adir, name)):
@@ -692,9 +696,21 @@ def build(app_id, language='en', preview_only=False):
             p = os.path.join(src, 'javascript', 'kit', 'locales', name)
             if os.path.exists(p):
                 os.remove(p)
+    if language != 'es':
+        # the Spanish catalog only in Spanish packages: the others keep main's file set
+        for name in ('es.json', 'es.tsv'):
+            p = os.path.join(src, 'javascript', 'kit', 'locales', name)
+            if os.path.exists(p):
+                os.remove(p)
     if language == 'ru':
         shutil.copy(os.path.join(KIT, 'localization', 'fonts', 'cyrillic-ru.json'),
                     os.path.join(src, 'javascript', 'kit', 'fonts', 'cyrillic.json'))
+    if language == 'es':
+        # The Latin atlases with the Spanish letters added (kit/tools/bake_spanish.py); their own cacheKey
+        # keeps them apart from an English app's atlases in the shared renderer.
+        for name in ('label.json', 'bold.json', 'light.json', 'num.json'):
+            shutil.copy(os.path.join(KIT, 'localization', 'fonts', 'es', name),
+                        os.path.join(src, 'javascript', 'kit', 'fonts', name))
     if language == 'ko':
         # Korean and Chinese are separate fixed-language packages. Loading both large
         # atlases could fragment the renderer's two 1024x4096 glyph shelves.
@@ -819,7 +835,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--language', type=normalize_language, choices=languages(), default='en',
-                        help='UI language; Korean also accepts ko-KR, ko-kr and ko_KR')
+                        help='UI language; Korean also accepts ko-KR, ko-kr and ko_KR, Spanish es-ES and es_ES')
     parser.add_argument('--preview-only', action='store_true', help='stage an offline preview without BMW SDK or installable archives')
     parser.add_argument('apps', nargs='*')
     args = parser.parse_args()

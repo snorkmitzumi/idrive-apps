@@ -1,5 +1,5 @@
 'use strict';
-// Ambient config's service and tabs as a host gets them (apps/ambient_config/ambient_page.js: Ambient config and Combo),
+// Ambient config's service and tabs as a host gets them (shared/ambient_config/ambient_page.js: Ambient config and Combo),
 // and owner.js (one of our ambient apps at a time on the lights). No car: the diagnostic link and the signals stubbed.
 //   node kit/tools/test_ambient_page.js
 
@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const Module = require('module');
 
-const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'apps', 'ambient_config');
+const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'shared', 'ambient_config');
 const OWNERS = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ambient-owner-'));
 process.env.MGU_AMBIENT_OWNER_DIR = OWNERS;
 process.env.MGU_AMBIENT_FLASH = path.join(OWNERS, 'flash.json');
@@ -73,6 +73,13 @@ const checks = [
             assert(tx.length > 3 && !tx.some((x) => /undefined|NaN/.test(x)), 'tab ' + i + ': ' + tx.join(' | '));
         }
         assert(page.wants() === false || page.wants() === true);
+        // a finger on the colour ring (Colour tab): the colour follows it, the gesture is the page's; off the ring: not
+        page.select(0);
+        assert.strictEqual(page.touch(1, 290 + 160, 288), true, 'a finger down on the ring taken');
+        assert.strictEqual(page.touch(3, 290, 288 + 160), true, 'its lift taken');
+        const hue = (rgb) => require(path.join(APP, 'scenes')).hueOf(rgb);
+        assert(Math.abs(hue(parts.control.look().upper.rgb) - 180) < 20, 'the colour where the finger let go: ' + JSON.stringify(parts.control.look().upper));
+        assert.strictEqual(page.touch(1, 20, 20), false, 'a finger off the ring and dial: the kit has it');
         page.original();
         assert.strictEqual(parts.control.on(), false, 'Original colour: the car\'s own');
         assert(parts.owner && parts.owner.peer === null, 'the only one of ours: it has the lights');

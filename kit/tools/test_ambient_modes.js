@@ -5,7 +5,7 @@
 //   node kit/tools/test_ambient_modes.js
 const path = require('path');
 const EventEmitter = require('events');
-const APP = path.join(__dirname, '..', '..', 'apps', 'ambient_config');
+const APP = path.join(__dirname, '..', '..', 'shared', 'ambient_config');
 const { Ambient, modeOf, groupOf, MAX_SHOWN } = require(path.join(APP, 'ambient'));
 
 let fails = 0, checks = 0;

@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer) and Ambient config's colours, animations, driving modes and favourites",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -56,7 +56,8 @@
     },
     "de.bmw.infrastructure.VehicleCondition": {
       "_optional": "the car locked and left: nothing read, so it can sleep",
-      "VehicleCondition": "s"
+      "VehicleCondition": "s",
+      "vehicleConditionNoCrc": "s"
     },
     "de.bmw.infotainment.drivingexcitement.Efficiencytainment2": {
       "_optional": "the cluster's eDRIVE needle: logged once, to see whether a mild hybrid sends it",
@@ -577,6 +578,12 @@
       "type": "bool",
       "default": false,
       "hidden": true
+    },
+    {
+      "key": "doorCar",
+      "label": "Ambient: open door shows the car's own warning (G20 / G26)",
+      "type": "bool",
+      "default": false
     },
     {
       "key": "hazardRed",

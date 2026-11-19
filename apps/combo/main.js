@@ -8,7 +8,7 @@
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
  *   Ambient, Animations, Modes, Favourites
  *                Ambient config's tabs (its Colour, Animations, Driving modes and Favourites; not the Strobe), the
- *                same code, taken from apps/ambient_config at build time (app.json "include", ambient_page.js)
+ *                same code, taken from shared/ambient_config at build time (app.json "include", ambient_page.js)
  *
  * The ambient light runs from the platform's start (app.json "autostart"), as Ambient config does: the look and the
  * driving modes work with the app closed. With Ambient config installed too, the one started first drives the
@@ -158,7 +158,9 @@ mgu.run({
         ctx.onTab((i) => pick(i));
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
-        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb ? amb.tap(x, y) : null));
+        // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb ? amb.touch(phase, x, y) : false));
+        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
 
         function drawDriving(cv, t) {
             const d = data();
