@@ -109,6 +109,20 @@ test('ctx.onTilt: the app takes a push (a key: the knob onto that button once dr
     } finally { t.end(); }
 });
 
+test('map style (layout "map"): the full layout, no tabs in the header (it names the page), Settings from the app', async () => {
+    const t = await setup({ settings: { layout: 'map' } });
+    try {
+        assert(t.d.own() && t.d.mapStyle(), 'map style where the kit runs the screen');
+        const r = t.d.canvas(1600, 520); r.chrome = { tabs: { tabs: ['Driving', 'M View'], sel: 1, badges: [] } };
+        t.d.present('MAIN', r, () => Promise.resolve()); await sleep(30);
+        assert.deepStrictEqual(t.d._tabList().tabs, [], 'no tabs (and no Settings tab)');
+        let opened = 0;
+        t.d._click = (id) => { if (id === 'BTN_SETTINGS') opened++; };
+        t.d.openSettings();
+        assert.strictEqual(opened, 1, 'Settings opened as its button does');
+    } finally { t.end(); }
+});
+
 test('unchanged frames: not sent again, but one a second (the renderer hides an app quiet for 3 s)', async () => {
     const t = await setup(), c = t.c;
     try {
