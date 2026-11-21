@@ -339,6 +339,77 @@ const checks = [
         assert.strictEqual(R.fresh().b12.v, null, 'a voltage 70 s old still shown');
         r.done();
     }],
+    ['2.3: a G26: refused reads not asked again, the OBD voltage first, no 12 V current at all', async () => {
+        const r = await rig({ driving: true, g26: true });
+        r.start(); await r.run(60000);
+        const n = (k) => r.asked.filter((q) => q.key === k).length;
+        assert(n('18:F442') <= 1, 'F442 refused as not supported, asked again: ' + n('18:F442'));
+        assert.strictEqual(n('18:5852'), 1, 'the 12 V current asked again after "not supported": ' + n('18:5852'));
+        assert.strictEqual(n('18:5854'), 1, 'the 12 V temperature asked again: ' + n('18:5854'));
+        assert(n('18:OBD 42') >= 20, 'the OBD voltage asked every 2.5 s: ' + n('18:OBD 42'));
+        assert(Math.abs(r.reads.fresh().b12.v - 14.66) < 0.01, 'voltage ' + r.reads.fresh().b12.v);
+        assert.strictEqual(r.reads.can('i12'), false, 'no unit gives the 12 V current');
+        assert(r.reads.can('v12'), 'the voltage has a unit');
+        assert(r.logged.some((m) => /^i12 0x12 5852: not supported \(7F 22 31\), not asked again/.test(m)), r.logged.filter((m) => /i12/.test(m)).join(' | '));
+        r.done();
+    }],
+    ['2.3: the answering candidate is remembered by its key across a restart', async () => {
+        const dir = tmp('v12key');
+        const r = await rig({ driving: true, g26: true });
+        r.reads.file = require('path').join(dir, 'battery.json');
+        r.start(); await r.run(10000);
+        assert.strictEqual(JSON.parse(fs.readFileSync(r.reads.file, 'utf8')).v12Key, '18:OBD 42');
+        r.done();
+    }],
+    ['2.3: reads wait for the ambient light\'s writes, at most 0.6 s each', async () => {
+        let busy = true;
+        const r = await rig({ driving: true, g26: true, yieldTo: () => busy });
+        r.start(); await r.run(500);
+        assert.strictEqual(r.asked.length, 0, 'a read went out while the lights were writing: ' + r.asked.map((q) => q.key).join(' '));
+        await r.run(1000);
+        assert(r.asked.length > 0, 'never read: the lights may hold the reads only 0.6 s at a time');
+        busy = false; r.asked.length = 0;
+        await r.run(3000);
+        assert(r.asked.length > 2, 'the lights done: reading on');
+        r.done();
+    }],
+    ['2.3: 48 V: the pack voltage where the terminal voltage field does not fit (a G26)', async () => {
+        const B = appModule('batteries'), F = SPEC.config.battery.b48[0].fields;
+        // the G26's reply from its log
+        const g26 = '62 AA 56 00 E8 00 00 00 0E 43 4D FF FF FF FF 02 3E 50 61 12 1E 6E 33 27 50 6A 56 2E 62 60 46'.split(' ').map((x) => parseInt(x, 16));
+        const b = B.b48(B.fields(g26, F));
+        assert(Math.abs(b.v - 46.38) < 0.01, 'pack voltage ' + b.v);
+        assert.strictEqual(b.soc, 80); assert.strictEqual(b.soh, 96);
+        assert(Math.abs(b.temp - 7) < 0.01, 'temperature ' + b.temp);
+    }],
+    ['2.3: no 12 V current on this car: the panel shows the voltage alone', async () => {
+        const d = car(); d.b12.a = null;
+        const t = await page(d, {}, { no12A: true });
+        assert(t.some((x) => /^14\.10 V$/.test(x)), 'the voltage alone: ' + t.filter((x) => / V/.test(x)).join(' | '));
+        assert(!t.some((x) => /14\.10 V\s+·/.test(x)), 'still a second value after the voltage');
+    }],
+    ['2.3: Seats: the position reply shown and logged once; no interface: says so, not asked again', async () => {
+        const { Seats } = appModule('seats');
+        const logs = [];
+        const log = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error() {} };
+        let calls = 0;
+        const reply = { outSeatID: 0, statusResponse: 2, seatAxisList: [{ seatAxis: 0, seatMovement: 2, axisPositionValue: 1234 }, { seatAxis: 'AXISSHV', seatMovement: 2, axisPositionValue: 567 }] };
+        const signals = { proxy: async () => ({}), call: async (p, m, a) => { calls++; assert.strictEqual(m, 'getCurrentPosition'); assert.deepStrictEqual(a, { inSeatID: 0 }); return reply; } };
+        let now = 1000;
+        const s = new Seats({ signals, log, now: () => now });
+        await s.read(); await s.read();
+        assert.deepStrictEqual(s.state.axes.map((a) => [a.axis, a.value]), [['SLV', 1234], ['SHV', 567]]);
+        assert.strictEqual(logs.filter((m) => /getCurrentPosition ->/.test(m)).length, 1, 'the same shape logged twice');
+        const cv = new Canvas(1600, 520), out = [];
+        cv.own = true; const tx = cv.text; cv.text = function (x, ...r2) { out.push(String(x)); return tx.call(this, x, ...r2); };
+        s.draw(cv, themes.theme('m_tricolour'));
+        assert(out.includes('Forward / back') && out.includes('1234') && out.includes('Height'), out.join(' | '));
+        const gone = new Seats({ signals: { proxy: async () => { throw new Error('interface not found in config'); } }, log, now: () => now });
+        await gone.read();
+        assert.strictEqual(gone.state.available, false);
+        gone.poll(); now += 5000; gone.poll();
+        assert(!gone.busy, 'asked again with the interface missing');
+    }],
     ['2.1: the 12 V panel shows the power into the battery in W, as the 48 V one in kW', async () => {
         const t = await page(car());
         assert(t.some((x) => /14\.10 V\s+·\s+\+23 W/.test(x)), 'no 12 V power: ' + t.filter((x) => / V /.test(x)).join(' | '));
@@ -489,7 +560,7 @@ async function rig(o) {
     if (o.hold) gate = new Promise((res) => { release = () => { gate = null; res(); }; });
     const ui = { vis: o.shown !== false, isVisible: (n) => n === 'MAIN' && ui.vis };
     const reads = new Reads({ link: lk, reader: new DidReader(lk), values, settings, cfg: SPEC.config, ui, log: { info: (m) => logged.push(m), warn: (m) => logged.push(m), error() {} }, now: () => clock, dataDir: tmp('reads-data'),
-        active: o.active === false ? () => false : undefined });
+        active: o.active === false ? () => false : undefined, yieldTo: o.yieldTo });
     // keep the car driving while time moves (the signals would)
     const keep = () => { if (o.driving) { values.put('speed', 50); values.put('rpm', 2000); } };
     const next = () => timers.slice().sort((a, b) => a.at - b.at)[0];
@@ -519,6 +590,9 @@ function answer(ecu, sid, data, o) {
     if (ecu === 25 && did === 0xDB32) return [0x62, 0xDB, 0x32, 0x00, 0x9E, 0x00, 0x02, 0x00, 0x98, 0x00, 0x20];
     if (ecu === 2 && did === 0xAA56) return o.no48 ? null : o.odd48 ? [0x62, 0xAA, 0x56, 0x00, 0x05, 0x12] : aa56({ v: 4720, a: -105, temp: 48, soc: 66, soh: 96 });
     if (o.dead12 && ecu === 18 && [0xF442, 0x5852, 0x40AD, 0x56F0, 0x402B, 0x5853].indexOf(did) >= 0) return null;
+    // a G26 M440i's engine unit (its log, Nov 2026): refuses these as not supported, answers the OBD voltage (14.66 V)
+    if (o.g26 && ecu === 18 && [0xF442, 0x5852, 0x402B, 0x5853, 0x5854].indexOf(did) >= 0) return [0x7F, 0x22, 0x31];
+    if (o.g26 && ecu === 18 && sid === 0x01 && data[0] === 0x42) return [0x41, 0x42, 0x39, 0x44];
     if (ecu === 18 && did === 0xF442) return [0x62, 0xF4, 0x42, 12600 >> 8, 12600 & 0xFF];
     if (ecu === 18 && did === 0x5852) { const raw = Math.round((1.6 + 200) / 0.02); return [0x62, 0x58, 0x52, raw >> 8, raw & 0xFF]; }
     if (ecu === 18 && did === 0x40AD) return [0x62, 0x40, 0xAD, 84, 0, 80, 0, 79, 0, 78, 0, 77, 0, 76].concat(new Array(12).fill(0));
@@ -647,18 +721,20 @@ checks.push(
         const t2 = await page(Object.assign(car(), { slip: null }));
         assert(t2.includes('AXLE SLIP') && !t2.some((x) => /NaN|undefined/.test(x)));
     }],
-    ['2.0 #1 tabs: Driving, Performance, then Ambient config\'s four (no Strobe); each tab drawn', async () => {
+    ['2.0 #1 tabs: Driving, Performance, Seats, then Ambient config\'s four (no Strobe); each tab drawn', async () => {
         fakeAmb.calls = [];
         const b = await boot(tmp('tabs'));
         assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0, 'the ambient service without the strobe: ' + fakeAmb.calls.join(' | '));
         assert(fakeAmb.calls.some((c) => /^mount .*"strobe":false.*"names":\["Ambient","Animations","Modes","Favourites"\]/.test(c)), fakeAmb.calls.join(' | '));
         const t0 = await b.draw();
-        ['DRIVING', 'PERFORMANCE', 'AMBIENT', 'ANIMATIONS', 'MODES', 'FAVOURITES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        ['DRIVING', 'PERFORMANCE', 'SEATS', 'AMBIENT', 'ANIMATIONS', 'MODES', 'FAVOURITES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
         assert(t0.includes('Engine speed'), 'Driving first');
         const t1 = await b.tab(1);
         assert(t1.includes('Dyno') && t1.includes('Drag timer'), 'Performance: ' + t1.join(' | '));
         assert(!t1.includes('Engine speed'), 'Driving still drawn on Performance');
-        const t3 = await b.tab(3);
+        const t2 = await b.tab(2);
+        assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
+        const t3 = await b.tab(4);
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
         assert(fakeAmb.calls.indexOf('tap 300,300') >= 0, 'a tap on an ambient tab goes to it');
@@ -688,7 +764,7 @@ checks.push(
         const b = await boot(tmp('reset'));
         await b.tab(1);
         b.clicks.BTN_RESET();
-        await b.tab(2);
+        await b.tab(3);
         b.clicks.BTN_RESET();
         assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
     }],

@@ -6,6 +6,8 @@
  *   Driving      engine speed and boost, speed / power / torque, xDrive, the 48 V and 12 V batteries, in M Vitals'
  *                look (design: docs/superpowers/specs/2026-11-08-combo-screen-design.md); draw.js
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
+ *   Seats        the driver seat's position from the car (seats.js; reading only for now: memory 1-3 and easy entry
+ *                next, once a car's log shows the position reply)
  *   Ambient, Animations, Modes, Favourites
  *                Ambient config's tabs (its Colour, Animations, Driving modes and Favourites; not the Strobe), the
  *                same code, taken from shared/ambient_config at build time (app.json "include", ambient_page.js)
@@ -30,13 +32,14 @@ const { ReadOnlyDiag } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 const { Reads } = require('./reads');
 const { Perf, PerfDemo } = require('./perf');
+const { Seats } = require('./seats');
 const ambientPage = require('./ambient_page');
 
 const W = 1600, H = 520;
-const TABS = ['Driving', 'Performance'];
+const TABS = ['Driving', 'Performance', 'Seats'];
 // Ambient config's tabs under names that say what they are next to Driving and Performance
 const AMBIENT_TABS = ['Ambient', 'Animations', 'Modes', 'Favourites'];
-const DRIVING = 0, PERF = 1, AMBIENT = 2;
+const DRIVING = 0, PERF = 1, SEATS = 2, AMBIENT = 3;
 
 /** The ambient light, without screens (and the start with them): Ambient config's service, without the strobe. */
 const background = (bg) => ambientPage.background(bg, { strobe: false });
@@ -55,13 +58,14 @@ mgu.run({
         const engine = new Engine({ settings, dataDir: ctx.dataDir, log });
         const values = new Values({ settings, log, dataDir: ctx.dataDir, gearRatios: (cfg.xdrive && cfg.xdrive.gearRatios) || [] });
         const startT = Date.now();
-        // tab: DRIVING, PERF or AMBIENT (then amb.page says which of its tabs)
+        // tab: DRIVING, PERF, SEATS or AMBIENT (then amb.page says which of its tabs)
         let tab = DRIVING;
 
         // the ambient light: its tabs, over the service background() started (a failure leaves the other tabs working)
-        let amb = null;
+        let amb = null, ambLights = null;
         try {
             const parts = ctx.background || await background(ctx);
+            ambLights = parts.lights;
             amb = ambientPage.mount(ctx, parts, { strobe: false, names: AMBIENT_TABS, redraw: () => render() });
         } catch (e) { log.error('ambient light: ' + (e && e.stack || e)); }
 
@@ -85,7 +89,9 @@ mgu.run({
         const link = new ReadOnlyDiag(ctx.signals, log);
         link.init().catch((e) => log.warn('diagnostic link: ' + e));
         const reads = new Reads({ link, reader: new DidReader(link), values, settings, cfg, ui, log, dataDir: ctx.dataDir,
-            active: () => tab === DRIVING && !usingDemo() });
+            active: () => tab === DRIVING && !usingDemo(),
+            // the ambient light's writes go first (the gateway takes one request at a time)
+            yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         // shown again (another app was on screen): a round at once
         ui.onVisible((name, v) => { if (name === 'MAIN' && v && tab === DRIVING) reads.opened(); });
         reads.start();
@@ -93,6 +99,8 @@ mgu.run({
         // the Performance tab: the car's values as they come (each speed times the drag run), the demo's at 20 Hz;
         // the timer's clock runs with the tab hidden too, so a launch is caught from any tab
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
+        // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
+        const seats = new Seats({ signals: ctx.signals, log });
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
         values.onPut = (k, v) => {
@@ -132,9 +140,10 @@ mgu.run({
         // clears them, M Vitals' confirm pattern), Reset run (Performance), Original colour (the ambient tabs)
         const CONFIRM_MS = 6000;
         let confirmUntil = 0;
-        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : 'Original colour');
+        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : 'Original colour');
         ui.onClick('BTN_RESET', () => {
             if (tab === PERF) { perf.resetRun(); return render(); }
+            if (tab === SEATS) { seats.last = 0; seats.poll(); return render(); }
             if (tab === AMBIENT) { if (amb) { amb.original(); amb.dirty(); } return render(); }
             reads.opened();                                  // a button press counts as using the screen
             if (Date.now() > confirmUntil) { confirmUntil = Date.now() + CONFIRM_MS; return render(); }
@@ -149,7 +158,7 @@ mgu.run({
         /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, then the ambient tabs. */
         function pick(i) {
             const was = tab;
-            if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : DRIVING;
+            if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
             if (tab !== was) { log.info('tab ' + tabs()[sel()]); resetLabel(); }
@@ -169,13 +178,18 @@ mgu.run({
             PEAKS.forEach((k) => pk.raise(k, now[k]));
             if (!d.demo) reads.shown();          // (a frame of the car's values after the demo: a round at once)
             draw.render(cv, t, d, { settings, peak: (k) => pk.peak(k), why: (k) => reads.why(k), redline: engine.redline(), scaleMax: engine.scaleMax(), has48: d.has48,
+            no12A: !d.demo && !reads.can('i12'),
                 note: Date.now() <= confirmUntil ? 'Press again to reset peaks' : null, tabs: tabs(), sel: sel() });
         }
 
         async function render() {
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg);
             if (tab === DRIVING) drawDriving(cv, t);
-            else if (tab === PERF) {
+            else if (tab === SEATS) {
+                seats.poll();
+                seats.draw(cv, t);
+                G.frame(cv, t, tabs(), sel(), []);
+            } else if (tab === PERF) {
                 perf.draw(cv, t, { redraw: () => render() });
                 G.frame(cv, t, tabs(), sel(), [perf.isDemo && { text: 'DEMO' }, settings.get('rollout') && { text: 'ROLLOUT 1 FT', color: 'dim' }]);
             } else {

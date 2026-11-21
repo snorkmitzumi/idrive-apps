@@ -160,7 +160,9 @@ function battery(cv, t, box, title, x, key, u, opts) {
     const sign = (n, dec, unit) => (G.isNum(n) ? (n > 0 ? '+' : '') + G.fmt(n, dec) + ' ' + unit : '--');
     // the power into the battery, as the 48 V panel's kW: the 12 V one in W (voltage x current), + = charging
     const w12 = !is48 && G.isNum(v.v) && G.isNum(v.a) ? v.v * v.a : null;
-    cv.text(withUnit(v.v, is48 ? 1 : 2, 'V') + '  ·  ' + (is48 ? sign(v.kw, 2, 'kW') : sign(w12, 0, 'W')), r, box.y + 100, 22, any ? t.text : t.dim, { align: 'right', font: 'bold' });
+    // (a car with no unit that gives the 12 V current, opts.no12A: the voltage alone, the state from it above)
+    const second = is48 ? '  ·  ' + sign(v.kw, 2, 'kW') : opts.no12A ? '' : '  ·  ' + sign(w12, 0, 'W');
+    cv.text(withUnit(v.v, is48 ? 1 : 2, 'V') + second, r, box.y + 100, 22, any ? t.text : t.dim, { align: 'right', font: 'bold' });
     // the charge as 10 segments, as eDrive's battery icon
     const sy = box.y + 150, sw = (box.w - 44) / 10, f = G.isNum(v.soc) ? G.clamp(v.soc / 100, 0, 1) : 0;
     const col = !G.isNum(v.soc) ? t.tick : v.soc < 25 ? t.crit : v.soc < 45 ? t.warn : GO;

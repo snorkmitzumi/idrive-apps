@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer) and Ambient config's colours, animations, driving modes and favourites",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -95,6 +95,12 @@
     "de.bmw.body.DoorsWindowsRoofMirrors": {
       "_optional": "an open door: its lights red",
       "CentralLockingSystemAndPanelStatus": "s"
+    },
+    "de.bmw.body.seat.SeatTargetAdjustment": {
+      "_optional": "the Seats tab: the driver seat's position (reading only, for now)",
+      "_methods": [
+        "getCurrentPosition"
+      ]
     }
   },
   "screens": [
@@ -1110,10 +1116,32 @@
               "max": 100
             }
           },
-          "note": "48 V battery BATT48 (MESSWERTE_BATT48): terminal voltage first, current negative = charging; layout from Live Data's builtin/BATT48.json, not yet confirmed on a car"
+          "note": "48 V battery BATT48 (MESSWERTE_BATT48): terminal voltage first, current negative = charging; layout from Live Data's builtin/BATT48.json, not yet confirmed on a car; on a G26 M440i the first field reads 2-21 (not a voltage: likely the current) while pack (at 16) reads 46.4 V, so the pack voltage stands in"
         }
       ],
       "v12": [
+        {
+          "ecu": 18,
+          "obd": "42",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.001,
+          "offset": 0,
+          "min": 5,
+          "max": 18,
+          "note": "the engine unit's OBD voltage: a G26 M440i's answers this and refuses F442 (7F 22 31), so it goes first"
+        },
+        {
+          "ecu": 24,
+          "did": "F442",
+          "bytes": 2,
+          "at": 0,
+          "factor": 0.001,
+          "offset": 0,
+          "min": 5,
+          "max": 18,
+          "note": "transmission unit EGS (0x18): control module voltage, answered on a G26 M440i and a G06 N63"
+        },
         {
           "ecu": 18,
           "did": "F442",
@@ -1135,17 +1163,6 @@
           "max": 18
         },
         {
-          "ecu": 18,
-          "obd": "42",
-          "bytes": 2,
-          "at": 0,
-          "factor": 0.001,
-          "offset": 0,
-          "min": 5,
-          "max": 18,
-          "note": "the same PID with OBD service 01, for engine units that refuse F442 with NRC 31"
-        },
-        {
           "ecu": 19,
           "did": "F442",
           "bytes": 2,
@@ -1165,17 +1182,6 @@
           "offset": 0,
           "min": 5,
           "max": 18
-        },
-        {
-          "ecu": 24,
-          "did": "F442",
-          "bytes": 2,
-          "at": 0,
-          "factor": 0.001,
-          "offset": 0,
-          "min": 5,
-          "max": 18,
-          "note": "transmission unit EGS (0x18): control module voltage too, when the engine unit doesn't answer (e.g. G06 N63)"
         },
         {
           "ecu": 24,
