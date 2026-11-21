@@ -736,7 +736,7 @@ checks.push(
         const t2 = await b.tab(2);
         assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
-        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
+        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
         const t3 = await b.tab(5);
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
@@ -820,16 +820,14 @@ checks.push(
             });
         });
     }],
-    ['2.4 #1 M View: oil and coolant from the car\'s own signals, the oil level from its measurement', async () => {
+    ['2.4 #1 M View: oil and coolant from the car\'s own signals, no oil level', async () => {
         const { v, w } = signalRig();
         w.CDS.statusEngineTemperature({ temperatureEngineDrive: 48 + 91, temperatureEngineOilDrive: 48 + 104 });
         assert.strictEqual(v.live.coolant, 91); assert.strictEqual(v.live.oil, 104); assert(v.live.oilT > 0);
         w.VehicleInformation.DataPowerTrain2({ temperatureEngineDrive: 48 + 93, temperatureEngineOilDrive: 255 });
         assert.strictEqual(v.live.coolant, 93, 'DataPowerTrain2 carries them too'); assert.strictEqual(v.live.oil, 104, '255 = no value');
-        w.Vehicle2.statusOilDipstick2({ fluidLevelEngineOilRelative: 'MOTOROELSTAND_3_4' });
-        const { oilLevel } = appModule('mview');
-        assert.strictEqual(oilLevel(v.live.oilLevel), '3/4'); assert.strictEqual(oilLevel(4), '3/4'); assert.strictEqual(oilLevel('SIGNAL_UNGUELTIG'), null);
-        assert(SPEC.signals['de.bmw.infotainment.vehicle.CDS'].statusEngineTemperature && SPEC.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusOilDipstick2);
+        assert(SPEC.signals['de.bmw.infotainment.vehicle.CDS'].statusEngineTemperature);
+        assert(!SPEC.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusOilDipstick2, 'no oil level (2.4.2: a B58 measures it its own way)');
     }],
     ['2.4 #2 M View reads: the car\'s values not asked, the gearbox from the EGS, refusals not asked again, misfires per cylinder', async () => {
         const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
@@ -967,5 +965,23 @@ checks.push(
         assert.strictEqual(s.state.available, false); assert(/not available/.test(s.summary()));
         ok = true; s.again(); s.poll(); while (s.busy) await new Promise((r) => setImmediate(r));
         assert.strictEqual(s.state.available, true); assert(/1 motors/.test(s.summary()));
+    }],
+    ['2.4.2 M View: fuel trims and timing from the engine unit (OBD 01 06 / 07 / 0E), a trim far from 0 % in the warning colour', async () => {
+        const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
+        const asked = [];
+        const fake = { available: true, async physical(ecu, sid, data) {
+            asked.push(sid + ':' + data[0]);
+            if (sid !== 1) return [0x7F, sid, 0x11];
+            const by = { 6: 130, 7: 141, 0x0E: 156, 0x5C: 140, 0x05: 130, 0x0F: 70 }[data[0]];
+            return by == null ? [0x7F, 1, 0x12] : [0x41, data[0], by];
+        } };
+        let clock = 1e6;
+        const m = new MView({ reader: new DidReader(fake), values: { live: {}, now: () => clock }, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet, link: fake, now: () => clock });
+        for (let i = 0; i < 60; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        assert(Math.abs(m.fuel('stft') - 1.5625) < 1e-6, 'short trim (130 - 128) / 1.28: ' + m.fuel('stft'));
+        assert(Math.abs(m.fuel('ltft') - 10.15625) < 1e-6, 'long trim');
+        assert.strictEqual(m.fuel('timing'), 14, '156 / 2 - 64');
+        const tx = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; m.draw(cv, themes.theme('m_tricolour')); });
+        assert(tx.includes('Fuel trims & timing') && tx.includes('+1.6') && tx.includes('+10.2') && tx.includes('14.0') && !tx.some((x) => /NaN|undefined|oil level/i.test(x)), tx.join(' | '));
     }],
 );

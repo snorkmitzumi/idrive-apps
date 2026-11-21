@@ -8,7 +8,7 @@
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
  *   Seats        the driver seat's position from the car (seats.js; reading only for now: memory 1-3 and easy entry
  *                next, once a car's log shows the position reply)
- *   M View       engine oil, coolant, gearbox oil and intake air temperatures, the oil level, misfires per cylinder
+ *   M View       engine oil, coolant, gearbox oil and intake air temperatures, fuel trims and timing, misfires per cylinder
  *                (mview.js; read only while the tab shows)
  *   Ambient, Animations, Modes
  *                Ambient config's tabs (its Colour, Animations and Driving modes; not Favourites, not the Strobe), the
@@ -106,7 +106,7 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         const seats = new Seats({ signals: ctx.signals, log });
-        // the M View tab: temperatures, oil level, misfires; its reads only while the tab shows (mview.js)
+        // the M View tab: temperatures, fuel trims and timing, misfires; its reads only while the tab shows (mview.js)
         const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         const perfDemo = new PerfDemo();

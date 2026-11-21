@@ -122,8 +122,6 @@ function watches(values, engine, sc, log) {
         } }],
         ['de.bmw.infotainment.vehicle.Vehicle2', Object.assign({
             statusCarSpeed2: (v) => put('speed', sc('speed', v.speedVehicleCentreOfGravity)),
-            // the engine oil level as the car's own measurement gives it (an enum: 1/4 .. 4/4 above the minimum)
-            statusOilDipstick2: (v) => { logRaw('oil level', v && v.fluidLevelEngineOilRelative); L.oilLevel = v && v.fluidLevelEngineOilRelative; L.oilLevelT = values.now(); },
         }, engine.handlers())],
         ['de.bmw.infotainment.drivingexcitement.FES', {
             statusSwitchDriveDynamicSport2: (v) => { logRaw('FES boost', v.displayBoostPressure); put('boostFes', sc('boost', v.displayBoostPressure)); },
