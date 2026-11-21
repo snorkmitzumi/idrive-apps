@@ -19,6 +19,7 @@
  *   m.draw(cv, t, { demo })
  */
 const G = require('./kit/gauges');
+const { withAlpha } = require('./kit/canvas');
 
 const TEMP_MS = 5000, MISFIRE_MS = 10000, CAR_FRESH = 10000, KEEP = 30000, HIST_MS = 2000, HIST_N = 150;
 const YIELD_MS = 600, YIELD_STEP = 50, CALL_MS = 1500;
@@ -28,6 +29,10 @@ const LEVELS = { MOTOROELSTAND_UNTER_MINIMUM: 'Below min', MOTOROELSTAND_AM_MINI
 const LEVEL_NO = { 0: 'MOTOROELSTAND_UNTER_MINIMUM', 1: 'MOTOROELSTAND_AM_MINIMUM', 2: 'MOTOROELSTAND_1_4', 3: 'MOTOROELSTAND_2_4',
     4: 'MOTOROELSTAND_3_4', 5: 'MOTOROELSTAND_4_4', 6: 'MOTOROELSTAND_5_4', 7: 'MOTOROELSTAND_UEBERFUELLT', 13: 'MOTOROELSTAND_OK', 14: 'SERVICEFUNKTION_AKTIV' };
 const TEMPS = ['oil', 'coolant', 'gearbox', 'iat'];
+const GO = '#2fd27a';
+// a healthy engine counts a few each drive (the engine unit flags misfires at ~1-2 % of revolutions): the total in
+// yellow from MIS_WARN, red from MIS_CRIT, a cylinder from MIS_CYL_WARN (M Vitals' thresholds)
+const MIS_WARN = 100, MIS_CRIT = 500, MIS_CYL_WARN = 50;
 const isNum = (x) => typeof x === 'number' && isFinite(x);
 const hexOf = (x) => parseInt(String(x), 16);
 
@@ -158,55 +163,96 @@ class MView {
     }
 
     /* ---------- the tab ---------- */
+    /*
+     * Left to right: the tyres (M Vitals' Chassis card, narrower), the four temperatures in two columns, then the
+     * misfires (M Vitals' Fuel & ignition card: the total, a cell per cylinder) over the oil level.
+     */
     draw(cv, t, o) {
-        const demo = !!(o && o.demo), f = this.settings && this.settings.get('tempUnit') === 'f';
-        const u = (c) => (isNum(c) ? (f ? c * 1.8 + 32 : c) : null), unit = f ? '°F' : '°C', T = (c) => (f ? c * 1.8 + 32 : c);
-        const D = demo ? demoValues(this.now()) : null;
+        const demo = !!(o && o.demo), U = require('./draw').units(this.settings || { get: () => null });
+        const D = demo ? demoValues(this.now()) : null, T = (c) => U.T(c);
+        this.drawTyres(cv, t, 24, 44, 452, 468, D ? D.tyres : this.tyres(), U);
         const tile = (k, label, x, y, zones) => {
             const x0 = D ? { v: D[k], from: 'demo' } : this.temp(k);
             const pk = D ? null : this.peak[k], why = x0 ? null : this.why(k);
-            G.stat(cv, t, x, y, 380, 228, {
-                label, value: x0 ? u(x0.v) : null, unit, decimals: 0, size: 72, zones,
-                history: D ? [] : (this.hist[k] || []).map(u),
-                sub: why || ((isNum(pk) ? 'Max ' + Math.round(u(pk)) + unit + '  ·  ' : '') + 'from ' + x0.from),
+            G.stat(cv, t, x, y, 300, 228, {
+                label, value: x0 ? T(x0.v) : null, unit: U.tU, decimals: 0, size: 72, zones,
+                history: D ? [] : (this.hist[k] || []).map(T),
+                sub: why || ((isNum(pk) ? 'Max ' + Math.round(T(pk)) + U.tU + '  ·  ' : '') + 'from ' + x0.from),
             });
         };
         const hot = (warn, crit, cold) => [{ from: T(crit), to: 9999, color: 'crit' }, { from: T(warn), to: T(crit), color: 'warn' }].concat(cold != null ? [{ from: -999, to: T(cold), color: 'cold' }] : []);
-        tile('oil', 'Engine oil', 24, 44, hot(130, 145, 70));
-        tile('coolant', 'Coolant', 412, 44, hot(110, 118, 60));
-        tile('gearbox', 'Gearbox oil', 24, 284, hot(110, 125, 50));
-        tile('iat', 'Intake air', 412, 284, hot(55, 70));
-        this.drawRight(cv, t, D);
+        tile('oil', 'Engine oil', 488, 44, hot(130, 145, 70));
+        tile('coolant', 'Coolant', 800, 44, hot(110, 118, 60));
+        tile('gearbox', 'Gearbox oil', 488, 284, hot(110, 125, 50));
+        // (intake air: 74 deg C parked in traffic is heat soak, not a fault - warn from 65, red from 80)
+        tile('iat', 'Intake air', 800, 284, hot(65, 80));
+        this.drawMisfires(cv, t, 1112, 44, 464, 300, D);
+        this.drawOilLevel(cv, t, 1112, 356, 464, 156, D);
     }
+    /** The car's tyres while fresh (signals.js L.tyres), else null. */
+    tyres() { const L = this.values.live; return L.tyresT && this.now() - L.tyresT < 5 * 60000 ? L.tyres : null; }
     why(k) {
         if (this.link && !this.link.available) return 'Diagnostic link down';
         if (this.values.live.left) return 'Paused: car locked';
         if (!this.live(this.c[k]).length) return 'Not given by this car';
         return this.last[k] ? 'No reply' : 'Reading…';
     }
-    drawRight(cv, t, D) {
-        const x = 800, w = 776;
-        G.panel(cv, t, x, 44, w, 468, 'Misfires this drive');
+    /** Top-down car, each tyre's pressure against the car's target, its temperature under it (M Vitals' drawTyres). */
+    drawTyres(cv, t, x, y, w, h, ty, U) {
+        G.panel(cv, t, x, y, w, h, 'Tyres');
+        const cx = x + w / 2, top = y + 64, bh = h - 84, bw = 104, dec = U.psi || U.kpa ? 0 : 1;
+        cv.roundRect(cx - bw / 2, top, bw, bh, 40, withAlpha(t.track, 0.9));
+        cv.strokeRoundRect(cx - bw / 2, top, bw, bh, 40, 3, t.tick);
+        cv.roundRect(cx - bw / 2 + 14, top + bh * 0.24, bw - 28, 28, 10, withAlpha(t.tick, 0.45));
+        cv.roundRect(cx - bw / 2 + 18, top + bh * 0.70, bw - 36, 22, 8, withAlpha(t.tick, 0.35));
+        cv.text('FRONT', cx, top + 32, 18, t.dim, { align: 'center', font: 'bold', spacing: 1 });
+        const tyw = 26, tyh = 72;
+        [['FL', -1, top + 26], ['FR', 1, top + 26], ['RL', -1, top + bh - 26 - tyh], ['RR', 1, top + bh - 26 - tyh]].forEach(([k, side, tyY]) => {
+            const v = (ty && ty[k]) || {}, pr = U.P(v.p), tgt = U.P(v.pt), temp = v.t;
+            let pc = isNum(pr) ? t.text : t.dim;
+            if (isNum(v.p) && isNum(v.pt) && v.pt > 0) { const r = v.p / v.pt; pc = r < 0.85 ? t.crit : r < 0.93 || r > 1.15 ? t.warn : GO; }
+            const tc = !isNum(temp) ? t.tick : temp < 20 ? t.cold : temp > 105 ? t.crit : temp > 90 ? t.warn : t.accent;
+            const tx0 = side < 0 ? cx - bw / 2 - tyw - 6 : cx + bw / 2 + 6;
+            cv.roundRect(tx0, tyY, tyw, tyh, 8, tc);
+            for (let i = 1; i < 4; i++) cv.fillRect(tx0 + 5, tyY + i * tyh / 4, tyw - 10, 2, withAlpha(t.bg, 0.35));
+            const al = side < 0 ? 'right' : 'left', lx = side < 0 ? tx0 - 14 : tx0 + tyw + 14, py = tyY + 44;
+            const uw = cv.textWidth(' ' + U.pU, 20);
+            const pw = cv.text(isNum(pr) ? G.fmt(pr, dec) : '--', lx + (side < 0 ? -uw : 0), py, 48, pc, { align: al, font: 'num' });
+            cv.text(' ' + U.pU, side < 0 ? lx : lx + pw, py, 20, t.dim, { align: al });
+            cv.text(isNum(tgt) ? 'target ' + G.fmt(tgt, dec) : 'no target', lx, py + 26, 18, t.dim, { align: al });
+            cv.text(isNum(temp) ? G.fmt(U.T(temp), 0) + U.tU : '--' + U.tU, lx, py + 56, 24, isNum(temp) ? tc : t.dim, { align: al, font: 'bold' });
+        });
+        if (!ty) cv.text('No tyre values from the car yet', cx, y + h - 14, 18, t.dim, { align: 'center' });
+    }
+    /** The total this drive, big and coloured, a cell per cylinder along the bottom (M Vitals' misfireTile). */
+    drawMisfires(cv, t, x, y, w, h, D) {
+        G.panel(cv, t, x, y, w, h, 'Misfires');
+        if (!D && this.misGone) { cv.text(this.misGone, x + 18, y + 120, 20, t.dim); return; }
+        const counts = D ? D.mis : this.shown(), n = D ? 6 : (this.mids ? this.mids.length : this.mis.cylinders);
+        const ok = !!D || (this.misT > 0 && counts.some(isNum));
+        const total = ok ? counts.reduce((a, c) => a + (isNum(c) ? c : 0), 0) : null;
+        const col = !ok ? t.dim : total === 0 ? GO : total < MIS_WARN ? t.text : total < MIS_CRIT ? t.warn : t.crit;
+        const tw = cv.text(ok ? String(total) : '--', x + 18, y + 128, 88, col, { font: 'num' });
+        const avg = D ? [] : this.avg.filter(isNum);
+        const sub = !ok ? (!this.mids ? 'Asking the engine unit…' : this.link && !this.link.available ? 'Diagnostic link down' : 'Reading…')
+            : this.base ? 'since Reset' : 'this drive';
+        cv.text(sub, x + 30 + tw, y + 128, 22, t.dim);
+        if (avg.length) cv.text('10-drive average ' + avg.reduce((a, b) => a + b, 0), x + w - 18, y + 40, 18, t.dim, { align: 'right' });
+        const gap = 8, cw = (w - 36 - gap * (n - 1)) / n, ch = 82, cy = y + h - 18 - ch;
+        for (let i = 0; i < n; i++) {
+            const c = counts[i], cx = x + 18 + i * (cw + gap), hit = isNum(c) && c >= MIS_CYL_WARN;
+            cv.roundRect(cx, cy, cw, ch, 8, withAlpha(hit ? t.warn : t.track, hit ? 0.18 : 0.9));
+            cv.text(String(i + 1), cx + cw / 2, cy + 28, 22, t.dim, { align: 'center', font: 'bold' });
+            cv.text(isNum(c) ? String(c) : '-', cx + cw / 2, cy + ch - 12, 34, !isNum(c) ? t.dim : hit ? t.warn : t.text, { align: 'center', font: 'num' });
+        }
+    }
+    drawOilLevel(cv, t, x, y, w, h, D) {
+        G.panel(cv, t, x, y, w, h, 'Engine oil level');
         const L = this.values.live;
         const lvl = D ? '4/4' : (L.oilLevelT && this.now() - L.oilLevelT < 10 * 60000 ? oilLevel(L.oilLevel) : null);
-        cv.text('OIL LEVEL', x + 400, 82, 18, t.dim, { font: 'bold', spacing: 2 });
-        cv.text(lvl || '--', x + w - 24, 84, 26, lvl === 'Below min' || lvl === 'At min' || lvl === 'Overfilled' ? t.warn : lvl ? t.text : t.dim, { align: 'right', font: 'bold' });
-        const counts = D ? D.mis : this.shown(), n = D ? 6 : (this.mids ? this.mids.length : this.mis.cylinders);
-        if (!D && this.misGone) { cv.text(this.misGone, x + 24, 150, 22, t.dim); return; }
-        const top = 120, rowH = Math.min(52, 330 / n), max = Math.max(10, ...counts.filter(isNum));
-        let total = 0;
-        for (let i = 0; i < n; i++) {
-            const y = top + i * rowH, c = counts[i];
-            if (isNum(c)) total += c;
-            cv.text('Cyl ' + (i + 1), x + 24, y + 28, 22, t.text, { font: 'bold' });
-            G.bar(cv, t, x + 120, y + 6, w - 260, 30, { head: false, value: isNum(c) ? c : null, min: 0, max, smooth: false,
-                color: isNum(c) && c > 0 ? 'warn' : undefined });
-            cv.text(isNum(c) ? String(c) : '--', x + w - 24, y + 30, 26, isNum(c) && c > 0 ? t.warn : isNum(c) ? t.text : t.dim, { align: 'right', font: 'num' });
-        }
-        const avg = D ? [] : this.avg.filter(isNum), y = top + n * rowH + 24;
-        const sub = D ? 'Demo' : !this.mids ? 'Asking the engine unit…' : !this.misT ? (this.link && !this.link.available ? 'Diagnostic link down' : 'Reading…')
-            : 'Total ' + total + (this.base ? ' since Reset' : '') + (avg.length ? '  ·  10-drive average ' + avg.reduce((a, b) => a + b, 0) : '');
-        cv.text(sub, x + 24, Math.min(y, 492), 20, t.dim);
+        const bad = lvl === 'Below min' || lvl === 'At min' || lvl === 'Overfilled';
+        cv.text(lvl || '--', x + 18, y + 116, 52, bad ? t.warn : lvl ? t.text : t.dim, { font: 'bold' });
+        cv.text(lvl ? "the car's own measurement" : 'not sent by the car yet', x + w - 18, y + 116, 18, t.dim, { align: 'right' });
     }
 }
 
@@ -220,7 +266,8 @@ function refused(raw) {
 /** The demo's values (Combo's demo setting): a warm engine, no misfires. */
 function demoValues(now) {
     const s = Math.sin(now / 9000);
-    return { oil: 102 + 4 * s, coolant: 92 + 2 * s, gearbox: 81 + 3 * s, iat: 34 + 3 * s, mis: [0, 0, 0, 0, 0, 0] };
+    return { oil: 102 + 4 * s, coolant: 92 + 2 * s, gearbox: 81 + 3 * s, iat: 34 + 3 * s, mis: [0, 0, 0, 0, 0, 0],
+        tyres: { FL: { p: 2.3, t: 31, pt: 2.5 }, FR: { p: 2.3, t: 31, pt: 2.5 }, RL: { p: 2.5, t: 34, pt: 2.7 }, RR: { p: 2.6, t: 34, pt: 2.7 } } };
 }
 
 module.exports = { MView, oilLevel, refused };

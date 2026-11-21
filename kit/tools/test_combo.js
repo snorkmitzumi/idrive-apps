@@ -736,7 +736,7 @@ checks.push(
         const t2 = await b.tab(2);
         assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
-        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires this drive') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
+        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
         const t3 = await b.tab(5);
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
@@ -864,7 +864,7 @@ checks.push(
         assert.deepStrictEqual(m.shown(), [0, 0, 0, 0, 0, 0], 'Reset: from now on');
         // drawn without NaN, the misfire in the warn colour's row
         const tx = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; m.draw(cv, themes.theme('m_tricolour')); });
-        assert(tx.includes('Cyl 3') && tx.some((x) => /^75$/.test(x)) && !tx.some((x) => /NaN|undefined/.test(x)), tx.join(' | '));
+        assert(tx.includes('since Reset') && tx.includes('Tyres') && tx.some((x) => /^75$/.test(x)) && !tx.some((x) => /NaN|undefined/.test(x)), tx.join(' | '));
         // the car's own oil temperature stopped: then the DME is asked (it refuses: not asked again)
         values.live.oilT = 0; const was = asked.length; clock += 60000;
         for (let i = 0; i < 40; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
@@ -885,6 +885,11 @@ checks.push(
         const tx = await page(d);
         ['2.4/20', '2.7/20', '--/20'].forEach((x) => assert(tx.includes(x), x + ' missing: ' + tx.join(' | ')));
         assert(tx.includes('xDrive') && !tx.some((x) => /NaN|undefined/.test(x)));
+        // the M View tab's tyre card: pressure, target, temperature per tyre
+        const { MView } = appModule('mview');
+        const mv = new MView({ reader: { key: () => '' }, values: { live: { tyres: ty, tyresT: Date.now() } }, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet });
+        const mt = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; mv.draw(cv, themes.theme('m_tricolour')); });
+        assert(mt.includes('2.4') && mt.includes('target 2.4') && mt.includes('20°C') && mt.includes('target 2.9') && !mt.some((x) => /NaN|undefined/.test(x)), mt.join(' | '));
         const t2 = await page(Object.assign(car(), { tyres: null }));
         assert(!t2.some((x) => /^\d\.\d\/\d+$/.test(x)), 'no tyres from the car: nothing drawn');
     }],
