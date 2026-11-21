@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (oil, coolant and gearbox temperatures, oil level, misfires per cylinder) and Ambient config's colours, animations and driving modes",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -558,6 +558,13 @@
       "type": "bool",
       "default": false,
       "hidden": true
+    },
+    {
+      "key": "decorWith",
+      "label": "Decor lights (dash, under the door trim) with",
+      "type": "choice",
+      "default": "upper",
+      "options": [["upper", "Upper lights"], ["lower", "Lower lights (like BMW)"]]
     },
     {
       "key": "nightDim",
