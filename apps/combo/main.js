@@ -206,7 +206,8 @@ mgu.run({
          * RAIL_HIDE_MS after the last touch), the controller pushed left / right too (open until pushed back or a row
          * is pressed). The full layout's rail opens by itself the first time the Ambient tab shows, so its pages are found.
          */
-        const RAIL_W = 300, MAP_W = 340, RAIL_HIDE_MS = 5000, RAIL_TOP = 50;
+        // EDGE: where the page shows from (the kit's full layout trims 12 px each side, display.js FULL.src)
+        const RAIL_W = 300, MAP_W = 340, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
         let railOpen = null, railT = 0, railShown = false, railByKnob = false;      // railOpen: null, 'L' or 'R'
         const mapped = () => owned && !!(ctx.mapStyle && ctx.mapStyle());
         const barW = () => (mapped() ? MAP_W : RAIL_W);
@@ -255,23 +256,24 @@ mgu.run({
             return null;
         });
         /** A touch on an open bar or a handle is the bar's, not the page's (the colour ring under it). */
-        const onRail = (x, y) => owned && (railOpen === 'L' ? x < barW() : railOpen === 'R' ? x > W - barW()
-            : (y > 200 && y < 340 && (x < 44 || (mapped() && x > W - 44))));
+        const onRail = (x, y) => owned && (railOpen === 'L' ? x < barW() + EDGE : railOpen === 'R' ? x > W - barW() - EDGE
+            : (y > 190 && y < 350 && (x < EDGE + 44 || (mapped() && x > W - EDGE - 44))));
         function drawRail(cv, t) {
             // (opened with the controller: open until it is pushed back or a row is pressed)
             if (railOpen && !railByKnob && Date.now() - railT > RAIL_HIDE_MS) { railOpen = null; if (amb && tab === AMBIENT) amb.dirty(); }
             const handle = (side) => {
                 if (!railRows(side).length) return;
-                const x = side === 'L' ? 0 : W - 22;
-                cv.roundRect(x, 228, 22, 84, 8, withAlpha('#ffffff', 0.16));
-                cv.text(side === 'L' ? '>' : '<', x + 11, 278, 22, t.text, { align: 'center', font: 'bold' });
-                cv.target(side === 'L' ? 0 : W - 44, 200, 44, 140, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
+                // in the margin beside the cards that the kit shows (it trims x < 12 and > 1588: 2.5.0's right one was cut off)
+                const x = side === 'L' ? EDGE : W - EDGE - 10;
+                cv.roundRect(x, 210, 10, 120, 5, withAlpha('#ffffff', 0.42));
+                cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
             };
             if (!railOpen) { handle('L'); if (mapped()) handle('R'); return; }
-            const side = railOpen, rows = railRows(side), bw = barW(), x0 = side === 'L' ? 0 : W - bw;
-            cv.roundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, t.bg);
-            cv.roundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
-            cv.strokeRoundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
+            const side = railOpen, rows = railRows(side), bw = barW(), x0 = side === 'L' ? EDGE : W - bw - EDGE;
+            const bot = 516 + (cv.extra || 0);         // (down into the room below the page, as the cards)
+            cv.roundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, t.bg);
+            cv.roundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
+            cv.strokeRoundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
             let y = RAIL_TOP + 18;
             const big = rows.length <= 4;
             rows.forEach((r) => {
@@ -281,7 +283,7 @@ mgu.run({
                 y += h + (sub ? 6 : 10);
             });
             // close: a row of its own at the bottom (or wait: it hides by itself)
-            G.button(cv, t, x0 + 20, 516 - 18 - 44, bw - 40, 44, side === 'L' ? '<  Hide' : 'Hide  >', () => openRail(null), { key: side === 'L' ? 'rail-close' : 'rail-r-close' });
+            G.button(cv, t, x0 + 20, bot - 18 - 44, bw - 40, 44, side === 'L' ? '<  Hide' : 'Hide  >', () => openRail(null), { key: side === 'L' ? 'rail-close' : 'rail-r-close' });
         }
 
         async function render() {

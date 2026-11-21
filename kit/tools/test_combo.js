@@ -1094,7 +1094,8 @@ checks.push(
         ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT', 'COLOUR', 'ANIMATIONS', 'MODES'].forEach((x) => assert(tl.includes(x), x + ' missing: ' + tl.join(' | ')));
         await b.press('nav-3');
         const tm = await b.draw();
-        assert(tm.includes('this drive') && !tm.includes('COLOUR') && tm.includes('>') && tm.includes('<'), 'M View shown, the bar closed (a handle each side): ' + tm.join(' | '));
+        assert(tm.includes('this drive') && !tm.includes('COLOUR'), 'M View shown, the bar closed: ' + tm.join(' | '));
+        assert(['rail', 'rail-r'].every((k) => (b.canvas().targets || []).some((q) => q.key === k)), 'a handle each side');
         assert.strictEqual(b.tilt('E'), 'misfires', 'pushed right: the knob on Reset misfires');
         const tr = await b.draw();
         assert(tr.includes('RESET MISFIRES') && tr.includes('SETTINGS'), 'the right bar: ' + tr.join(' | '));
@@ -1104,5 +1105,37 @@ checks.push(
         await b.draw(); await b.press('rail'); await b.press('amb-2');
         const ta = await b.draw();
         assert(ta.includes('AMBIENT TAB 2') && fakeAmb.calls.indexOf('select 2') >= 0, 'Ambient\'s Modes from the left bar: ' + ta.join(' | '));
+    }],
+    ['2.5.1 Driving with room below the page (no bar): the panels share it, none ends in a strip, none gets it twice', async () => {
+        freshKit();
+        const G = require(path.join(KIT, 'gauges'));
+        delete require.cache[path.join(APP, 'draw.js')];
+        const draw = require(path.join(APP, 'draw.js'));
+        const bottoms = [], panel = G.panel;
+        G.panel = function (cv, t, x, y, w, h, title) { const r = panel.apply(this, arguments); bottoms.push([title, Math.round(r.y + r.h)]); return r; };
+        try {
+            const cv = new Canvas(1600, 520); cv.extra = 49;
+            draw.render(cv, themes.theme('m_tricolour'), car(), { settings: settingsOf(), peak: () => null, why: () => '', redline: 7000, scaleMax: 8000, has48: true, tabs: [], sel: 0 });
+            const by = (n) => (bottoms.find((b) => b[0] === n) || [])[1];
+            ['Boost', 'xDrive', '12 V battery'].forEach((n) => assert(Math.abs(by(n) - (512 + 49)) <= 1, n + ' to the screen\'s bottom: ' + JSON.stringify(bottoms)));
+            assert(by('Engine speed') > 270 && by('Engine speed') < 512, 'the upper panel grew by its share: ' + by('Engine speed'));
+            assert(!bottoms.some((b) => b[1] > 512 + 50), 'none got the room twice: ' + JSON.stringify(bottoms));
+        } finally { G.panel = panel; }
+    }],
+    ['2.5.1 M View with room below the page: both rows of tiles the same height, down to the screen\'s bottom', async () => {
+        const { MView } = appModule('mview');
+        const G = require(path.join(KIT, 'gauges'));
+        const tiles = [], stat = G.stat;
+        G.stat = function (cv, t, x, y, w, h, o) { tiles.push([o.label, y, h, cv.extra]); return stat.apply(this, arguments); };
+        try {
+            const m = new MView({ reader: { key: () => '' }, values: { live: {} }, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet });
+            const cv = new Canvas(1600, 520); cv.extra = 49;
+            m.draw(cv, themes.theme('m_tricolour'), { demo: true });
+            const h = tiles.map((x) => x[2]);
+            assert(h.length === 4 && h.every((x) => x === h[0]) && h[0] > 228, 'the same height, taller: ' + JSON.stringify(tiles));
+            assert(Math.abs(tiles[2][1] + tiles[2][2] - 561) <= 1, 'the lower row to the bottom: ' + JSON.stringify(tiles));
+            assert(tiles.every((x) => !x[3]), 'drawn with the kit\'s stretch off');
+            assert.strictEqual(cv.extra, 49, 'the room given back afterwards');
+        } finally { G.stat = stat; }
     }],
 );

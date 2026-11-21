@@ -22,16 +22,23 @@ const BOOST_MAX = { '2.0': [2, 30, 200], '2.5': [2.5, 36, 250], '3.0': [3, 44, 3
 const PRESS = { bar: [1, 'bar', 2], psi: [14.5038, 'psi', 1], kpa: [100, 'kPa', 0] };
 const AWD = { _4WD_STANDARD: '4WD', _4WD_ALTERNATIV: '4WD Sport', _2WD: '2WD', AWDSAND: 'Sand' };
 
-/** The four columns, left to right: same width and height. */
-function columns() {
+/**
+ * The four columns, left to right: same width and height. ex: the room the screen has below the page (cv.extra, where
+ * the kit runs the screen with no bar: 2.5.1) - the columns go down into it, each panel taking its share, and what is
+ * at a panel's bottom (the gauges, the bars) moves down with it, so no panel ends in an empty strip.
+ */
+function columns(ex) {
     const out = [];
-    for (let i = 0; i < 4; i++) out.push({ x: LEFT + i * (COL_W + GAP), y: G.TOP, w: COL_W, h: G.BOTTOM - G.TOP });
+    for (let i = 0; i < 4; i++) out.push({ x: LEFT + i * (COL_W + GAP), y: G.TOP, w: COL_W, h: G.BOTTOM - G.TOP + (ex || 0), ex: ex || 0 });
     return out;
 }
 /** A column cut into a top and a bottom panel (16 px apart), as M Vitals' Engine speed over Boost. */
 function halves(c) {
-    const h = (c.h - HALF_GAP) / 2;
-    return [{ x: c.x, y: c.y, w: c.w, h }, { x: c.x, y: c.y + h + HALF_GAP, w: c.w, h }];
+    const h = (c.h - HALF_GAP) / 2, ex = c.ex || 0;
+    return [{ x: c.x, y: c.y, w: c.w, h, ex: 0, e: ex / 2 }, { x: c.x, y: c.y + h + HALF_GAP, w: c.w, h, ex, e: ex / 2 }];
+}
+/** A panel in a column (b.ex: it reaches the page's bottom, where G.panel itself adds the room below: not twice). */
+function panelIn(cv, t, b, title) { return G.panel(cv, t, b.x, b.y, b.w, b.h - (b.ex || 0), title);
 }
 
 /** Unit conversions for the settings (M Vitals'). */
@@ -64,7 +71,7 @@ function render(cv, t, d, opts) {
     const tabs = opts.tabs || [];
     G.frame(cv, t, tabs, opts.sel || 0, [d.demo && { text: 'DEMO' }, tabs.length && opts.note && { text: opts.note, color: 'warn' }]);
     if (opts.note && !tabs.length) cv.text(opts.note, 800, 25, 20, t.warn, { align: 'center', font: 'bold', spacing: 1 });
-    const [c1, c2, c3, c4] = columns();
+    const [c1, c2, c3, c4] = columns(cv.extra || 0);
     engineColumn(cv, t, d, u, pk, s, opts, c1);
     speedColumn(cv, t, d, u, pk, s, c2);
     xdriveColumn(cv, t, d, u, pk, s, c3);
@@ -74,20 +81,20 @@ function render(cv, t, d, opts) {
 /* ---------- 1: engine speed over boost ---------- */
 function engineColumn(cv, t, d, u, pk, s, opts, c) {
     const [a, b] = halves(c), red = opts.redline, max = opts.scaleMax;
-    G.panel(cv, t, a.x, a.y, a.w, a.h, 'Engine speed');
+    panelIn(cv, t, a, 'Engine speed');
     bigValue(cv, t, a.x, a.y, a.w, G.fmt(d.rpm, 0), 'rpm', G.isNum(d.rpm) && d.rpm >= red ? '#ff4a4a' : null);
-    kv(cv, t, a.x + 22, a.y + 88, a.w - 44, 'PEAK', withUnit(pk('rpm'), 0, 'rpm'));
-    kv(cv, t, a.x + 22, a.y + 112, a.w - 44, 'GEAR · SHIFT AT', (gearText(d) || '--') + ' · ' + withUnit(red, 0, 'rpm'));
-    G.segBar(cv, t, a.x + 22, a.y + 126, a.w - 44, 46, {
+    kv(cv, t, a.x + 22, a.y + 88 + a.e / 2, a.w - 44, 'PEAK', withUnit(pk('rpm'), 0, 'rpm'));
+    kv(cv, t, a.x + 22, a.y + 112 + a.e / 2, a.w - 44, 'GEAR · SHIFT AT', (gearText(d) || '--') + ' · ' + withUnit(red, 0, 'rpm'));
+    G.segBar(cv, t, a.x + 22, a.y + 126 + a.e, a.w - 44, 46, {
         panel: false, value: d.rpm, min: 0, max, step: 500, scale: { every: 2000, div: 1000, size: 20, labelY: 30 }, ramp: 'hot', limit: red,
         marks: [{ value: red, color: 'crit' }], peak: pk('rpm'),
     });
     const bmax = BOOST_MAX[s.get('boostMax')] || BOOST_MAX['2.5'], top = u.psi ? bmax[1] : u.kpa ? bmax[2] : bmax[0], dec = u.pDec;
-    G.panel(cv, t, b.x, b.y, b.w, b.h, 'Boost');
+    panelIn(cv, t, b, 'Boost');
     bigValue(cv, t, b.x, b.y, b.w, G.fmt(u.P(d.boost), dec), u.pU);
-    kv(cv, t, b.x + 22, b.y + 88, b.w - 44, 'TARGET', withUnit(u.P(d.boostTarget), dec, u.pU));
-    kv(cv, t, b.x + 22, b.y + 112, b.w - 44, 'PEAK', withUnit(u.P(pk('boost')), dec, u.pU));
-    G.segBar(cv, t, b.x + 22, b.y + 126, b.w - 44, 46, {
+    kv(cv, t, b.x + 22, b.y + 88 + b.e / 2, b.w - 44, 'TARGET', withUnit(u.P(d.boostTarget), dec, u.pU));
+    kv(cv, t, b.x + 22, b.y + 112 + b.e / 2, b.w - 44, 'PEAK', withUnit(u.P(pk('boost')), dec, u.pU));
+    G.segBar(cv, t, b.x + 22, b.y + 126 + b.e, b.w - 44, 46, {
         panel: false, value: u.P(d.boost), min: 0, max: top, step: u.psi ? 2 : u.kpa ? 12.5 : 0.125, scale: { every: u.psi ? 10 : u.kpa ? 50 : 0.5, decimals: u.psi || u.kpa ? 0 : 1, size: 20, labelY: 30 },
         ramp: 'hot', limit: top * 0.85, marks: [{ value: top * 0.85, color: 'warn' }], peak: u.P(pk('boost')),
     });
@@ -105,22 +112,23 @@ function gearText(d) {
 
 /* ---------- 2: speed, power, torque ---------- */
 function speedColumn(cv, t, d, u, pk, s, c) {
-    const ph = 190;
+    const e = (c.ex || 0) / 2, ph = 190 + e;
     G.panel(cv, t, c.x, c.y, c.w, ph, 'Speed');
     const sp = u.V(G.hold('combo.speed', d.speed, 1000 / (s.get('speedRate') || 10)));
-    const sw = cv.text(G.fmt(sp, 0), c.x + 22, c.y + 160, 84, G.isNum(sp) ? t.text : t.dim, { font: 'num' });
-    cv.text(u.vU, c.x + 30 + sw, c.y + 160, 24, t.dim);
+    const sw = cv.text(G.fmt(sp, 0), c.x + 22, c.y + 160 + e / 2, 84, G.isNum(sp) ? t.text : t.dim, { font: 'num' });
+    cv.text(u.vU, c.x + 30 + sw, c.y + 160 + e / 2, 24, t.dim);
     const gr = gearText(d);
-    if (gr) cv.text(gr, c.x + c.w - 22, c.y + 160, 96, gr[0] === 'M' ? t.crit : gr[0] === 'S' ? t.accent : t.text, { align: 'right', font: 'gear' });
+    if (gr) cv.text(gr, c.x + c.w - 22, c.y + 160 + e / 2, 96, gr[0] === 'M' ? t.crit : gr[0] === 'S' ? t.accent : t.text, { align: 'right', font: 'gear' });
     const pw = d.power || {}, tq = s.get('torqueUnit') === 'kgm' ? (s.get('maxTorqueKgm') || 100) : u.TQ(s.get('torqueMax') || 900);
-    const py = c.y + ph + 24, gap = 132;
+    const py = c.y + ph + 24, gap = 132 + e;
     G.bar(cv, t, c.x, py, c.w, 92, { label: pw.calc ? 'Power (calc)' : 'Power', value: u.PW(pw.kw), unit: u.pwU, max: u.PW(s.get('maxPower')), niceMax: true, ramp: 'hot', peak: u.PW(pk('power')), peakText: true });
     G.bar(cv, t, c.x, py + gap, c.w, 92, { label: 'Torque', value: u.TQ(d.torque), unit: u.tqU, decimals: s.get('torqueUnit') === 'kgm' ? 1 : 0, max: tq, niceMax: false, ramp: 'hot', peak: u.TQ(pk('torque')), peakText: true });   // ends at the setting
 }
 
 /* ---------- 3: xDrive ---------- */
 function xdriveColumn(cv, t, d, u, pk, s, c) {
-    G.panel(cv, t, c.x, c.y, c.w, c.h, 'xDrive');
+    panelIn(cv, t, c, 'xDrive');
+    const e = (c.ex || 0) / 2;
     tyreGrid(cv, t, d.tyres, u, c);
     if (s.get('xdrive') === 'off') {
         cv.text('RWD', c.x + 22, c.y + 116, 52, t.text, { font: 'bold' });
@@ -133,13 +141,13 @@ function xdriveColumn(cv, t, d, u, pk, s, c) {
     else if (sp.from) cv.text(sp.from, c.x + 22, c.y + 134, 18, t.dim);
     // (the transfer case reads +-1-2 Nm with its clutch open, a G26's log: shown as 0; a peak only above that)
     const idle = (nm) => (G.isNum(nm) && Math.abs(nm) <= 5 ? 0 : nm), fp = pk('lmvFront');
-    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(idle(sp.nm)), 0, u.tqU));
-    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(G.isNum(fp) && fp > 5 ? fp : null), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 168 + e / 2, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(idle(sp.nm)), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 194 + e / 2, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(G.isNum(fp) && fp > 5 ? fp : null), 0, u.tqU));
     // wheel slip: the front axle's wheels against the rear's (+ = the front turns faster), above 5 km/h
-    kv(cv, t, c.x + 22, c.y + 220, c.w - 44, 'AXLE SLIP', G.isNum(d.slip) ? (d.slip > 0 ? '+' : '') + G.fmt(d.slip, 1) + ' %' : '--');
+    kv(cv, t, c.x + 22, c.y + 220 + e / 2, c.w - 44, 'AXLE SLIP', G.isNum(d.slip) ? (d.slip > 0 ? '+' : '') + G.fmt(d.slip, 1) + ' %' : '--');
     const rear = sp.rear;
-    G.bar(cv, t, c.x + 22, c.y + 240, c.w - 44, 92, { label: 'Rear', value: rear, unit: '%', ramp: 'hot' });
-    G.bar(cv, t, c.x + 22, c.y + 350, c.w - 44, 92, { label: 'Front', value: G.isNum(rear) ? 100 - rear : null, unit: '%', ramp: 'hot' });
+    G.bar(cv, t, c.x + 22, c.y + 240 + e, c.w - 44, 92, { label: 'Rear', value: rear, unit: '%', ramp: 'hot' });
+    G.bar(cv, t, c.x + 22, c.y + 350 + 2 * e, c.w - 44, 92, { label: 'Front', value: G.isNum(rear) ? 100 - rear : null, unit: '%', ramp: 'hot' });
 }
 
 /**
@@ -168,27 +176,28 @@ function batteryColumn(cv, t, d, u, s, opts, c) {
 const STATE_COLOR = (t, st) => (st === 'CHARGING' ? GO : st === 'SUPPLYING' ? t.warn : t.dim);
 function battery(cv, t, box, title, x, key, u, opts) {
     const B = require('./batteries');
-    G.panel(cv, t, box.x, box.y, box.w, box.h, title);
+    panelIn(cv, t, box, title);
+    const e = box.e != null ? box.e : (box.ex || 0) / 2;
     const is48 = key === 'b48', v = x || {}, st = B.state(v.a, is48 ? null : v.v), any = G.isNum(v.soc) || G.isNum(v.v);
     const r = box.x + box.w - 22, l = box.x + 22;
     if (st) cv.text(st, r, box.y + 42, 20, STATE_COLOR(t, st), { align: 'right', font: 'bold', spacing: 1.5 });
     cv.text('CHARGE', l, box.y + 76, 18, t.dim, { font: 'bold', spacing: 1.2 });
-    const pw = cv.text(G.fmt(v.soc, 0), l, box.y + 130, 56, G.isNum(v.soc) ? t.text : t.dim, { font: 'num' });
-    cv.text('%', l + 6 + pw, box.y + 130, 24, t.dim, { font: 'bold' });
+    const pw = cv.text(G.fmt(v.soc, 0), l, box.y + 130 + e / 2, 56, G.isNum(v.soc) ? t.text : t.dim, { font: 'num' });
+    cv.text('%', l + 6 + pw, box.y + 130 + e / 2, 24, t.dim, { font: 'bold' });
     const sign = (n, dec, unit) => (G.isNum(n) ? (n > 0 ? '+' : '') + G.fmt(n, dec) + ' ' + unit : '--');
     // the power into the battery, as the 48 V panel's kW: the 12 V one in W (voltage x current), + = charging
     const w12 = !is48 && G.isNum(v.v) && G.isNum(v.a) ? v.v * v.a : null;
     // (a car with no unit that gives the 12 V current, opts.no12A: the voltage alone, the state from it above)
     const second = is48 ? '  ·  ' + sign(v.kw, 2, 'kW') : opts.no12A ? '' : '  ·  ' + sign(w12, 0, 'W');
-    cv.text(withUnit(v.v, is48 ? 1 : 2, 'V') + second, r, box.y + 100, 22, any ? t.text : t.dim, { align: 'right', font: 'bold' });
+    cv.text(withUnit(v.v, is48 ? 1 : 2, 'V') + second, r, box.y + 100 + e / 2, 22, any ? t.text : t.dim, { align: 'right', font: 'bold' });
     // the charge as 10 segments, as eDrive's battery icon
-    const sy = box.y + 150, sw = (box.w - 44) / 10, f = G.isNum(v.soc) ? G.clamp(v.soc / 100, 0, 1) : 0;
+    const sy = box.y + 150 + e, sw = (box.w - 44) / 10, f = G.isNum(v.soc) ? G.clamp(v.soc / 100, 0, 1) : 0;
     const col = !G.isNum(v.soc) ? t.tick : v.soc < 25 ? t.crit : v.soc < 45 ? t.warn : GO;
     for (let k = 0; k < 10; k++) cv.roundRect(l + k * sw, sy, sw - 5, 24, 3, f * 10 > k + 0.05 ? col : withAlpha(t.track || '#333', 0.9));
     // under the charge: health and temperature, or why there is nothing to show
     const ht = (G.isNum(v.soh) ? G.fmt(v.soh, 0) + ' %' : '--') + ' · ' + withUnit(u.T(v.temp), 0, u.tU);
-    if (any) kv(cv, t, l, box.y + 204, box.w - 44, 'HEALTH · TEMP', ht);
-    else cv.text(opts.why(key), l, box.y + 204, 18, t.dim);
+    if (any) kv(cv, t, l, box.y + 204 + e, box.w - 44, 'HEALTH · TEMP', ht);
+    else cv.text(opts.why(key), l, box.y + 204 + e, 18, t.dim);
 }
 
 module.exports = { columns, halves, render, units, gearText, COL_W };
