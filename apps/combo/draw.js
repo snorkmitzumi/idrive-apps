@@ -131,8 +131,10 @@ function xdriveColumn(cv, t, d, u, pk, s, c) {
     cv.text(AWD[d.awd] || '--', c.x + 22, c.y + 104, 44, hot ? t.crit : AWD[d.awd] ? t.text : t.dim, { font: 'bold' });
     if (hot) cv.text('DERATED / OFF', c.x + 22, c.y + 134, 20, t.crit, { font: 'bold', spacing: 1.5 });
     else if (sp.from) cv.text(sp.from, c.x + 22, c.y + 134, 18, t.dim);
-    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(sp.nm), 0, u.tqU));
-    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(pk('lmvFront')), 0, u.tqU));
+    // (the transfer case reads +-1-2 Nm with its clutch open, a G26's log: shown as 0; a peak only above that)
+    const idle = (nm) => (G.isNum(nm) && Math.abs(nm) <= 5 ? 0 : nm), fp = pk('lmvFront');
+    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(idle(sp.nm)), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(G.isNum(fp) && fp > 5 ? fp : null), 0, u.tqU));
     // wheel slip: the front axle's wheels against the rear's (+ = the front turns faster), above 5 km/h
     kv(cv, t, c.x + 22, c.y + 220, c.w - 44, 'AXLE SLIP', G.isNum(d.slip) ? (d.slip > 0 ? '+' : '') + G.fmt(d.slip, 1) + ' %' : '--');
     const rear = sp.rear;

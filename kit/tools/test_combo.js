@@ -888,6 +888,22 @@ checks.push(
         const t2 = await page(Object.assign(car(), { tyres: null }));
         assert(!t2.some((x) => /^\d\.\d\/\d+$/.test(x)), 'no tyres from the car: nothing drawn');
     }],
+    ['2.4 #5 seats: every step logged; a set-up that never comes back is given up, a seat interface not offered is not called', async () => {
+        const { Seats } = appModule('seats');
+        const logged = [], log = { info: (m) => logged.push(m), warn: (m) => logged.push(m) };
+        // never answers (2.3.1 on a G26: not one seat line in the log)
+        const hang = new Seats({ signals: { proxy: () => new Promise(() => {}), call: () => new Promise(() => {}) }, log, stepMs: 50 });
+        await hang.read();
+        assert(logged.some((m) => /seats: asking the car for its seat interface/.test(m)) && logged.some((m) => /seat interface set-up: no answer/.test(m)), logged.join(' | '));
+        assert(!hang.busy, 'not left waiting');
+        // set up, but the car doesn't offer it: no call, asked again after 30 s
+        let calls = 0, clock = 1e6;
+        const off = new Seats({ signals: { proxy: async () => ({ isAvailable: () => false }), call: async () => { calls++; return {}; } }, log, now: () => clock, stepMs: 50 });
+        await off.read();
+        assert.strictEqual(calls, 0); assert(/does not offer/.test(off.state.why) && off.offered === false);
+        off.last = clock; clock += 5000; off.poll(); assert(!off.busy, 'asked again before 30 s');
+        assert(logged.some((m) => /offered by the car: false/.test(m)));
+    }],
     ['2.4 #3 M View: an engine unit without misfire monitors is not asked again; nothing read while locked', async () => {
         const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
         const asked = [];

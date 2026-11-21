@@ -16,6 +16,15 @@ const G = require('./kit/gauges');
 
 const IFACE = 'de.bmw.body.seat.SeatTargetAdjustment', INSTANCE = '1';
 const DRIVER = 0, POLL_MS = 2000, CALL_MS = 3000;
+// a step that doesn't finish in this long is given up (2.3.1 on a G26: the tab opened three times, not one seat line
+// in the log - a set-up or call that never came back); an interface the car doesn't offer: asked again after RETRY_MS
+const STEP_MS = 8000, RETRY_MS = 30000;
+/** p, or a rejection after ms (the native call itself can't be stopped: it is only no longer waited for). */
+const within = (p, ms, what) => new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error(what + ': no answer in ' + Math.round(ms / 1000) + ' s')), ms);
+    if (t.unref) t.unref();
+    p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); });
+});
 // the seat's motors, by the catalog's SeatAxis numbers (German abbreviations as BMW names them)
 const AXES = ['SLV', 'SNV', 'SHV', 'STV', 'LNV', 'LKV', 'LBV', 'KHV', 'KTV', 'FNV', 'MNV'];
 const NAMES = { SLV: 'Forward / back', SNV: 'Seat tilt', SHV: 'Height', STV: 'Thigh support', LNV: 'Backrest angle',
@@ -27,14 +36,15 @@ const enumNo = (x, names) => (typeof x === 'number' ? x : names.indexOf(String(x
 
 class Seats {
     constructor(o) {
-        this.signals = o.signals; this.log = o.log; this.now = o.now || Date.now;
+        this.signals = o.signals; this.log = o.log; this.now = o.now || Date.now; this.stepMs = o.stepMs || STEP_MS;
         this.state = { available: null, why: 'Not asked yet', axes: [], at: 0 };
         this.p = null; this.busy = false; this.last = 0; this.shapes = {};
     }
 
     /** While the tab shows: the position again every POLL_MS. */
     poll() {
-        if (this.busy || this.now() - this.last < POLL_MS || this.state.available === false) return;
+        if (this.busy || this.state.available === false) return;
+        if (this.now() - this.last < (this.offered === false ? RETRY_MS : POLL_MS)) return;
         this.last = this.now();
         this.read().catch((e) => this.log.warn('seats: ' + e));
     }
@@ -42,8 +52,21 @@ class Seats {
     async read() {
         this.busy = true;
         try {
-            if (!this.p) this.p = await this.signals.proxy(IFACE, INSTANCE);
-            const r = await this.signals.call(this.p, 'getCurrentPosition', { inSeatID: DRIVER }, CALL_MS);
+            // each step to the log once (where it stops, when it does)
+            if (!this.p) {
+                this.step('asking the car for its seat interface (' + IFACE.split('.').pop() + ' ' + INSTANCE + ')');
+                this.p = await within(Promise.resolve().then(() => this.signals.proxy(IFACE, INSTANCE)), this.stepMs, 'seat interface set-up');
+                this.step('seat interface set up, offered by the car: ' + (this.p && this.p.isAvailable ? this.p.isAvailable() : 'unknown'));
+            }
+            // not offered (yet): no call (it would only wait), asked again after RETRY_MS
+            if (this.p && this.p.isAvailable && !this.p.isAvailable()) {
+                this.offered = false;
+                this.state = Object.assign({}, this.state, { why: 'The car does not offer its seat interface to apps (asked again every 30 s)' });
+                return;
+            }
+            this.offered = true;
+            this.step('calling getCurrentPosition');
+            const r = await within(this.signals.call(this.p, 'getCurrentPosition', { inSeatID: DRIVER }, CALL_MS), this.stepMs, 'getCurrentPosition');
             this.take(r);
         } catch (e) {
             const why = String(e && e.message || e);
@@ -54,6 +77,8 @@ class Seats {
             if (this.state.why !== this._lastWhy) { this._lastWhy = this.state.why; this.log.warn('seats: ' + why); }
         } finally { this.busy = false; }
     }
+
+    step(what) { if (!this.steps) this.steps = {}; if (!this.steps[what]) { this.steps[what] = true; this.log.info('seats: ' + what); } }
 
     /** The reply as the tab shows it; each new shape of it to the log (how the car numbers the positions). */
     take(r) {
