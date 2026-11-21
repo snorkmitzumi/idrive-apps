@@ -1,8 +1,8 @@
 {
   "id": "combo",
   "title": "Combo",
-  "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer) and Ambient config's colours, animations, driving modes and favourites",
-  "version": "2.3.1",
+  "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (oil, coolant and gearbox temperatures, oil level, misfires per cylinder) and Ambient config's colours, animations and driving modes",
+  "version": "2.4.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -30,11 +30,23 @@
   },
   "signals": {
     "de.bmw.infotainment.vehicle.CDS": {
-      "statusEngineSpeed2": "rs"
+      "statusEngineSpeed2": "rs",
+      "statusEngineTemperature": "rs"
+    },
+    "de.bmw.infotainment.vehicle.Vehicle": {
+      "_optional": "day or night: dimmer at night",
+      "statusDayNightChangeOver": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle2": {
       "statusCarSpeed2": "rs",
-      "statusVehiclePartType": "rs"
+      "statusVehiclePartType": "rs",
+      "statusOilDipstick2": "rs"
+    },
+    "de.bmw.infotainment.vehicle.TPMS": {
+      "_optional": "the tyres beside xDrive",
+      "statusTyreTemperature": "rs",
+      "statusTyrePressure": "rs",
+      "statusTargetTyrePressure": "rs"
     },
     "de.bmw.infotainment.drivingexcitement.FES": {
       "statusSwitchDriveDynamicSport2": "rs",
@@ -83,10 +95,6 @@
     "de.bmw.infotainment.misc.ComfortFunctionIuK": {
       "ambientLightInteriorColour": "w",
       "statusAmbientLightInteriorColour": "rs"
-    },
-    "de.bmw.infotainment.vehicle.Vehicle": {
-      "_optional": "day or night: dimmer at night",
-      "statusDayNightChangeOver": "rs"
     },
     "de.bmw.body.Light": {
       "_optional": "the turn signals: that side's lights breathe green",
@@ -1339,6 +1347,107 @@
           "max": 90
         }
       ]
+    },
+    "mview": {
+      "comment": "The M View tab (mview.js): read only while it shows, one request at a time, after the ambient light's writes. Engine oil and coolant come from the car's own signals (CDS statusEngineTemperature, VehicleInformation DataPowerTrain2); these candidates only while the car sends none. oil / coolant / iat: OBD service 01 PIDs 5C / 05 / 0F from the engine unit (DME 0x12; a G26's answers service 01, it refuses many 22 F4xx), then the same over UDS. egs: gearbox oil from the gearbox unit (EGS 0x18), the car's BasicDataSet never arrives on a G26. misfire: OBD service 06 monitors (A1 = all cylinders, A2 = cylinder 1 ...), tid 0C = misfires this driving cycle, 0B = average of the last 10; an engine unit that refuses service 06 is asked 22 F6xx.",
+      "oil": [
+        {
+          "ecu": 18,
+          "obd": "5C",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 170,
+          "note": "engine oil temperature, only while the car’s own signal sends none"
+        },
+        {
+          "ecu": 18,
+          "did": "F45C",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 170
+        }
+      ],
+      "coolant": [
+        {
+          "ecu": 18,
+          "obd": "05",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 150
+        },
+        {
+          "ecu": 18,
+          "did": "F405",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 150
+        }
+      ],
+      "iat": [
+        {
+          "ecu": 18,
+          "obd": "0F",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 120
+        },
+        {
+          "ecu": 18,
+          "did": "F40F",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 120
+        }
+      ],
+      "egs": [
+        {
+          "ecu": 24,
+          "did": "6000",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -40,
+          "min": -40,
+          "max": 160,
+          "note": "ZF 8HP gearbox oil temperature, deg C + 40 (read on a G22)"
+        },
+        {
+          "ecu": 24,
+          "did": "DA12",
+          "bytes": 1,
+          "at": 0,
+          "factor": 1,
+          "offset": -48,
+          "min": -40,
+          "max": 160,
+          "note": "gearbox oil temperature, deg C + 48 (a forum report, not confirmed)"
+        }
+      ],
+      "misfire": {
+        "ecu": 18,
+        "tid": "0C",
+        "avgTid": "0B",
+        "cylinders": 6,
+        "note": "cylinders: asked when the engine unit doesn’t list its monitors (mid A0)"
+      }
     }
   }
 }

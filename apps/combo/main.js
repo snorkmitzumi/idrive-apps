@@ -8,8 +8,10 @@
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
  *   Seats        the driver seat's position from the car (seats.js; reading only for now: memory 1-3 and easy entry
  *                next, once a car's log shows the position reply)
- *   Ambient, Animations, Modes, Favourites
- *                Ambient config's tabs (its Colour, Animations, Driving modes and Favourites; not the Strobe), the
+ *   M View       engine oil, coolant, gearbox oil and intake air temperatures, the oil level, misfires per cylinder
+ *                (mview.js; read only while the tab shows)
+ *   Ambient, Animations, Modes
+ *                Ambient config's tabs (its Colour, Animations and Driving modes; not Favourites, not the Strobe), the
  *                same code, taken from shared/ambient_config at build time (app.json "include", ambient_page.js)
  *
  * The ambient light runs from the platform's start (app.json "autostart"), as Ambient config does: the look and the
@@ -33,13 +35,15 @@ const { DidReader } = require('./kit/dids');
 const { Reads } = require('./reads');
 const { Perf, PerfDemo } = require('./perf');
 const { Seats } = require('./seats');
+const { MView } = require('./mview');
 const ambientPage = require('./ambient_page');
 
 const W = 1600, H = 520;
-const TABS = ['Driving', 'Performance', 'Seats'];
-// Ambient config's tabs under names that say what they are next to Driving and Performance
-const AMBIENT_TABS = ['Ambient', 'Animations', 'Modes', 'Favourites'];
-const DRIVING = 0, PERF = 1, SEATS = 2, AMBIENT = 3;
+const TABS = ['Driving', 'Performance', 'Seats', 'M View'];
+// Ambient config's tabs under names that say what they are next to Driving and Performance (its Favourites left out:
+// M View took its place, 2.4.0)
+const AMBIENT_TABS = ['Ambient', 'Animations', 'Modes'];
+const DRIVING = 0, PERF = 1, SEATS = 2, MVIEW = 3, AMBIENT = 4;
 
 /** The ambient light, without screens (and the start with them): Ambient config's service, without the strobe. */
 const background = (bg) => ambientPage.background(bg, { strobe: false });
@@ -58,7 +62,7 @@ mgu.run({
         const engine = new Engine({ settings, dataDir: ctx.dataDir, log });
         const values = new Values({ settings, log, dataDir: ctx.dataDir, gearRatios: (cfg.xdrive && cfg.xdrive.gearRatios) || [] });
         const startT = Date.now();
-        // tab: DRIVING, PERF, SEATS or AMBIENT (then amb.page says which of its tabs)
+        // tab: DRIVING, PERF, SEATS, MVIEW or AMBIENT (then amb.page says which of its tabs)
         let tab = DRIVING;
 
         // the ambient light: its tabs, over the service background() started (a failure leaves the other tabs working)
@@ -70,7 +74,8 @@ mgu.run({
         } catch (e) { log.error('ambient light: ' + (e && e.stack || e)); }
 
         watches(values, engine, sc, log).forEach(([iface, h]) => {
-            ctx.signals.watch(iface, '1', h, log).then((s) => {
+            // (the tyres also read every 10 s: BMW's own app only ever reads them, so a car may not notify them)
+            ctx.signals.watch(iface, '1', h, log, /\.TPMS$/.test(iface) ? { pollMs: 10000 } : undefined).then((s) => {
                 values.subs.push(s);
                 log.info('signal ' + iface.split('.').pop() + (s.error ? ' error: ' + s.error : ' subscribed'));
             });
@@ -101,6 +106,9 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         const seats = new Seats({ signals: ctx.signals, log });
+        // the M View tab: temperatures, oil level, misfires; its reads only while the tab shows (mview.js)
+        const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
+            yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
         values.onPut = (k, v) => {
@@ -125,12 +133,13 @@ mgu.run({
                 const s = demo.sample();
                 return { demo: true, rpm: s.rpm, boost: s.boost, boostTarget: s.boostTarget, speed: s.speed, gear: s.gear, gearMode: s.gearMode, stage: 'D',
                     power: { kw: s.powerPct / 100 * settings.get('maxPower'), calc: false }, torque: s.torque,
-                    split: { rear: s.splitRear, from: null, nm: s.lmvFront }, slip: s.slip, awd: s.awd, awdQual: s.awdQual, b48: s.b48, b12: s.b12 };
+                    split: { rear: s.splitRear, from: null, nm: s.lmvFront }, slip: s.slip, awd: s.awd, awdQual: s.awdQual, b48: s.b48, b12: s.b12, tyres: s.tyres };
             }
             const L = values.live, bat = reads.fresh();
             return { demo: false, rpm: L.rpm, boost: values.boost().value, boostTarget: L.boostTarget, speed: L.speed,
                 gear: L.gear !== undefined ? L.gear : L.gearGuess, gearMode: L.gearMode || L.program || null, stage: L.stage,
-                power: values.power(), torque: L.torque, split: values.split(), slip: values.slip(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48 };
+                power: values.power(), torque: L.torque, split: values.split(), slip: values.slip(), awd: L.awd, awdQual: L.awdQual, b48: bat.b48, b12: bat.b12, has48: bat.has48,
+                tyres: L.tyresT && Date.now() - L.tyresT < 5 * 60000 ? L.tyres : null };
         }
 
         const tabs = () => TABS.concat(amb ? amb.tabs() : []);
@@ -140,10 +149,11 @@ mgu.run({
         // clears them, M Vitals' confirm pattern), Reset run (Performance), Original colour (the ambient tabs)
         const CONFIRM_MS = 6000;
         let confirmUntil = 0;
-        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : 'Original colour');
+        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : tab === MVIEW ? 'Reset misfires' : 'Original colour');
         ui.onClick('BTN_RESET', () => {
             if (tab === PERF) { perf.resetRun(); return render(); }
             if (tab === SEATS) { seats.last = 0; seats.poll(); return render(); }
+            if (tab === MVIEW) { mview.resetMisfires(); return render(); }
             if (tab === AMBIENT) { if (amb) { amb.original(); amb.dirty(); } return render(); }
             reads.opened();                                  // a button press counts as using the screen
             if (Date.now() > confirmUntil) { confirmUntil = Date.now() + CONFIRM_MS; return render(); }
@@ -155,10 +165,10 @@ mgu.run({
         // a new boost source: its peak starts over (M Vitals)
         settings.onChange((k) => { if (k === 'boostSource') { delete values.peaks.boost; delete demoPeaks.peaks.boost; } });
 
-        /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, then the ambient tabs. */
+        /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, Seats, M View, then the ambient tabs. */
         function pick(i) {
             const was = tab;
-            if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : DRIVING;
+            if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
             if (tab !== was) { log.info('tab ' + tabs()[sel()]); resetLabel(); }
@@ -185,7 +195,12 @@ mgu.run({
         async function render() {
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg);
             if (tab === DRIVING) drawDriving(cv, t);
-            else if (tab === SEATS) {
+            else if (tab === MVIEW) {
+                const demoOn = usingDemo();
+                if (!demoOn) mview.tick();
+                mview.draw(cv, t, { demo: demoOn });
+                G.frame(cv, t, tabs(), sel(), [demoOn && { text: 'DEMO' }]);
+            } else if (tab === SEATS) {
                 seats.poll();
                 seats.draw(cv, t);
                 G.frame(cv, t, tabs(), sel(), []);

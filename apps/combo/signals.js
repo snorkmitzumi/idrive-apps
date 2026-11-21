@@ -15,6 +15,15 @@ const STAGES = { P: 'P', R: 'R', N: 'N', D: 'D', 1: 'P', 2: 'R', 3: 'N', 4: 'D' 
 // MDrive.dataDisplayGearbox: the programme the cluster shows next to the gear
 const PROGRAMS = { S_MINUS_PROGRAMM: 'S', M_MINUS_PROGRAMM: 'M', 1: 'S', 2: 'M' };
 // BasicDataSet torque split qualifier: valid (or left out) - M Vitals' SPLIT_OK
+/*
+ * The tyres (M Vitals' tyreP / tyreT): the TPMS sends pressures as 0.1 x raw in the car's own pressure unit and
+ * temperatures as the car's degrees + 40 (Vehicle.statusNewCurrentUnitsStatusExt says which). Until the unit is known,
+ * each unit's plausible tyre pressures lie apart (bar 0.5-6, psi 7-60, kPa 60-600), so only one fits; psi means deg F.
+ */
+const PRESS_UNITS = { 1: 'BAR', 2: 'KPA', 3: 'PSI' }, TEMP_UNITS = { 1: 'C', 2: 'F' };
+const PRESS_TO_BAR = { BAR: 1, KPA: 0.01, PSI: 1 / 14.5038 };
+const TYRES = ['FL', 'FR', 'RL', 'RR'], TYRE_P = [0.5, 6], TYRE_T = [-40, 150];
+const unitName = (map, v) => (map[v] || (Object.keys(map).map((k) => map[k]).indexOf(v) >= 0 ? v : null));
 const SPLIT_OK = (q) => q === undefined || q === null || q === 2 || q === 10 ||
     q === 'SIGNALWERT_IST_GUELTIG' || q === 'SIGNALWERT_IST_GUELTIG__REKALIBRIERUNGSBEDARF';
 
@@ -55,20 +64,63 @@ function watches(values, engine, sc, log) {
         log.info(L.left ? 'the car is locked and left: no reads, so it can sleep' : 'the car is in use again');
     };
     const L = values.live, put = (k, v) => values.put(k, v), seen = {};
+    // the M View tab's temperatures from the car (deg C), with the time they came (mview.js: older = read instead)
+    const temp = (k, v) => { if (v === null || v === undefined) return; put(k, v); L[k + 'T'] = values.now(); };
+    // the engine's temperatures: CDS and DataPowerTrain2 carry the same two (whichever the car sends)
+    const engineTemps = (v) => { temp('coolant', sc('engineTemp', v && v.temperatureEngineDrive)); temp('oil', sc('engineTemp', v && v.temperatureEngineOilDrive)); };
     // the first raw values of the doubtful fields go to the log, as M Vitals' logRaw()
     const logRaw = (name, raw) => {
         const key = JSON.stringify(raw), l = seen[name] || (seen[name] = []);
         if (l.length >= 12 || l.indexOf(key) >= 0) return;
         l.push(key); log.info('raw ' + name + ': ' + key);
     };
+    const carUnits = { press: null, temp: null, psiSeen: false };
+    const tyreP = (raw) => {
+        const v = sc('tyrePress', raw);
+        if (v === null) return null;
+        const k = PRESS_TO_BAR[carUnits.press];
+        const bar = k ? v * k : v >= TYRE_P[0] && v <= TYRE_P[1] ? v : v >= 7 && v < 60 ? (carUnits.psiSeen = true, v / 14.5038) : v >= 60 && v <= 600 ? v / 100 : null;
+        return bar !== null && bar >= TYRE_P[0] && bar <= TYRE_P[1] ? bar : null;
+    };
+    const tyreT = (raw) => {
+        const v = sc('tyreTemp', raw), f = carUnits.temp ? carUnits.temp === 'F' : carUnits.psiSeen;
+        const c = v !== null && f ? (v - 32) * 5 / 9 : v;
+        return c !== null && c >= TYRE_T[0] && c <= TYRE_T[1] ? c : null;
+    };
+    // each tyre's { p (bar), t (deg C), pt (the car's target, bar) } and when it came (L.tyresT)
+    const tyre = (field, of, v, f) => {
+        const ty = L.tyres || (L.tyres = {});
+        TYRES.forEach((w) => { const x = f(v && v[of(w)]); (ty[w] || (ty[w] = {}))[field] = x; });
+        L.tyresT = values.now();
+    };
     return [
-        ['de.bmw.infotainment.vehicle.CDS', { statusEngineSpeed2: (v) => put('rpm', sc('rpm', v.actualValueRPMEngineCrankshaft)) }],
+        ['de.bmw.infotainment.vehicle.Vehicle', {
+            statusNewCurrentUnitsStatusExt: (v) => {
+                const press = unitName(PRESS_UNITS, v && v.unitOfMeasurementAirPressure), temp = unitName(TEMP_UNITS, v && v.unitOfMeasurementTemperature);
+                if (press === carUnits.press && temp === carUnits.temp) return;
+                carUnits.press = press; carUnits.temp = temp;
+                log.info('car units: pressure ' + (press || '?') + ', temperature ' + (temp || '?'));
+            },
+        }],
+        ['de.bmw.infotainment.vehicle.TPMS', {
+            statusTyrePressure: (v) => { logRaw('tyre pressure', TYRES.map((w) => v && v['actualValuePressureTyre' + w + 'H'])); tyre('p', (w) => 'actualValuePressureTyre' + w + 'H', v, tyreP); },
+            statusTyreTemperature: (v) => { logRaw('tyre temperature', TYRES.map((w) => v && v['actualValueTemperatureTyre' + w + 'H'])); tyre('t', (w) => 'actualValueTemperatureTyre' + w + 'H', v, tyreT); },
+            statusTargetTyrePressure: (v) => tyre('pt', (w) => 'targetPressureTyre' + w + 'H', v, tyreP),
+        }],
+        ['de.bmw.infotainment.vehicle.CDS', {
+            statusEngineSpeed2: (v) => put('rpm', sc('rpm', v.actualValueRPMEngineCrankshaft)),
+            statusEngineTemperature: (v) => { logRaw('engine temperatures [coolant, oil]', [v && v.temperatureEngineDrive, v && v.temperatureEngineOilDrive]); engineTemps(v); },
+        }],
         // the Performance tab: the dyno's acceleration, in g (Virtual Dyno's and Drag Timer's)
         ['de.bmw.infotainment.vehicle.CDS2', { statusLongitudinalAccelerationMassCenter: (v) => {
             const a = sc('accel', v.longitudinalAccelerationCentreOfGravity);
             if (a !== null) put('gLong', a / 9.80665);
         } }],
-        ['de.bmw.infotainment.vehicle.Vehicle2', Object.assign({ statusCarSpeed2: (v) => put('speed', sc('speed', v.speedVehicleCentreOfGravity)) }, engine.handlers())],
+        ['de.bmw.infotainment.vehicle.Vehicle2', Object.assign({
+            statusCarSpeed2: (v) => put('speed', sc('speed', v.speedVehicleCentreOfGravity)),
+            // the engine oil level as the car's own measurement gives it (an enum: 1/4 .. 4/4 above the minimum)
+            statusOilDipstick2: (v) => { logRaw('oil level', v && v.fluidLevelEngineOilRelative); L.oilLevel = v && v.fluidLevelEngineOilRelative; L.oilLevelT = values.now(); },
+        }, engine.handlers())],
         ['de.bmw.infotainment.drivingexcitement.FES', {
             statusSwitchDriveDynamicSport2: (v) => { logRaw('FES boost', v.displayBoostPressure); put('boostFes', sc('boost', v.displayBoostPressure)); },
             // the HMI's sport display: power / torque in % of the car's maximum
@@ -85,6 +137,7 @@ function watches(values, engine, sc, log) {
             },
             // cars that never send statusGearboxDrive: P / R / N / gear from here
             DataPowerTrain2: (v) => {
+                engineTemps(v);
                 const sel = selectionOf(v && v.statusGearSelectionDrive);
                 if (!sel) return;
                 if (sel.stage !== undefined) L.stage = sel.stage;
@@ -93,6 +146,8 @@ function watches(values, engine, sc, log) {
         }],
         ['de.bmw.infrastructure.analytics.BasicDataSet', {
             basicDataSet: (v) => {
+                logRaw('gearbox oil', v.valueTemperatureTransmissionOil);
+                temp('gearbox', sc('gearboxTemp', v.valueTemperatureTransmissionOil));
                 const rawSplit = v.valueDistributionLongitudinalTorqueRearAxisFrontAxis, q = v.qualifierValueDistributionLongitudinalTorqueRearAxisFrontAxis;
                 logRaw('torque split [value, qualifier]', [rawSplit, q]);
                 // valid qualifier, not the car's "no value" (0, 65535) and a real share (Engine Config's xdrive_live.js split())
@@ -138,4 +193,4 @@ function watches(values, engine, sc, log) {
     ];
 }
 
-module.exports = { watches, modeOf, gearOf };
+module.exports = { watches, modeOf, gearOf, TYRES };

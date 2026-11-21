@@ -243,7 +243,7 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
         overlay(k, test, at) { if (test) this.overs[k] = { test, at }; else delete this.overs[k]; },
         carOwn(k, test) { if (test) this.owns = test; else delete this.owns; } };
     const amb = new EventEmitter(); amb._m = 'comfort'; amb.mode = () => amb._m;
-    const c = new Control({ settings, lights: fake, ambient: amb, log });
+    const c = new Control({ settings, lights: fake, ambient: amb, log, turnGraceMs: 0 });
     c.start();
     ok(shows.length === 1 && shows[0] === null, 'start: nothing picked, the car\'s colour');
     c.setLook({ upper: { rgb: [0, 255, 0], bright: 70 } });
@@ -303,8 +303,15 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
         'left turn signal: the driver\'s side lights (left-hand drive), not the footwells nor the other side');
     const g = [0, BLINK_MS / 2 + 10].map((ms) => fake.overs.turn.at(ms, true));
     ok(g[0].rgb.join() === '0,230,60' && g[0].bright === 100 && g[1].bright === 0 && g[1].rgb.join() === '0,0,0', 'its blink: green fully on, then dark, on its own clock');
-    ok(BLINK_MS >= 500 && BLINK_MS <= 900 && fake.overs.turn.at(BLINK_MS + 5, false).bright === 100 && fake.overs.turn.at(BLINK_MS / 2 + 10, true).bright === 0,
-        'the blink keeps its own clock (' + BLINK_MS + ' ms), whatever the frame flag says');
+    ok(BLINK_MS >= 500 && BLINK_MS <= 1000 && fake.overs.turn.at(BLINK_MS + 30, false).bright === 100,
+        'the blink keeps its own pace (' + BLINK_MS + ' ms), whatever the frame flag says');
+    {
+        // every half written and as long as the others, however late a frame starts (writes of ~400 ms: no half skipped)
+        const b = require(path.join(A, 'control')).blink([0, 230, 60]), seen = [];
+        let t = 0, cur = null, from = 0;
+        for (let i = 0; i < 60; i++) { const on = b(t).bright > 0; if (on !== cur) { if (cur !== null) seen.push(t - from); cur = on; from = t; } t += 380 + (i % 3) * 40; }
+        ok(seen.length > 10 && seen.every((d) => d >= BLINK_MS / 2 && d <= BLINK_MS / 2 + 460), 'halves of even length: ' + seen.join());
+    }
     values.drive = 'rhd'; c.turn('left');
     ok(fake.overs.turn.test(pl(0x0c)) && !fake.overs.turn.test(pl(0x05)), 'right-hand drive: left is the passenger\'s side');
     values.drive = 'lhd'; c.turn('both');
@@ -377,7 +384,7 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     values.turnGlow = undefined; values.doorRed = undefined; c.doors([]); c.turn(null);
     // a restart with Welcome on: the sweep, then the look
     values.welcome = true; shows.length = 0;
-    const c2 = new Control({ settings, lights: fake, ambient: amb, log });
+    const c2 = new Control({ settings, lights: fake, ambient: amb, log, turnGraceMs: 0 });
     c.setLook({ kind: 'solid' }); shows.length = 0;
     c2.start();
     ok(shows[0].kind === 'welcome' && shows[0].then.kind === 'solid', 'welcome sweep at start, then the look');

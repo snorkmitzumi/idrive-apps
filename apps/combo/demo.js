@@ -24,6 +24,7 @@ class Demo {
             lmvFront: Math.round(40 + 380 * pull * (1 - (62 + 25 * pull) / 100) * 2),
             b48: { soc: 66 + 4 * Math.sin(t / 40), v: 47.4 + a48 * 0.02, a: a48, kw: (47.4 + a48 * 0.02) * a48 / 1000, soh: 96, temp: 24 + 2 * Math.sin(t / 200) },
             b12: { soc: 84, v: lift ? 14.6 : 14.1, a: lift ? 18 : 1.6, soh: 92, temp: 19 },
+            tyres: { FL: { p: 2.4, t: 21, pt: 2.4 }, FR: { p: 2.4, t: 22, pt: 2.4 }, RL: { p: 2.7, t: 23, pt: 2.7 }, RR: { p: 2.6, t: 23, pt: 2.7 } },
         };
     }
 }
