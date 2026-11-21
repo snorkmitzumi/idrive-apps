@@ -132,7 +132,7 @@ const checks = [
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
-            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
