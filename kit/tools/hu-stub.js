@@ -266,7 +266,7 @@ function liveSignals(hu) {
 
 /* ---------------- emu.js's app process ---------------- */
 
-// README section 7; a copy: must match SCALE in kit/runtime/car.js. app.json "config.scaling" overrides, as in car.js
+// KIT.md section 7; a copy: must match SCALE in kit/runtime/car.js. app.json "config.scaling" overrides, as in car.js
 const SCALE = {
     rpm: { factor: 0.25, offset: 0 }, speed: { factor: 0.015625, offset: 0 }, accel: { factor: 0.002, offset: -65 },
     temp: { factor: 1, offset: -48 }, torque: { factor: 0.5, offset: -1023.5 },
@@ -353,7 +353,7 @@ function runLive(stage, dataDir) {
         g.sock.destroy();
     };
 
-    // manual signals: raw values (README section 7) through the stub, 20 a second as the car sends them
+    // manual signals: raw values (KIT.md section 7) through the stub, 20 a second as the car sends them
     const S = Object.assign({}, SCALE, (spec.config && spec.config.scaling) || {});
     const raw = (k, v) => Math.round((v - (S[k].offset || 0)) / S[k].factor);
     let manual = null;
