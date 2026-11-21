@@ -116,6 +116,11 @@ test('map style (layout "map"): the full layout, no tabs in the header (it names
         const r = t.d.canvas(1600, 520); r.chrome = { tabs: { tabs: ['Driving', 'M View'], sel: 1, badges: [] } };
         t.d.present('MAIN', r, () => Promise.resolve()); await sleep(30);
         assert.deepStrictEqual(t.d._tabList().tabs, [], 'no tabs (and no Settings tab)');
+        // 2.5.2: the page over the back arrow column too, the same margin left and right; its touches the app's
+        const pl = t.d.place, lx = pl.ox + 24 * pl.scale, rx = pl.w - (pl.ox + 1576 * pl.scale);
+        assert(Math.abs(lx - rx) <= 2 && lx < 40, 'the cards as far from the left edge as from the right: ' + lx + ' / ' + rx);
+        const cl = JSON.parse(t.d.gpu.claimed || '[]');
+        assert(cl.some((q) => q.x * pl.scale + pl.ox <= 1 && q.y * pl.scale + pl.oy >= 70), 'the page claimed from the left edge: ' + t.d.gpu.claimed);
         let opened = 0;
         t.d._click = (id) => { if (id === 'BTN_SETTINGS') opened++; };
         t.d.openSettings();

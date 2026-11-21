@@ -550,7 +550,8 @@ class Display {
         const he = HMI.status.h ? this.headEnd : W;
         if (this.own()) {
             // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's
-            this.gpu.claim([{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: hx, y: this.headH(), w: W - hx, h: pl.h - this.headH() }].map(logical));
+            const px = pl.left === 0 ? -pl.x : hx;     // (map style: the back arrow column's page part is the app's)
+            this.gpu.claim([{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: px, y: this.headH(), w: W - px, h: pl.h - this.headH() }].map(logical));
             return;
         }
         if (!this.onTab || this.tabs.length < 2) { this.gpu.claim([]); return; }
@@ -631,13 +632,16 @@ class Display {
             // iDrive 7: the surface covers the whole screen, so the HMI's own bar can't show under the back
             // arrow column; the page content goes right of that column. iDrive 8: the area under its status bar
             const a = HMI.area ? this._area(HMI) : { x: 0, y: 0, w: scr.w, h: scr.h };
-            const w = a.w - HMI.left, h = a.h, src = FULL.src;
+            // map style (2.5.2): the page over the back arrow column too (only the home button above it stays the
+            // HMI's), so its left margin is the right one's - BMW's map covers the column the same way
+            const left = v === 'map' ? 0 : HMI.left;
+            const w = a.w - left, h = a.h, src = FULL.src;
             const ah = h - this.headH() - this.barH();
             const s = Math.floor(Math.min(w / src.w, ah / src.h) * 1000) / 1000;
             pl = {
                 x: a.x, y: a.y, w: a.w, h, full: true,
                 scale: s,
-                ox: HMI.left + Math.round((w - src.w * s) / 2 - src.x * s),
+                ox: left + Math.round((w - src.w * s) / 2 - src.x * s), left,
                 oy: Math.round(this.headH() + (ah - src.h * s) / 2 - src.y * s),
             };
             // no bar under the page (the kit's, emptied): a page that reaches down (its panels, a sheet: it reads
@@ -928,7 +932,7 @@ class Display {
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
         c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();
-        if (hx > 0) c.clip(0, 0, hx, HMI.colEnd - pl.y).clear(0).noclip();
+        if (hx > 0) c.clip(0, 0, hx, (pl.left === 0 ? FULL.headH : HMI.colEnd) - pl.y).clear(0).noclip();
         drawCredit(c, W - 18, FULL.headH + 17);
         r.xf(1, 0, 0).append(c).xf();
     }
