@@ -1,6 +1,6 @@
 # MGU Custom Apps en español
 
-Original: https://github.com/cauliflowermossgrape/idrive7-apps · Guía completa (en inglés): [README.md](README.md)
+Original: https://github.com/cauliflowermossgrape/idrive7-apps · Guía completa (en inglés): [README.md](KIT.md)
 
 Traducción al español: Rubén Ríos ([rubenrios](https://github.com/rubenrios))
 
