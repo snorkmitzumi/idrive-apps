@@ -1096,8 +1096,15 @@ checks.push(
         const tm = await b.draw();
         assert(tm.includes('this drive') && !tm.includes('COLOUR'), 'M View shown, the bar closed: ' + tm.join(' | '));
         assert(['rail', 'rail-r'].every((k) => (b.canvas().targets || []).some((q) => q.key === k)), 'a handle each side');
+        // 2.5.2: the handles are touch places only (nothing drawn, as BMW's map), an open bar covers a whole column
+        const rr = Canvas.prototype.roundRect, slim = [];
+        Canvas.prototype.roundRect = function (x, y, w, h) { if (w === 10 && h === 120) slim.push(x); return rr.apply(this, arguments); };
+        try { await b.draw(); } finally { Canvas.prototype.roundRect = rr; }
+        assert.deepStrictEqual(slim, [], 'no handle drawn in map style');
         assert.strictEqual(b.tilt('E'), 'misfires', 'pushed right: the knob on Reset misfires');
         const tr = await b.draw();
+        const hide = (b.canvas().targets || []).find((q) => q.key === 'rail-r-close');
+        assert(hide && hide.x <= 1206 + 20, 'the right bar over the whole last column: ' + JSON.stringify(hide));
         assert(tr.includes('RESET MISFIRES') && tr.includes('SETTINGS'), 'the right bar: ' + tr.join(' | '));
         assert.strictEqual(b.tilt('W'), true, 'pushed left: the right bar closes');
         await b.draw(); await b.press('rail-r'); await b.press('settings');

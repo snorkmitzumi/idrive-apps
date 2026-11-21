@@ -207,7 +207,8 @@ mgu.run({
          * is pressed). The full layout's rail opens by itself the first time the Ambient tab shows, so its pages are found.
          */
         // EDGE: where the page shows from (the kit's full layout trims 12 px each side, display.js FULL.src)
-        const RAIL_W = 300, MAP_W = 340, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
+        // MAP_W: one Driving column and half the gaps beside it (draw.js columns: 370 wide, 24 apart), so no card shows beside a bar
+        const RAIL_W = 300, MAP_W = 394, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
         let railOpen = null, railT = 0, railShown = false, railByKnob = false;      // railOpen: null, 'L' or 'R'
         const mapped = () => owned && !!(ctx.mapStyle && ctx.mapStyle());
         const barW = () => (mapped() ? MAP_W : RAIL_W);
@@ -264,17 +265,22 @@ mgu.run({
             const handle = (side) => {
                 if (!railRows(side).length) return;
                 // in the margin beside the cards that the kit shows (it trims x < 12 and > 1588: 2.5.0's right one was cut off)
+                // map style (2.5.2): nothing drawn, as BMW's map - the controller pushed left / right, or a touch on the edge
                 const x = side === 'L' ? EDGE : W - EDGE - 10;
-                cv.roundRect(x, 210, 10, 120, 5, withAlpha('#ffffff', 0.42));
+                if (!mapped()) cv.roundRect(x, 210, 10, 120, 5, withAlpha('#ffffff', 0.42));
                 cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
             };
             if (!railOpen) { handle('L'); if (mapped()) handle('R'); return; }
             const side = railOpen, rows = railRows(side), bw = barW(), x0 = side === 'L' ? EDGE : W - bw - EDGE;
             const bot = 516 + (cv.extra || 0);         // (down into the room below the page, as the cards)
-            cv.roundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, t.bg);
-            cv.roundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
-            cv.strokeRoundRect(x0, RAIL_TOP, bw, bot - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
-            let y = RAIL_TOP + 18;
+            // map style: from the page's top (the kit shows y >= 38), over the cards' coloured top lines too
+            const top = mapped() ? 38 : RAIL_TOP;
+            // the page behind a map-style bar dimmed: the bar is over it, not beside it
+            if (mapped()) cv.fillRect(side === 'L' ? x0 + bw : 0, 0, W - bw - EDGE, bot + 4, withAlpha('#000000', 0.45));
+            cv.roundRect(x0, top, bw, bot - top, 12, t.bg);
+            cv.roundRect(x0, top, bw, bot - top, 12, withAlpha('#ffffff', 0.05));
+            cv.strokeRoundRect(x0, top, bw, bot - top, 12, 1.5, withAlpha('#ffffff', 0.18));
+            let y = top + 18;
             const big = rows.length <= 4;
             rows.forEach((r) => {
                 if (!r) { y += 10; cv.fillRect(x0 + 24, y - 6, bw - 48, 1, withAlpha('#ffffff', 0.15)); return; }
