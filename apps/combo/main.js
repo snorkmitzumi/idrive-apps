@@ -152,7 +152,7 @@ mgu.run({
         const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : tab === MVIEW ? 'Reset misfires' : 'Original colour');
         ui.onClick('BTN_RESET', () => {
             if (tab === PERF) { perf.resetRun(); return render(); }
-            if (tab === SEATS) { seats.last = 0; seats.poll(); return render(); }
+            if (tab === SEATS) { seats.again(); seats.poll(); return render(); }
             if (tab === MVIEW) { mview.resetMisfires(); return render(); }
             if (tab === AMBIENT) { if (amb) { amb.original(); amb.dirty(); } return render(); }
             reads.opened();                                  // a button press counts as using the screen
@@ -171,7 +171,7 @@ mgu.run({
             if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { log.info('tab ' + tabs()[sel()]); resetLabel(); }
+            if (tab !== was) { log.info('tab ' + tabs()[sel()] + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));

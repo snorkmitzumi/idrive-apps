@@ -153,7 +153,8 @@ class MView {
         let recs = await r.monitor(e, mid, this.misDid);
         const raw = r.raws[r.monitorKey(e, mid, this.misDid)];
         this.logOnce('misfire ' + r.monitorKey(e, mid, this.misDid), raw);
-        if (!recs && refused(raw)) {
+        // refused by the unit, or not let out by the read-only link (a kit before 2.4.2): the UDS form instead
+        if (!recs && (refused(raw) || blocked(raw))) {
             if (!this.misDid) { this.misDid = true; this.log.info('misfires: service 06 refused, asking 22 F6xx'); recs = await r.monitor(e, mid, true); this.logOnce('misfire ' + r.monitorKey(e, mid, true), r.raws[r.monitorKey(e, mid, true)]); }
             if (!recs && refused(r.raws[r.monitorKey(e, mid, true)])) { this.misGone = 'The engine unit gives no misfire counts'; this.log.info('misfires: ' + this.misGone + ', not asked again'); return; }
         }
@@ -255,6 +256,9 @@ class MView {
         cv.text(lvl ? "the car's own measurement" : 'not sent by the car yet', x + w - 18, y + 116, 18, t.dim, { align: 'right' });
     }
 }
+
+/** A request the read-only link didn't send (kit/runtime/readonly-diag.js check()). */
+const blocked = (raw) => !!(raw && !raw.bytes && /read-only:/.test(raw.why || ''));
 
 /** A reply the unit refused as not supported: 7F <sid> 11 / 12 / 31. */
 function refused(raw) {
