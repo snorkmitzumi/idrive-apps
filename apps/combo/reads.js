@@ -15,7 +15,8 @@
  * The 48 V battery (eDrive's read48()): Auto shows it once it answers (kept in battery.json); one that never answers
  * is given up after 6 tries (3 when another unit answered) and asked again only every 5 min.
  *
- *   const r = new Reads({ link, reader, values, settings, cfg, ui, log, now, dataDir, active })   active(): false = demo, no reads
+ *   const r = new Reads({ link, reader, values, settings, cfg, ui, log, now, dataDir, active, yieldTo })   active(): false = demo,
+ *     no reads; yieldTo(): true while the ambient light writes (a read waits up to YIELD_MS)
  *   r.start()  r.shown() (each frame)  r.opened() (screen shown again)  r.inUse()  r.paused()
  *   r.bat = { b48, b48T, b12: { soc, v, a, soh, temp }, b12T, has48 }   r.fresh() -> { b48, b12 } (stale -> null)
  *   r.why(key) -> 'diagnostic link down' | 'paused - parked' | 'no 48 V battery' | 'no reply' | 'reading…'
@@ -29,6 +30,9 @@ const DIAG = { retryBaseMs: 150, pendingTimeoutMs: 1500, callTimeoutMs: 2000 };
 const IDLE_AFTER_MOVE = 3 * 60000, IDLE_AFTER_USER = 10 * 60000, OPENED_GAP = 5000;
 const FAST = 500, SPLIT = 1000, BATTERY = 2500, SLOW = 30000, HEALTH = 30 * 60000, BACKOFF = 5 * 60000, LINK_RETRY = 2000;
 const BARO_MS = 60000;
+// the ambient light's writes first: the gateway takes one request at a time, and theirs refused ("temporarily not
+// accepted") paused the colours for 10 s; a read waits at most this long for them (2.3.0)
+const YIELD_MS = 600, YIELD_STEP = 50;
 // a value this old is not shown any more (the battery panels show the reason instead)
 // (the 12 V voltage and current a minute: one missed round no longer blanks them; 15 s before 2.1.0)
 const KEEP = { b48: 15000, v: 60000, a: 60000, soc: 10 * 60000, temp: 2 * 60000, soh: Infinity };
@@ -40,6 +44,7 @@ class Reads {
         Object.assign(this, { link: o.link, reader: o.reader, values: o.values, settings: o.settings, ui: o.ui, log: o.log });
         this.now = o.now || (() => Date.now());
         this.active = o.active || (() => true);           // false: nothing to read (the demo is on screen)
+        this.yieldTo = o.yieldTo || null;                 // true while the ambient light is writing: a read waits
         const cfg = o.cfg || {}, dme = cfg.dme || {}, bat = cfg.battery || {};
         // short waits per candidate (M Vitals and eDrive since PR #1); a candidate's own values in app.json win
         const quick = (list, ecu) => (list || []).map((c) => Object.assign({ timeoutMs: 1000, diagOpts: DIAG }, ecu != null && c.ecu == null ? { ecu } : {}, c));
@@ -53,7 +58,11 @@ class Reads {
         this.st = {};
         try { this.st = JSON.parse(fs.readFileSync(this.file, 'utf8')) || {}; } catch (e) { /* first run */ }
         if (this.st.has48 === true || this.st.has48 === false) this.bat.has48 = this.st.has48;
-        if (typeof this.st.v12Pick === 'number') this.reader.pick.v12 = this.st.v12Pick;
+        // the candidate that answered last, by its key (the order of the candidates may change between versions)
+        this.pickKey = {};
+        if (typeof this.st.v12Key === 'string') this.pickKey.v12 = this.st.v12Key;
+        // candidates a unit refused as not supported (7F <sid> 11 / 12 / 31): not asked again this run
+        this.no = {};
         this.last = {}; this.fails = {}; this.miss48 = 0; this.shapes = {};
         this.baro = 101.3; this.baroT = 0;
         this.lastUserT = this.now(); this.lastActiveT = 0; this.lastFrameT = 0;
@@ -70,20 +79,20 @@ class Reads {
         const ecusOf = (...lists) => { const out = []; lists.forEach((l) => l.forEach((x) => { if (x.ecu != null && out.indexOf(x.ecu) < 0) out.push(x.ecu); })); return out; };
         const keep12 = (k, x) => { if (x === null || x === undefined) return false; this.bat.b12[k] = x; this.bat.b12T[k] = this.now(); return true; };
         return [
-            { key: 'lmvFront', every: xdriveEvery, ecus: ecusOf(c.front),
-                read: async () => { const x = await r.value('lmvFront', c.front); if (x === null) return false; v.put('lmvFront', x); if (Math.abs(x) > 20) v.markAwd(); return true; } },
+            { key: 'lmvFront', every: xdriveEvery, ecus: ecusOf(c.front), list: c.front,
+                read: async () => { const x = await this.ask('lmvFront', c.front); if (x === null) return false; v.put('lmvFront', x); if (Math.abs(x) > 20) v.markAwd(); return true; } },
             { key: 'boostDme', ecus: ecusOf(c.boost, c.baro), every: () => (c.boost.length && v.boostFromDme() ? FAST : null),
                 read: async () => { await this.freshBaro(); const x = await r.value('boost', c.boost); if (x === null) return false; v.put('boostDme', (x - this.baro) / 100); return true; } },
             { key: 'b48', ecus: ecusOf(c.b48), every: () => (s.get('battery48') === 'off' || !c.b48.length ? null : this.bat.has48 === false && s.get('battery48') === 'auto' ? BACKOFF : BATTERY),
                 read: () => this.read48() },
-            { key: 'v12', ecus: ecusOf(c.v12), every: () => BATTERY, read: () => this.readV12(keep12) },
-            { key: 'i12', ecus: ecusOf(c.i12), every: () => BATTERY, read: async () => { const a = await r.value('i12', c.i12); this.logRaws('i12', c.i12); return keep12('a', a); } },
+            { key: 'v12', ecus: ecusOf(c.v12), every: () => BATTERY, list: c.v12, read: () => this.readV12(keep12) },
+            { key: 'i12', ecus: ecusOf(c.i12), every: () => BATTERY, list: c.i12, read: async () => keep12('a', await this.ask('i12', c.i12)) },
             { key: 'soc40', ecus: ecusOf(c.soc40), every: () => SLOW, read: async () => { const f = await this.readFields('soc40', c.soc40); return !!f && keep12('soc', f.soc); } },
-            { key: 'soc12', ecus: ecusOf(c.soc12), every: () => ((this.fails.soc40 || 0) >= 3 ? SLOW : null), read: async () => keep12('soc', await r.value('soc12', c.soc12)) },
+            { key: 'soc12', ecus: ecusOf(c.soc12), every: () => ((this.fails.soc40 || 0) >= 3 ? SLOW : null), list: c.soc12, read: async () => keep12('soc', await this.ask('soc12', c.soc12)) },
             { key: 'boostTarget', ecus: ecusOf(c.boostTarget, c.baro), every: () => (c.boostTarget.length ? SLOW : null),
                 read: async () => { await this.freshBaro(); const x = await r.value('boostTarget', c.boostTarget); if (x === null) return false; v.put('boostTarget', (x - this.baro) / 100); return true; } },
-            { key: 't12', ecus: ecusOf(c.t12), every: () => SLOW, read: async () => keep12('temp', await r.value('t12', c.t12)) },
-            { key: 'soh12', ecus: ecusOf(c.soh12), every: () => HEALTH, read: async () => keep12('soh', await r.value('soh12', c.soh12)) },
+            { key: 't12', ecus: ecusOf(c.t12), every: () => SLOW, list: c.t12, read: async () => keep12('temp', await this.ask('t12', c.t12)) },
+            { key: 'soh12', ecus: ecusOf(c.soh12), every: () => HEALTH, list: c.soh12, read: async () => keep12('soh', await this.ask('soh12', c.soh12)) },
         ];
     }
 
@@ -126,7 +135,38 @@ class Reads {
         if (!this.active() || !this.ui.isVisible('MAIN') || !this.inUse()) return;
         this.timer = setTimeout(() => { this.timer = null; this.round(); }, ms);
     }
-    every(it) { const e = it.every(); return e === null ? null : (this.fails[it.key] || 0) >= 3 ? Math.max(e, RETRY_SOON[it.key] || BACKOFF) : e; }
+    every(it) {
+        // every candidate refused as not supported: nothing left to ask (this run)
+        if (it.list && it.list.length && !this.live(it.list).length) return null;
+        const e = it.every();
+        return e === null ? null : (this.fails[it.key] || 0) >= 3 ? Math.max(e, RETRY_SOON[it.key] || BACKOFF) : e;
+    }
+    /** The candidates not refused as not supported. */
+    live(list) { return (list || []).filter((c) => !this.no[this.reader.key(c)]); }
+    /** Whether a value has a candidate left (e.g. the 12 V current: no unit of the car gives it). */
+    can(key) { const it = this.items.find((x) => x.key === key); return !it || !it.list || this.live(it.list).length > 0; }
+    /**
+     * A value from the first candidate that answers, the one that answered last asked first; a candidate refused as
+     * not supported (7F <sid> 11 / 12 / 31: the unit has no such service or identifier) is left out from then on, so
+     * the gateway is not asked it every round (a G26's engine unit refuses F442, 402B, 5852, 5853 and 5854). Each
+     * candidate's reply goes to the log once (logRaws).
+     */
+    async ask(name, list) {
+        const live = this.live(list), pk = this.pickKey[name];
+        const order = live.filter((c) => this.reader.key(c) === pk).concat(live.filter((c) => this.reader.key(c) !== pk));
+        let got = null;
+        for (const c of order) {
+            const v = await this.reader.read(c), key = this.reader.key(c), raw = this.reader.raws[key];
+            const b = raw && raw.bytes ? raw.bytes.split(' ').map((x) => parseInt(x, 16)) : null;
+            if (b && b[0] === 0x7f && [0x11, 0x12, 0x31].indexOf(b[2]) >= 0 && !this.no[key]) {
+                this.no[key] = true;
+                this.log.info(name + ' 0x' + (c.ecu || 0).toString(16) + ' ' + (c.did || 'OBD ' + c.obd) + ': not supported (' + raw.bytes + '), not asked again');
+            }
+            if (v !== null) { this.pickKey[name] = key; got = v; break; }
+        }
+        this.logRaws(name, list);
+        return got;
+    }
     nextDelay() {
         if (!this.link.available) return LINK_RETRY;
         const now = this.now();
@@ -150,6 +190,10 @@ class Reads {
                     if (e === null || this.now() - (this.last[it.key] || 0) < e) continue;
                     this.last[it.key] = this.now();
                     if ((this.fails[it.key] || 0) >= 3 && it.ecus) this.wake(it.ecus);      // the back-off retry: really ask
+                    if (this.yieldTo) {
+                        const t0 = this.now();
+                        while (this.yieldTo() && this.now() - t0 < YIELD_MS) await new Promise((res) => setTimeout(res, YIELD_STEP));
+                    }
                     let ok = false;
                     try { ok = await it.read(); } catch (err) { this.log.warn(it.key + ': ' + err); }
                     this.fails[it.key] = ok ? 0 : (this.fails[it.key] || 0) + 1;
@@ -205,9 +249,8 @@ class Reads {
     }
     /** The 12 V voltage: the candidate that answered is asked first, remembered across restarts (eDrive's v12Pick). */
     async readV12(keep12) {
-        const v = await this.reader.value('v12', this.c.v12);
-        this.logRaws('v12', this.c.v12);
-        if (v !== null && this.reader.pick.v12 !== this.st.v12Pick) { this.st.v12Pick = this.reader.pick.v12; this.save(); }
+        const v = await this.ask('v12', this.c.v12);
+        if (v !== null && this.pickKey.v12 !== this.st.v12Key) { this.st.v12Key = this.pickKey.v12; this.save(); }
         return keep12('v', v);
     }
     /**

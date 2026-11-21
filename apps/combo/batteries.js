@@ -4,7 +4,8 @@
  *
  *   fields(reply, cfg)  a 62 <DID> <data> reply decoded with app.json fields ({ at, bytes, factor, offset, signed, min, max },
  *                       as eDrive's readFields): all FF = no value (unsigned fields), outside min..max = null, past the reply's end = null
- *   b48(f)              { soc, v, a, kw, soh, temp }: + = into the battery (charging). The 48 V battery sends its current
+ *   b48(f)              { soc, v, a, kw, soh, temp }: + = into the battery (charging); v the pack voltage where the
+ *                       terminal voltage field doesn't fit. The 48 V battery sends its current
  *                       negative while charging (eDrive's config note), so it is turned round here.
  *   state(a, v)         'CHARGING' | 'SUPPLYING' | 'IDLE' | null: from the current (over +1 A / under -1 A), or without
  *                       one from the voltage (13.2 V and up: the 12 V battery is being charged, eDrive's charging())
@@ -32,7 +33,8 @@ function fields(reply, cfg) {
 const num = (x) => (typeof x === 'number' && isFinite(x) ? x : null);
 
 function b48(f) {
-    const v = num(f.v), raw = num(f.a), a = raw === null ? null : -raw;
+    // the terminal voltage, or the pack's where that field doesn't fit (a G26 M440i's first field reads 2-21)
+    const v = num(f.v) !== null ? num(f.v) : num(f.pack), raw = num(f.a), a = raw === null ? null : -raw;
     return { soc: num(f.soc), v, a, kw: v !== null && a !== null ? v * a / 1000 : null, soh: num(f.soh), temp: num(f.temp) };
 }
 
