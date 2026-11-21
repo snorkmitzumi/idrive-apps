@@ -142,8 +142,13 @@ mgu.run({
                 tyres: L.tyresT && Date.now() - L.tyresT < 5 * 60000 ? L.tyres : null };
         }
 
-        const tabs = () => TABS.concat(amb ? amb.tabs() : []);
-        const sel = () => (tab === AMBIENT ? AMBIENT + amb.page : tab);
+        // where the kit runs the screen (full layout, mgu-render; cv.own): Ambient config's three tabs are one Ambient tab
+        // with its pages as sub-tabs, so Settings fits in the header as its last tab; each tab's Reset is on its page and
+        // the bottom bar is gone (2.4.6). Elsewhere (the HMI's own bar and title) as before.
+        let owned = false;
+        const tabs = () => TABS.concat(!amb ? [] : owned ? ['Ambient'] : amb.tabs());
+        const sel = () => (tab === AMBIENT ? AMBIENT + (owned ? 0 : amb.page) : tab);
+        if (ctx.hideButton) ctx.hideButton('BTN_RESET');
 
         // the bar's Reset button, by tab: Reset peaks (Driving: the first press asks, a second one within CONFIRM_MS
         // clears them, M Vitals' confirm pattern), Reset run (Performance), Original colour (the ambient tabs)
@@ -168,10 +173,10 @@ mgu.run({
         /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, Seats, M View, then the ambient tabs. */
         function pick(i) {
             const was = tab;
-            if (i >= AMBIENT && amb) { tab = AMBIENT; amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
+            if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { log.info('tab ' + tabs()[sel()] + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));
@@ -192,8 +197,26 @@ mgu.run({
                 note: Date.now() <= confirmUntil ? 'Press again to reset peaks' : null, tabs: tabs(), sel: sel() });
         }
 
+        /** The page's own buttons where the kit runs the screen, in the strip over the cards (the bar's job there). */
+        function pageActions(cv, t) {
+            const B = (label, run, key, o) => G.button(cv, t, 1576 - (o && o.w || 200), 4, o && o.w || 200, 34, label, run, Object.assign({ key }, o));
+            if (tab === DRIVING) B('Reset peaks', () => { values.resetPeaks(); demoPeaks.resetPeaks(); log.info('peaks reset'); return render(); }, 'peaks', { confirm: true });
+            else if (tab === SEATS) B('Read again', () => { seats.again(); seats.poll(); return render(); }, 'seats-again');
+            else if (tab === MVIEW) B('Reset misfires', () => { mview.resetMisfires(); return render(); }, 'misfires', { w: 220 });
+            else if (tab === AMBIENT && amb) {
+                let x = 24;
+                AMBIENT_TABS.forEach((n, k) => {
+                    x += 8 + G.button(cv, t, x, 4, 0, 34, n === 'Ambient' ? 'Colour' : n, () => {
+                        if (amb.page !== k) { amb.select(k); amb.dirty(); log.info('tab ' + n); }
+                        return render();
+                    }, { key: 'amb-' + k, primary: amb.page === k });
+                });
+            }
+        }
+
         async function render() {
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg);
+            if (!!cv.own !== owned) { owned = !!cv.own; if (amb && tab === AMBIENT) amb.dirty(); }
             if (tab === DRIVING) drawDriving(cv, t);
             else if (tab === MVIEW) {
                 const demoOn = usingDemo();
@@ -211,6 +234,7 @@ mgu.run({
                 amb.draw(cv, t);
                 G.frame(cv, t, tabs(), sel(), []);
             }
+            if (owned) pageActions(cv, t);
             await ui.image('MAIN_GFX', cv);
         }
         // Driving and Performance follow the car each frame; the ambient tabs only while they move or changed

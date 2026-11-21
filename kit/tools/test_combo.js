@@ -58,6 +58,8 @@ Module._load = function (req, parent, isMain) {
 let sink = null;
 const textOf = Canvas.prototype.text;
 Canvas.prototype.text = function (str, ...rest) { if (sink) sink.push(String(str)); return textOf.call(this, str, ...rest); };
+// the page's buttons (G.button) as the kit's Recorder keeps them, so a check can press one
+Canvas.prototype.target = function (x, y, w, h, run, key) { (this.targets || (this.targets = [])).push({ x, y, w, h, run, key: String(key) }); return this; };
 const freshKit = () => { delete require.cache[path.join(KIT, 'gauges.js')]; };
 const appModule = (name) => { freshKit(); const f = path.join(APP, name + '.js'); delete require.cache[f]; return require(f); };
 /** Texts drawn by fn() (sync or async). */
@@ -86,19 +88,22 @@ async function boot(dir, opts) {
     booted.push(vis);
     const clicks = {};
     let frame = null, last = null, tab = null, tap = null;
+    const hidden = [];
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
-        onTab(fn) { tab = fn; }, hideButton() {}, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
+        onTab(fn) { tab = fn; }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
         theme: () => themes.theme('m_tricolour'),
-        canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = true; last = cv; return cv; },
+        canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = opts.own !== false; last = cv; return cv; },
     };
     await app.start(ctx);
     return {
         ctx, settings, vis, clicks,
         draw: () => textsOf(() => frame()),
-        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y),
+        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden,
+        /** press the page button with this key (drawn on the last frame) */
+        press: (key) => { const b = ((last && last.targets) || []).find((x) => x.key === key); assert(b, 'no button ' + key + ': ' + ((last && last.targets) || []).map((x) => x.key).join(' ')); return textsOf(() => b.run()); },
         canvas: () => last,
     };
 }
@@ -727,7 +732,9 @@ checks.push(
         assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0, 'the ambient service without the strobe: ' + fakeAmb.calls.join(' | '));
         assert(fakeAmb.calls.some((c) => /^mount .*"strobe":false.*"names":\["Ambient","Animations","Modes"\]/.test(c)), fakeAmb.calls.join(' | '));
         const t0 = await b.draw();
-        ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT', 'ANIMATIONS', 'MODES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        assert(!t0.includes('ANIMATIONS') && !t0.includes('MODES'), 'the kit runs the screen: one Ambient tab (Settings fits after it)');
+        assert(t0.includes('RESET PEAKS') && b.hidden.indexOf('BTN_RESET') >= 0, 'Reset peaks on the page, not in the bar');
         assert(!t0.includes('FAVOURITES'), 'Favourites still a tab');
         assert(t0.includes('Engine speed'), 'Driving first');
         const t1 = await b.tab(1);
@@ -737,7 +744,10 @@ checks.push(
         assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
         assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
-        const t3 = await b.tab(5);
+        const ta = await b.tab(4);
+        assert(ta.includes('AMBIENT TAB 0') && ['COLOUR', 'ANIMATIONS', 'MODES'].every((x) => ta.includes(x)), 'Ambient with its sub-tabs: ' + ta.join(' | '));
+        await b.press('amb-1');
+        const t3 = await b.draw();
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
         assert(fakeAmb.calls.indexOf('tap 300,300') >= 0, 'a tap on an ambient tab goes to it');
@@ -770,6 +780,10 @@ checks.push(
         await b.tab(4);
         b.clicks.BTN_RESET();
         assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
+        // the kit runs the screen: each tab's own button on the page
+        await b.tab(3); await b.press('misfires');
+        await b.tab(2); await b.press('seats-again');
+        await b.tab(0); await b.press('peaks');
     }],
     ['2.0 #4 dyno: a pull in one gear makes a run (power from m*a*v, torque from power), saved; demo runs not', async () => {
         const { Perf } = appModule('perf');
@@ -1041,5 +1055,14 @@ checks.push(
         clock += 6000; m.tick(); while (m.busy) await new Promise((r) => setTimeout(r, 5));
         assert.strictEqual(m.state, 'found', m.state + ' ' + logs.join(' | '));
         assert.deepStrictEqual(m.seats.map((x) => x.addr), [0x6D, 0x6E], 'the refused one asked again');
+    }],
+    ['2.4.6 the HMI\'s own layout (the kit not running the screen): Ambient config\'s three tabs and the bar\'s Reset, as before', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('std'), { own: false });
+        const t0 = await b.draw();
+        ['AMBIENT', 'ANIMATIONS', 'MODES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        assert(!t0.includes('RESET PEAKS'), 'no page buttons where the HMI has the bar');
+        const t3 = await b.tab(5);
+        assert(t3.includes('AMBIENT TAB 1'), 'Animations as a tab: ' + t3.join(' | '));
     }],
 );
