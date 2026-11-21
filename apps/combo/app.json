@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (oil, coolant and gearbox temperatures, oil level, misfires per cylinder) and Ambient config's colours, animations and driving modes",
-  "version": "2.4.5",
+  "version": "2.4.6",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -130,6 +130,7 @@
   "settings": [
     {
       "key": "engine",
+      "group": "Gauges",
       "label": "Engine",
       "type": "choice",
       "default": "auto",
@@ -150,6 +151,7 @@
     },
     {
       "key": "redline",
+      "group": "Gauges",
       "label": "Redline",
       "type": "number",
       "unit": "rpm",
@@ -180,6 +182,7 @@
     },
     {
       "key": "rpmScale",
+      "group": "Gauges",
       "label": "Rev scale up to",
       "type": "number",
       "unit": "rpm",
@@ -199,6 +202,7 @@
     },
     {
       "key": "boostMax",
+      "group": "Gauges",
       "label": "Boost gauge max",
       "type": "choice",
       "default": "2.5",
@@ -223,6 +227,7 @@
     },
     {
       "key": "boostSource",
+      "group": "Gauges",
       "label": "Boost from",
       "type": "choice",
       "default": "auto",
@@ -243,6 +248,7 @@
     },
     {
       "key": "maxPower",
+      "group": "Gauges",
       "label": "Max power (100% on sport display)",
       "type": "number",
       "unit": "kW",
@@ -295,6 +301,7 @@
     },
     {
       "key": "powerSource",
+      "group": "Gauges",
       "label": "Power from",
       "type": "choice",
       "default": "sport",
@@ -311,6 +318,7 @@
     },
     {
       "key": "torqueMax",
+      "group": "Gauges",
       "label": "Torque gauge max",
       "type": "number",
       "unit": "Nm",
@@ -338,6 +346,7 @@
     },
     {
       "key": "maxTorqueKgm",
+      "group": "Gauges",
       "label": "Torque gauge max",
       "type": "number",
       "unit": "kgm",
@@ -358,12 +367,14 @@
     },
     {
       "key": "peaks",
+      "group": "Gauges",
       "label": "Show peak markers",
       "type": "bool",
       "default": true
     },
     {
       "key": "peakHold",
+      "group": "Gauges",
       "label": "Peak hold",
       "type": "number",
       "unit": "s",
@@ -378,6 +389,7 @@
     },
     {
       "key": "xdrive",
+      "group": "Gauges",
       "label": "xDrive card",
       "type": "choice",
       "default": "auto",
@@ -398,6 +410,7 @@
     },
     {
       "key": "battery48",
+      "group": "Gauges",
       "label": "48 V battery",
       "type": "choice",
       "default": "auto",
@@ -418,6 +431,7 @@
     },
     {
       "key": "weight",
+      "group": "Dyno & drag",
       "label": "Dyno: weight with driver + fuel",
       "type": "number",
       "unit": "kg",
@@ -455,6 +469,7 @@
     },
     {
       "key": "body",
+      "group": "Dyno & drag",
       "label": "Dyno: body shape (air drag)",
       "type": "choice",
       "default": "coupe",
@@ -475,6 +490,7 @@
     },
     {
       "key": "loss",
+      "group": "Dyno & drag",
       "label": "Dyno: drivetrain loss",
       "type": "number",
       "unit": "%",
@@ -491,12 +507,14 @@
     },
     {
       "key": "ecuTorque",
+      "group": "Dyno & drag",
       "label": "Dyno: overlay ECU torque",
       "type": "bool",
       "default": true
     },
     {
       "key": "distance",
+      "group": "Dyno & drag",
       "label": "Drag: distance split",
       "type": "choice",
       "default": "qm",
@@ -517,12 +535,14 @@
     },
     {
       "key": "rollout",
+      "group": "Dyno & drag",
       "label": "Drag: one-foot rollout",
       "type": "bool",
       "default": false
     },
     {
       "key": "carKind",
+      "group": "Ambient light",
       "label": "Car type",
       "type": "choice",
       "default": "ice",
@@ -540,6 +560,7 @@
     },
     {
       "key": "follow",
+      "group": "Ambient light",
       "label": "Look by driving mode",
       "type": "bool",
       "default": true,
@@ -547,6 +568,7 @@
     },
     {
       "key": "welcome",
+      "group": "Ambient light",
       "label": "Welcome sweep at start",
       "type": "bool",
       "default": false,
@@ -554,6 +576,7 @@
     },
     {
       "key": "sportPulse",
+      "group": "Ambient light",
       "label": "Sport pulse",
       "type": "bool",
       "default": false,
@@ -561,6 +584,7 @@
     },
     {
       "key": "decorWith",
+      "group": "Ambient light",
       "label": "Decor lights (dash, under the door trim) with",
       "type": "choice",
       "default": "upper",
@@ -568,18 +592,21 @@
     },
     {
       "key": "nightDim",
+      "group": "Ambient light",
       "label": "Ambient: dimmer at night",
       "type": "bool",
       "default": true
     },
     {
       "key": "keep",
+      "group": "Ambient light",
       "label": "Ambient: my colour back at each start",
       "type": "bool",
       "default": true
     },
     {
       "key": "flashAlerts",
+      "group": "Ambient light",
       "label": "Redline shift flash",
       "type": "bool",
       "default": true,
@@ -587,6 +614,7 @@
     },
     {
       "key": "turnGlow",
+      "group": "Ambient light",
       "label": "Turn signal glow",
       "type": "bool",
       "default": false,
@@ -594,6 +622,7 @@
     },
     {
       "key": "doorRed",
+      "group": "Ambient light",
       "label": "Open door red",
       "type": "bool",
       "default": false,
@@ -601,12 +630,14 @@
     },
     {
       "key": "doorCar",
+      "group": "Ambient light",
       "label": "Ambient: open door shows the car's own warning (G20 / G26)",
       "type": "bool",
       "default": false
     },
     {
       "key": "hazardRed",
+      "group": "Ambient light",
       "label": "Hazard red",
       "type": "bool",
       "default": false,
@@ -614,6 +645,7 @@
     },
     {
       "key": "drive",
+      "group": "Ambient light",
       "label": "Ambient: steering wheel",
       "type": "choice",
       "default": "lhd",
@@ -630,6 +662,7 @@
     },
     {
       "key": "speedUnit",
+      "group": "Units",
       "label": "Speed unit",
       "type": "choice",
       "default": "kmh",
@@ -646,6 +679,7 @@
     },
     {
       "key": "pressUnit",
+      "group": "Units",
       "label": "Pressure unit",
       "type": "choice",
       "default": "bar",
@@ -666,6 +700,7 @@
     },
     {
       "key": "powerUnit",
+      "group": "Units",
       "label": "Power unit",
       "type": "choice",
       "default": "kw",
@@ -686,6 +721,7 @@
     },
     {
       "key": "torqueUnit",
+      "group": "Units",
       "label": "Torque unit",
       "type": "choice",
       "default": "nm",
@@ -706,6 +742,7 @@
     },
     {
       "key": "tempUnit",
+      "group": "Units",
       "label": "Temperature unit",
       "type": "choice",
       "default": "c",
@@ -726,6 +763,7 @@
     },
     {
       "key": "theme",
+      "group": "Screen",
       "label": "Colour theme",
       "type": "choice",
       "default": "m_tricolour",
@@ -750,6 +788,7 @@
     },
     {
       "key": "layout",
+      "group": "Screen",
       "label": "Screen layout",
       "type": "choice",
       "default": "full",
@@ -766,6 +805,7 @@
     },
     {
       "key": "renderer",
+      "group": "Screen",
       "label": "Renderer",
       "type": "choice",
       "default": "auto",
@@ -782,12 +822,14 @@
     },
     {
       "key": "advanced",
+      "group": "Screen",
       "label": "Advanced settings",
       "type": "bool",
       "default": false
     },
     {
       "key": "speedRate",
+      "group": "Screen",
       "label": "Speed display rate",
       "type": "number",
       "unit": "fps",
@@ -808,6 +850,7 @@
     },
     {
       "key": "demo",
+      "group": "Screen",
       "label": "Demo data",
       "type": "choice",
       "default": "auto",
