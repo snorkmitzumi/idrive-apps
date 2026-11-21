@@ -736,7 +736,7 @@ checks.push(
         const t2 = await b.tab(2);
         assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
-        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
+        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
         const t3 = await b.tab(5);
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
@@ -820,16 +820,14 @@ checks.push(
             });
         });
     }],
-    ['2.4 #1 M View: oil and coolant from the car\'s own signals, the oil level from its measurement', async () => {
+    ['2.4 #1 M View: oil and coolant from the car\'s own signals, no oil level', async () => {
         const { v, w } = signalRig();
         w.CDS.statusEngineTemperature({ temperatureEngineDrive: 48 + 91, temperatureEngineOilDrive: 48 + 104 });
         assert.strictEqual(v.live.coolant, 91); assert.strictEqual(v.live.oil, 104); assert(v.live.oilT > 0);
         w.VehicleInformation.DataPowerTrain2({ temperatureEngineDrive: 48 + 93, temperatureEngineOilDrive: 255 });
         assert.strictEqual(v.live.coolant, 93, 'DataPowerTrain2 carries them too'); assert.strictEqual(v.live.oil, 104, '255 = no value');
-        w.Vehicle2.statusOilDipstick2({ fluidLevelEngineOilRelative: 'MOTOROELSTAND_3_4' });
-        const { oilLevel } = appModule('mview');
-        assert.strictEqual(oilLevel(v.live.oilLevel), '3/4'); assert.strictEqual(oilLevel(4), '3/4'); assert.strictEqual(oilLevel('SIGNAL_UNGUELTIG'), null);
-        assert(SPEC.signals['de.bmw.infotainment.vehicle.CDS'].statusEngineTemperature && SPEC.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusOilDipstick2);
+        assert(SPEC.signals['de.bmw.infotainment.vehicle.CDS'].statusEngineTemperature);
+        assert(!SPEC.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusOilDipstick2, 'no oil level (2.4.2: a B58 measures it its own way)');
     }],
     ['2.4 #2 M View reads: the car\'s values not asked, the gearbox from the EGS, refusals not asked again, misfires per cylinder', async () => {
         const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
@@ -924,5 +922,66 @@ checks.push(
         values.live.left = true; m.misGone = null; m.no = {};
         for (let i = 0; i < 30; i++) { m.tick(); clock += 400; }
         assert.strictEqual(asked.length, n, 'read while the car is locked and left');
+    }],
+    ['2.4.2 #1 tyres: a car in bar that says deg F still reads its TPMS as deg C + 40; an imperial one as deg F', async () => {
+        const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });
+        const eu = signalRig();
+        // 2.4.1 on a G26 (bar): raw 48 46 45 44, the car's own page 8 7 6 5 deg C; Combo showed -13..-15
+        eu.w.Vehicle.statusNewCurrentUnitsStatusExt({ unitOfMeasurementAirPressure: 'BAR', unitOfMeasurementTemperature: 'F' });
+        eu.w.TPMS.statusTyreTemperature(T([48, 46, 45, 44]));
+        assert.deepStrictEqual(['FL', 'FR', 'RL', 'RR'].map((k) => eu.v.live.tyres[k].t), [8, 6, 5, 4]);
+        assert(eu.logged.some((m) => /raw units: \["BAR","F"\]/.test(m)), 'the raw units logged');
+        const us = signalRig();
+        us.w.Vehicle.statusNewCurrentUnitsStatusExt({ unitOfMeasurementAirPressure: 'PSI', unitOfMeasurementTemperature: 'F' });
+        us.w.TPMS.statusTyreTemperature(T([108, 108, 108, 108]));
+        assert.strictEqual(us.v.live.tyres.FL.t, 20, '68 F = 20 C');
+    }],
+    ['2.4.2 #2 misfires: the read-only link lets service 06 out; a link that blocks it: the UDS form instead, not 06 again', async () => {
+        const { check } = require(path.join(KIT, 'readonly-diag'));
+        check(0x12, 0x06, [0xA2], false);
+        assert.throws(() => check(0x12, 0x06, [0xA2, 0x0C], false), /exactly one PID/);
+        assert.throws(() => check(0x12, 0x31, [0x01], false), /not allowed/);
+        const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
+        const asked = [];
+        // an older link: 06 never leaves (throws), 22 F6xx answers cylinder misfires
+        const fake = { available: true, async physical(ecu, sid, data) {
+            asked.push(sid.toString(16) + ':' + data.map((b) => b.toString(16)).join(''));
+            if (sid === 0x06) throw new Error('read-only: service 06 is not allowed');
+            if (data[1] === 0xA0) return [0x62, 0xF6, 0xA0, 0x40, 0, 0, 0, 1];
+            return [0x62, 0xF6, data[1], 0x0B, 0x24, 0, 2, 0, 0, 0xFF, 0xFF, 0x0C, 0x24, 0, 1, 0, 0, 0xFF, 0xFF];
+        } };
+        let clock = 1e6;
+        const m = new MView({ reader: new DidReader(fake), values: { live: {}, now: () => clock }, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet, link: fake, now: () => clock });
+        for (let i = 0; i < 200; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        const n06 = asked.filter((a) => a.startsWith('6:')).length;
+        assert(n06 <= 2, 'service 06 asked again and again: ' + n06);
+        assert(asked.some((a) => a.startsWith('22:f6a')), 'the UDS form asked');
+    }],
+    ['2.4.2 #3 Seats: Read again starts over after the car said no; the tab line says where it stands', async () => {
+        const { Seats } = appModule('seats');
+        let ok = false;
+        const s = new Seats({ signals: { proxy: async () => { if (!ok) throw new Error('interface not found'); return { isAvailable: () => true }; }, call: async () => ({ statusResponse: 2, seatAxisList: [{ seatAxis: 0, axisPositionValue: 5 }] }) }, log: quiet, stepMs: 50 });
+        await s.read();
+        assert.strictEqual(s.state.available, false); assert(/not available/.test(s.summary()));
+        ok = true; s.again(); s.poll(); while (s.busy) await new Promise((r) => setImmediate(r));
+        assert.strictEqual(s.state.available, true); assert(/1 motors/.test(s.summary()));
+    }],
+    ['2.4.2 M View: fuel trims and timing from the engine unit (OBD 01 06 / 07 / 0E), a trim far from 0 % in the warning colour', async () => {
+        const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
+        const asked = [];
+        const fake = { available: true, async physical(ecu, sid, data) {
+            asked.push(sid + ':' + data[0]);
+            if (sid !== 1) return [0x7F, sid, 0x11];
+            const by = { 6: 130, 7: 141, 0x0E: 156, 0x5C: 140, 0x05: 130, 0x0F: 70 }[data[0]];
+            return by == null ? [0x7F, 1, 0x12] : [0x41, data[0], by];
+        } };
+        let clock = 1e6;
+        const m = new MView({ reader: new DidReader(fake), values: { live: {}, now: () => clock }, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet, link: fake, now: () => clock });
+        for (let i = 0; i < 60; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        assert(Math.abs(m.fuel('stft') - 1.5625) < 1e-6, 'short trim (130 - 128) / 1.28: ' + m.fuel('stft'));
+        assert(Math.abs(m.fuel('ltft') - 10.15625) < 1e-6, 'long trim');
+        assert.strictEqual(m.fuel('timing'), 14, '156 / 2 - 64');
+        const tx = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; m.draw(cv, themes.theme('m_tricolour')); });
+        assert(tx.includes('Fuel trims & timing') && tx.includes('+1.6') && tx.includes('+10.2') && tx.includes('14.0') && !tx.some((x) => /NaN|undefined|oil level/i.test(x)), tx.join(' | '));
     }],
 );

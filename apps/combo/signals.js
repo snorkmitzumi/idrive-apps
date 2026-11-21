@@ -83,7 +83,10 @@ function watches(values, engine, sc, log) {
         return bar !== null && bar >= TYRE_P[0] && bar <= TYRE_P[1] ? bar : null;
     };
     const tyreT = (raw) => {
-        const v = sc('tyreTemp', raw), f = carUnits.temp ? carUnits.temp === 'F' : carUnits.psiSeen;
+        // deg F only on an imperial car (deg F and psi): a G26 in bar / deg C said deg F in its units (2.4.1), but its
+        // TPMS sent deg C + 40 (raw 48 = 8 deg C, as the car's own tyre page showed): read as deg F it came out at -13
+        const psi = carUnits.press ? carUnits.press === 'PSI' : carUnits.psiSeen;
+        const v = sc('tyreTemp', raw), f = psi && (carUnits.temp ? carUnits.temp === 'F' : true);
         const c = v !== null && f ? (v - 32) * 5 / 9 : v;
         return c !== null && c >= TYRE_T[0] && c <= TYRE_T[1] ? c : null;
     };
@@ -97,6 +100,7 @@ function watches(values, engine, sc, log) {
         ['de.bmw.infotainment.vehicle.Vehicle', {
             statusNewCurrentUnitsStatusExt: (v) => {
                 const press = unitName(PRESS_UNITS, v && v.unitOfMeasurementAirPressure), temp = unitName(TEMP_UNITS, v && v.unitOfMeasurementTemperature);
+                logRaw('units', [v && v.unitOfMeasurementAirPressure, v && v.unitOfMeasurementTemperature]);
                 if (press === carUnits.press && temp === carUnits.temp) return;
                 carUnits.press = press; carUnits.temp = temp;
                 log.info('car units: pressure ' + (press || '?') + ', temperature ' + (temp || '?'));
@@ -118,8 +122,6 @@ function watches(values, engine, sc, log) {
         } }],
         ['de.bmw.infotainment.vehicle.Vehicle2', Object.assign({
             statusCarSpeed2: (v) => put('speed', sc('speed', v.speedVehicleCentreOfGravity)),
-            // the engine oil level as the car's own measurement gives it (an enum: 1/4 .. 4/4 above the minimum)
-            statusOilDipstick2: (v) => { logRaw('oil level', v && v.fluidLevelEngineOilRelative); L.oilLevel = v && v.fluidLevelEngineOilRelative; L.oilLevelT = values.now(); },
         }, engine.handlers())],
         ['de.bmw.infotainment.drivingexcitement.FES', {
             statusSwitchDriveDynamicSport2: (v) => { logRaw('FES boost', v.displayBoostPressure); put('boostFes', sc('boost', v.displayBoostPressure)); },

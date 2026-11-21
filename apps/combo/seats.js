@@ -78,6 +78,15 @@ class Seats {
         } finally { this.busy = false; }
     }
 
+    /** Read again (the tab's button): from the start, also after the car said no (its steps to the log again). */
+    again() { if (this.busy) return; this.state = Object.assign({}, this.state, { available: null }); this.p = null; this.offered = undefined; this.last = 0; this.steps = {}; this._lastWhy = null; }
+
+    /** Where it stands, for the log line of the tab opening. */
+    summary() {
+        const s = this.state;
+        return (this.busy ? 'a step running, ' : '') + (s.available === true ? s.axes.length + ' motors' : s.available === false ? 'not available' : 'not read yet') + (s.why ? ': ' + s.why : '');
+    }
+
     step(what) { if (!this.steps) this.steps = {}; if (!this.steps[what]) { this.steps[what] = true; this.log.info('seats: ' + what); } }
 
     /** The reply as the tab shows it; each new shape of it to the log (how the car numbers the positions). */

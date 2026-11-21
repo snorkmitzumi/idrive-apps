@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (oil, coolant and gearbox temperatures, oil level, misfires per cylinder) and Ambient config's colours, animations and driving modes",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -39,8 +39,7 @@
     },
     "de.bmw.infotainment.vehicle.Vehicle2": {
       "statusCarSpeed2": "rs",
-      "statusVehiclePartType": "rs",
-      "statusOilDipstick2": "rs"
+      "statusVehiclePartType": "rs"
     },
     "de.bmw.infotainment.vehicle.TPMS": {
       "_optional": "the tyres beside xDrive",
@@ -1349,7 +1348,7 @@
       ]
     },
     "mview": {
-      "comment": "The M View tab (mview.js): read only while it shows, one request at a time, after the ambient light's writes. Engine oil and coolant come from the car's own signals (CDS statusEngineTemperature, VehicleInformation DataPowerTrain2); these candidates only while the car sends none. oil / coolant / iat: OBD service 01 PIDs 5C / 05 / 0F from the engine unit (DME 0x12; a G26's answers service 01, it refuses many 22 F4xx), then the same over UDS. egs: gearbox oil from the gearbox unit (EGS 0x18), the car's BasicDataSet never arrives on a G26. misfire: OBD service 06 monitors (A1 = all cylinders, A2 = cylinder 1 ...), tid 0C = misfires this driving cycle, 0B = average of the last 10; an engine unit that refuses service 06 is asked 22 F6xx.",
+      "comment": "The M View tab (mview.js): read only while it shows, one request at a time, after the ambient light's writes. Engine oil and coolant come from the car's own signals (CDS statusEngineTemperature, VehicleInformation DataPowerTrain2); these candidates only while the car sends none. oil / coolant / iat: OBD service 01 PIDs 5C / 05 / 0F from the engine unit (DME 0x12; a G26's answers service 01, it refuses many 22 F4xx), then the same over UDS. egs: gearbox oil from the gearbox unit (EGS 0x18), the car's BasicDataSet never arrives on a G26. misfire: OBD service 06 monitors (A1 = all cylinders, A2 = cylinder 1 ...), tid 0C = misfires this driving cycle, 0B = average of the last 10; an engine unit that refuses service 06 is asked 22 F6xx. stft / ltft / timing (Fuel trims & timing card, 2.4.2): OBD service 01 PIDs 06 / 07 / 0E from the engine unit (bank 1: a B58 has one), then the same over UDS 22 F4xx.",
       "oil": [
         {
           "ecu": 18,
@@ -1439,6 +1438,75 @@
           "min": -40,
           "max": 160,
           "note": "gearbox oil temperature, deg C + 48 (a forum report, not confirmed)"
+        }
+      ],
+      "stft": [
+        {
+          "ecu": 18,
+          "obd": "06",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.78125,
+          "offset": -100,
+          "min": -100,
+          "max": 99.3,
+          "note": "short-term fuel trim bank 1, %: (A - 128) x 100 / 128"
+        },
+        {
+          "ecu": 18,
+          "did": "F406",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.78125,
+          "offset": -100,
+          "min": -100,
+          "max": 99.3
+        }
+      ],
+      "ltft": [
+        {
+          "ecu": 18,
+          "obd": "07",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.78125,
+          "offset": -100,
+          "min": -100,
+          "max": 99.3,
+          "note": "long-term fuel trim bank 1, %"
+        },
+        {
+          "ecu": 18,
+          "did": "F407",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.78125,
+          "offset": -100,
+          "min": -100,
+          "max": 99.3
+        }
+      ],
+      "timing": [
+        {
+          "ecu": 18,
+          "obd": "0E",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.5,
+          "offset": -64,
+          "min": -64,
+          "max": 63.5,
+          "note": "ignition timing advance, degrees before TDC: A / 2 - 64"
+        },
+        {
+          "ecu": 18,
+          "did": "F40E",
+          "bytes": 1,
+          "at": 0,
+          "factor": 0.5,
+          "offset": -64,
+          "min": -64,
+          "max": 63.5
         }
       ],
       "misfire": {

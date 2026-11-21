@@ -5,7 +5,7 @@
  *   Engine oil, coolant    the car's own signals (signals.js); while it sends none, the engine unit (OBD 5C / 05)
  *   Gearbox oil            the car's BasicDataSet, else the gearbox unit (EGS 0x18, 22 6000 as on a ZF 8HP)
  *   Intake air             the engine unit (OBD 0F)
- *   Oil level              the car's own measurement (Vehicle2.statusOilDipstick2)
+ *   Fuel trims, timing     the engine unit (OBD 06 / 07 short and long term trim bank 1, 0E ignition advance)
  *   Misfires               per cylinder this driving cycle, from the engine unit's on-board monitors (OBD service 06,
  *                          mid A2 = cylinder 1 ...; 22 F6xx when it refuses service 06); Reset counts from now on,
  *                          nothing is cleared in the car
@@ -23,12 +23,11 @@ const { withAlpha } = require('./kit/canvas');
 
 const TEMP_MS = 5000, MISFIRE_MS = 10000, CAR_FRESH = 10000, KEEP = 30000, HIST_MS = 2000, HIST_N = 150;
 const YIELD_MS = 600, YIELD_STEP = 50, CALL_MS = 1500;
-const LEVELS = { MOTOROELSTAND_UNTER_MINIMUM: 'Below min', MOTOROELSTAND_AM_MINIMUM: 'At min', MOTOROELSTAND_1_4: '1/4',
-    MOTOROELSTAND_2_4: '2/4', MOTOROELSTAND_3_4: '3/4', MOTOROELSTAND_4_4: '4/4', MOTOROELSTAND_5_4: 'Overfilled',
-    MOTOROELSTAND_UEBERFUELLT: 'Overfilled', MOTOROELSTAND_OK: 'OK', SERVICEFUNKTION_AKTIV: 'Measuring' };
-const LEVEL_NO = { 0: 'MOTOROELSTAND_UNTER_MINIMUM', 1: 'MOTOROELSTAND_AM_MINIMUM', 2: 'MOTOROELSTAND_1_4', 3: 'MOTOROELSTAND_2_4',
-    4: 'MOTOROELSTAND_3_4', 5: 'MOTOROELSTAND_4_4', 6: 'MOTOROELSTAND_5_4', 7: 'MOTOROELSTAND_UEBERFUELLT', 13: 'MOTOROELSTAND_OK', 14: 'SERVICEFUNKTION_AKTIV' };
 const TEMPS = ['oil', 'coolant', 'gearbox', 'iat'];
+// the Fuel trims & timing card (engine unit, OBD 01 06 / 07 / 0E): trims in %, the advance in degrees
+const FUEL = ['stft', 'ltft', 'timing'];
+// a trim the engine unit has to hold this far from 0 % means air or fuel is off (a leak, an injector, a sensor)
+const TRIM_WARN = 10, TRIM_CRIT = 20;
 const GO = '#2fd27a';
 // a healthy engine counts a few each drive (the engine unit flags misfires at ~1-2 % of revolutions): the total in
 // yellow from MIS_WARN, red from MIS_CRIT, a cylinder from MIS_CYL_WARN (M Vitals' thresholds)
@@ -36,19 +35,13 @@ const MIS_WARN = 100, MIS_CRIT = 500, MIS_CYL_WARN = 50;
 const isNum = (x) => typeof x === 'number' && isFinite(x);
 const hexOf = (x) => parseInt(String(x), 16);
 
-/** The car's oil level enum (by name or number) as shown, or null. */
-function oilLevel(x) {
-    const name = typeof x === 'number' ? LEVEL_NO[x] : x;
-    return LEVELS[name] || null;
-}
-
 class MView {
     constructor(o) {
         Object.assign(this, { reader: o.reader, values: o.values, settings: o.settings, log: o.log, link: o.link || null });
         this.now = o.now || Date.now;
         this.yieldTo = o.yieldTo || null;
         const cfg = o.cfg || {}, quick = (l) => (l || []).map((c) => Object.assign({ timeoutMs: CALL_MS }, c));
-        this.c = { oil: quick(cfg.oil), coolant: quick(cfg.coolant), iat: quick(cfg.iat), gearbox: quick(cfg.egs) };
+        this.c = { oil: quick(cfg.oil), coolant: quick(cfg.coolant), iat: quick(cfg.iat), gearbox: quick(cfg.egs), stft: quick(cfg.stft), ltft: quick(cfg.ltft), timing: quick(cfg.timing) };
         const m = cfg.misfire || {};
         this.mis = { ecu: m.ecu == null ? 0x12 : m.ecu, tid: hexOf(m.tid || '0C'), avgTid: hexOf(m.avgTid || '0B'), cylinders: m.cylinders || 6 };
         // the monitor ids to ask (cylinder 1 = A2), the form the unit answers (service 06, or 22 F6xx: did), none left
@@ -66,6 +59,8 @@ class MView {
         if (isNum(this.read[k]) && now - (this.readT[k] || 0) < KEEP) return { v: this.read[k], from: k === 'gearbox' ? 'EGS' : 'DME' };
         return null;
     }
+    /** A fuel trim or the timing while fresh, else null. */
+    fuel(k) { return isNum(this.read[k]) && this.now() - (this.readT[k] || 0) < KEEP ? this.read[k] : null; }
     carFresh(k) { const L = this.values.live; return isNum(L[k]) && this.now() - (L[k + 'T'] || 0) < CAR_FRESH; }
     /** The counts shown: since Reset (until the engine unit starts a new driving cycle: a count under its base). */
     shown() {
@@ -87,12 +82,13 @@ class MView {
         this.busy = true;
         this.run(due).catch((e) => this.log.warn('mview ' + due + ': ' + e)).then(() => { this.busy = false; });
     }
-    /** The next value to read: a temperature the car doesn't send, or the next cylinder's misfires. */
+    /** The next value to read: a temperature the car doesn't send, a fuel trim / the timing, or the next cylinder's misfires. */
     due(now) {
         for (const k of TEMPS) {
             if (this.carFresh(k) || !this.live(this.c[k]).length) continue;
             if (now - (this.last[k] || 0) >= TEMP_MS) return k;
         }
+        for (const k of FUEL) if (this.live(this.c[k]).length && now - (this.last[k] || 0) >= TEMP_MS) return k;
         if (this.misGone === null && now - (this.last.misfire || 0) >= MISFIRE_MS / Math.max(1, this.mis.cylinders)) return 'misfire';
         return null;
     }
@@ -153,7 +149,8 @@ class MView {
         let recs = await r.monitor(e, mid, this.misDid);
         const raw = r.raws[r.monitorKey(e, mid, this.misDid)];
         this.logOnce('misfire ' + r.monitorKey(e, mid, this.misDid), raw);
-        if (!recs && refused(raw)) {
+        // refused by the unit, or not let out by the read-only link (a kit before 2.4.2): the UDS form instead
+        if (!recs && (refused(raw) || blocked(raw))) {
             if (!this.misDid) { this.misDid = true; this.log.info('misfires: service 06 refused, asking 22 F6xx'); recs = await r.monitor(e, mid, true); this.logOnce('misfire ' + r.monitorKey(e, mid, true), r.raws[r.monitorKey(e, mid, true)]); }
             if (!recs && refused(r.raws[r.monitorKey(e, mid, true)])) { this.misGone = 'The engine unit gives no misfire counts'; this.log.info('misfires: ' + this.misGone + ', not asked again'); return; }
         }
@@ -165,7 +162,7 @@ class MView {
     /* ---------- the tab ---------- */
     /*
      * Left to right: the tyres (M Vitals' Chassis card, narrower), the four temperatures in two columns, then the
-     * misfires (M Vitals' Fuel & ignition card: the total, a cell per cylinder) over the oil level.
+     * misfires (M Vitals' Fuel & ignition card: the total, a cell per cylinder) over the fuel trims and the ignition timing.
      */
     draw(cv, t, o) {
         const demo = !!(o && o.demo), U = require('./draw').units(this.settings || { get: () => null });
@@ -187,7 +184,7 @@ class MView {
         // (intake air: 74 deg C parked in traffic is heat soak, not a fault - warn from 65, red from 80)
         tile('iat', 'Intake air', 800, 284, hot(65, 80));
         this.drawMisfires(cv, t, 1112, 44, 464, 300, D);
-        this.drawOilLevel(cv, t, 1112, 356, 464, 156, D);
+        this.drawFuel(cv, t, 1112, 356, 464, 156, D);
     }
     /** The car's tyres while fresh (signals.js L.tyres), else null. */
     tyres() { const L = this.values.live; return L.tyresT && this.now() - L.tyresT < 5 * 60000 ? L.tyres : null; }
@@ -246,15 +243,24 @@ class MView {
             cv.text(isNum(c) ? String(c) : '-', cx + cw / 2, cy + ch - 12, 34, !isNum(c) ? t.dim : hit ? t.warn : t.text, { align: 'center', font: 'num' });
         }
     }
-    drawOilLevel(cv, t, x, y, w, h, D) {
-        G.panel(cv, t, x, y, w, h, 'Engine oil level');
-        const L = this.values.live;
-        const lvl = D ? '4/4' : (L.oilLevelT && this.now() - L.oilLevelT < 10 * 60000 ? oilLevel(L.oilLevel) : null);
-        const bad = lvl === 'Below min' || lvl === 'At min' || lvl === 'Overfilled';
-        cv.text(lvl || '--', x + 18, y + 116, 52, bad ? t.warn : lvl ? t.text : t.dim, { font: 'bold' });
-        cv.text(lvl ? "the car's own measurement" : 'not sent by the car yet', x + w - 18, y + 116, 18, t.dim, { align: 'right' });
+    /** Short and long term fuel trim (%), ignition advance (degrees), side by side. */
+    drawFuel(cv, t, x, y, w, h, D) {
+        G.panel(cv, t, x, y, w, h, 'Fuel trims & timing');
+        const cw = (w - 36) / 3;
+        [['stft', 'Short trim', '%'], ['ltft', 'Long trim', '%'], ['timing', 'Timing', '°']].forEach((c, i) => {
+            const k = c[0], v = D ? D[k] : this.fuel(k), cx = x + 18 + i * cw, trim = k !== 'timing';
+            const a = isNum(v) ? Math.abs(v) : 0, col = !isNum(v) ? t.dim : trim && a >= TRIM_CRIT ? t.crit : trim && a >= TRIM_WARN ? t.warn : t.text;
+            cv.text(c[1], cx, y + 84, 18, t.dim, { font: 'bold' });
+            const txt = !isNum(v) ? '--' : (trim && v > 0 ? '+' : '') + G.fmt(v, 1);
+            cv.text(txt, cx, y + 138, 40, col, { font: 'num' });
+            if (isNum(v)) cv.text(c[2], cx + cv.textWidth(txt, 40, { font: 'num' }) + 4, y + 138, 20, t.dim);
+        });
+        if (!D && !FUEL.some((k) => isNum(this.fuel(k)))) cv.text(FUEL.every((k) => !this.live(this.c[k]).length) ? 'Not given by this car' : this.why('stft'), x + w - 18, y + 40, 16, t.dim, { align: 'right' });
     }
 }
+
+/** A request the read-only link didn't send (kit/runtime/readonly-diag.js check()). */
+const blocked = (raw) => !!(raw && !raw.bytes && /read-only:/.test(raw.why || ''));
 
 /** A reply the unit refused as not supported: 7F <sid> 11 / 12 / 31. */
 function refused(raw) {
@@ -266,8 +272,8 @@ function refused(raw) {
 /** The demo's values (Combo's demo setting): a warm engine, no misfires. */
 function demoValues(now) {
     const s = Math.sin(now / 9000);
-    return { oil: 102 + 4 * s, coolant: 92 + 2 * s, gearbox: 81 + 3 * s, iat: 34 + 3 * s, mis: [0, 0, 0, 0, 0, 0],
+    return { oil: 102 + 4 * s, coolant: 92 + 2 * s, gearbox: 81 + 3 * s, iat: 34 + 3 * s, stft: 1.6 * s, ltft: -2.3, timing: 14 + 4 * s, mis: [0, 0, 0, 0, 0, 0],
         tyres: { FL: { p: 2.3, t: 31, pt: 2.5 }, FR: { p: 2.3, t: 31, pt: 2.5 }, RL: { p: 2.5, t: 34, pt: 2.7 }, RR: { p: 2.6, t: 34, pt: 2.7 } } };
 }
 
-module.exports = { MView, oilLevel, refused };
+module.exports = { MView, refused };
