@@ -13,6 +13,8 @@
  *   s.draw(cv, t)        the tab, under the host's tab bar
  */
 const G = require('./kit/gauges');
+const { withAlpha } = require('./kit/canvas');
+const { SeatModules, AXES: MOD_AXES, LO, HI } = require('./seatmod');
 
 const IFACE = 'de.bmw.body.seat.SeatTargetAdjustment', INSTANCE = '1';
 const DRIVER = 0, POLL_MS = 2000, CALL_MS = 3000;
@@ -39,10 +41,13 @@ class Seats {
         this.signals = o.signals; this.log = o.log; this.now = o.now || Date.now; this.stepMs = o.stepMs || STEP_MS;
         this.state = { available: null, why: 'Not asked yet', axes: [], at: 0 };
         this.p = null; this.busy = false; this.last = 0; this.shapes = {};
+        // the seat modules themselves over the diagnostic link (seatmod.js), when Combo has one
+        this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
     }
 
     /** While the tab shows: the position again every POLL_MS. */
     poll() {
+        if (this.modules) this.modules.tick();
         if (this.busy || this.state.available === false) return;
         if (this.now() - this.last < (this.offered === false ? RETRY_MS : POLL_MS)) return;
         this.last = this.now();
@@ -84,7 +89,8 @@ class Seats {
     /** Where it stands, for the log line of the tab opening. */
     summary() {
         const s = this.state;
-        return (this.busy ? 'a step running, ' : '') + (s.available === true ? s.axes.length + ' motors' : s.available === false ? 'not available' : 'not read yet') + (s.why ? ': ' + s.why : '');
+        const m = this.modules, mods = m ? 'modules ' + (m.state === 'found' ? m.seats.map((x) => '0x' + x.addr.toString(16).toUpperCase()).join(' ') : m.state) + '; ' : '';
+        return mods + (this.busy ? 'a step running, ' : '') + (s.available === true ? s.axes.length + ' motors' : s.available === false ? 'not available' : 'not read yet') + (s.why ? ': ' + s.why : '');
     }
 
     step(what) { if (!this.steps) this.steps = {}; if (!this.steps[what]) { this.steps[what] = true; this.log.info('seats: ' + what); } }
@@ -103,24 +109,47 @@ class Seats {
     }
 
     draw(cv, t) {
-        G.panel(cv, t, 24, 44, 1552, 468, 'Driver seat');
-        const s = this.state;
-        cv.text('Reading only for now: the seat\'s position as the car reports it.', 44, 96, 20, t.dim);
-        cv.text('Memory 1-3 and easy entry come in the next version, once your car\'s log shows these values.', 44, 124, 20, t.dim);
-        if (s.available === false || !s.axes.length) {
-            cv.text(s.available === false ? 'The car\'s seat interface is not available to apps:' : s.available === null ? 'Asking the car...' : 'No seat position yet:', 44, 190, 22, s.available === false ? t.warn : t.text, { font: 'bold' });
-            if (s.why) cv.text(s.why, 44, 222, 18, t.dim);
-            return;
+        G.panel(cv, t, 24, 44, 1552, 468, 'Seats');
+        cv.text('Reading only for now: each seat motor\'s position from the seat modules. Moving the seats comes next.', 1556, 80, 16, t.dim, { align: 'right' });
+        const m = this.modules;
+        if (m && m.state === 'found') m.seats.slice(0, 2).forEach((seat, i) => this.drawSeat(cv, t, seat, 44 + i * 772, 132, 740));
+        else if (this.state.available === true && this.state.axes.length) {
+            // no seat module found, but BMW's interface answers: its positions
+            this.state.axes.forEach((ax, i) => {
+                const x = 44 + (i % 2) * 760, y = 176 + Math.floor(i / 2) * 52;
+                cv.text(ax.name, x, y, 22, t.text, { font: 'bold' });
+                cv.text(ax.value === null ? '--' : String(ax.value), x + 700, y, 24, t.text, { align: 'right', font: 'num' });
+                cv.text(ax.axis, x + 300, y, 16, t.dim);
+            });
+        } else {
+            const what = !m ? 'No diagnostic link' : m.state === 'finding' ? 'Asking every unit which ones are seat modules...'
+                : m.state === 'none' ? (m.why || 'No seat module answered') : 'Waiting for the diagnostic link...';
+            cv.text(what, 44, 190, 22, m && m.state === 'none' ? t.warn : t.text, { font: 'bold' });
         }
-        s.axes.forEach((a, i) => {
-            const x = 44 + (i % 2) * 760, y = 176 + Math.floor(i / 2) * 52;
-            cv.text(a.name, x, y, 22, t.text, { font: 'bold' });
-            cv.text(a.value === null ? '--' : String(a.value), x + 700, y, 24, t.text, { align: 'right', font: 'num' });
-            cv.text(a.axis, x + 300, y, 16, t.dim);
-        });
-        if (s.why) cv.text(s.why, 44, 492, 18, t.warn);
-        else cv.text('Updated ' + Math.max(0, Math.round((this.now() - s.at) / 1000)) + ' s ago', 44, 492, 16, t.dim);
+        // BMW's own seat interface on the head unit (SOME/IP): one line
+        const s = this.state;
+        const iface = s.available === true && s.axes.length ? 'BMW seat interface: ' + s.axes.length + ' motors' : s.available === false ? 'BMW seat interface: not available to apps' : 'BMW seat interface: ' + (s.why || 'asking');
+        cv.text(iface, 44, 492, 16, t.dim);
     }
+    /** One seat module: an axis a row, its counter on a bar (8192..57344), moving / switch pressed beside it. */
+    drawSeat(cv, t, seat, x, y, w) {
+        const ok = seat.init === 1, initTxt = seat.init === null ? '' : ok ? 'initialised' : seat.init === 0 ? 'not initialised' : 'initialisation not OK';
+        cv.text('Seat module 0x' + seat.addr.toString(16).toUpperCase() + (seat.index ? '  ' + seat.index : ''), x, y + 14, 22, t.text, { font: 'bold' });
+        if (initTxt) cv.text(initTxt, x + w, y + 14, 16, ok ? t.dim : t.warn, { align: 'right' });
+        const rows = MOD_AXES.map((a, i) => ({ a, i })).filter((r) => seat.pos[r.i] !== null || (seat.motor[r.i] !== undefined && seat.motor[r.i] !== 3 && seat.motor[r.i] !== null));
+        const bx = x + 250, bw = w - 250 - 130;
+        rows.forEach((r, k) => {
+            const ry = y + 52 + k * 38, v = seat.pos[r.i], mv = seat.motor[r.i], sw = seat.sw[r.i];
+            cv.text(NAMES[r.a] || r.a, x, ry + 6, 18, t.text);
+            cv.text(r.a, x + 200, ry + 6, 14, t.dim);
+            cv.roundRect(bx, ry - 4, bw, 12, 6, withAlpha(t.track || '#333333', 0.9));
+            if (v !== null) { const f = (v - LO) / (HI - LO); cv.roundRect(bx + Math.max(0, Math.min(1, f)) * (bw - 12), ry - 6, 12, 16, 6, mv === 1 || mv === 2 ? t.warn : t.accent); }
+            cv.text(v === null ? '--' : String(v), x + w - 40, ry + 6, 18, t.text, { align: 'right', font: 'num' });
+            const mark = sw ? sw : mv === 1 ? '+' : mv === 2 ? '-' : '';
+            if (mark) cv.text(mark, x + w, ry + 6, 20, t.warn, { align: 'right', font: 'bold' });
+        });
+    }
+
 }
 
 module.exports = { Seats, AXES, IFACE };

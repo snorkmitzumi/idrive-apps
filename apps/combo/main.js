@@ -105,7 +105,7 @@ mgu.run({
         // the timer's clock runs with the tab hidden too, so a launch is caught from any tab
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
-        const seats = new Seats({ signals: ctx.signals, log });
+        const seats = new Seats({ signals: ctx.signals, log, link, values, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         // the M View tab: temperatures, fuel trims and timing, misfires; its reads only while the tab shows (mview.js)
         const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
