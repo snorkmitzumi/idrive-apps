@@ -25,6 +25,7 @@
  */
 const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
+const { withAlpha } = require('./kit/canvas');
 const Engine = require('./kit/engine');
 const draw = require('./draw');
 const Demo = require('./demo');
@@ -176,15 +177,15 @@ mgu.run({
             if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { railOpen = false; if (owned && tab === AMBIENT && !railShown) { railShown = true; railOpen = true; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
         // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
-        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb ? amb.touch(phase, x, y) : false));
-        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb && !(owned && (railOpen ? x < RAIL_W : x < 44 && y > 200 && y < 340)) ? amb.touch(phase, x, y) : false));
+        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb && !(owned && railOpen && x < RAIL_W) ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
 
         function drawDriving(cv, t) {
             const d = data();
@@ -197,21 +198,51 @@ mgu.run({
                 note: Date.now() <= confirmUntil ? 'Press again to reset peaks' : null, tabs: tabs(), sel: sel() });
         }
 
-        /** The page's own buttons where the kit runs the screen, in the strip over the cards (the bar's job there). */
-        function pageActions(cv, t) {
-            const B = (label, run, key, o) => G.button(cv, t, 1576 - (o && o.w || 200), 4, o && o.w || 200, 34, label, run, Object.assign({ key }, o));
-            if (tab === DRIVING) B('Reset peaks', () => { values.resetPeaks(); demoPeaks.resetPeaks(); log.info('peaks reset'); return render(); }, 'peaks', { confirm: true });
-            else if (tab === SEATS) B('Read again', () => { seats.again(); seats.poll(); return render(); }, 'seats-again');
-            else if (tab === MVIEW) B('Reset misfires', () => { mview.resetMisfires(); return render(); }, 'misfires', { w: 220 });
-            else if (tab === AMBIENT && amb) {
-                let x = 24;
-                AMBIENT_TABS.forEach((n, k) => {
-                    x += 8 + G.button(cv, t, x, 4, 0, 34, n === 'Ambient' ? 'Colour' : n, () => {
-                        if (amb.page !== k) { amb.select(k); amb.dirty(); log.info('tab ' + n); }
-                        return render();
-                    }, { key: 'amb-' + k, primary: amb.page === k });
-                });
+        /*
+         * The side rail where the kit runs the screen (2.4.8; the strip over the cards is under the kit's header there,
+         * so 2.4.6's buttons in it were cut off): a handle on the page's left edge opens a panel with the tab's own
+         * actions - Ambient's three pages, each tab's Reset - that hides itself RAIL_HIDE_MS after the last touch.
+         * Opened once by itself the first time the Ambient tab shows, so its pages are found.
+         */
+        const RAIL_W = 300, RAIL_HIDE_MS = 5000, RAIL_TOP = 50;
+        let railOpen = false, railT = 0, railShown = false;
+        const openRail = (on) => { railOpen = on; railT = Date.now(); if (amb && tab === AMBIENT) amb.dirty(); return render(); };
+        /** The rail's rows for this tab: [label, run, { primary, confirm, key }] */
+        function railRows() {
+            const rows = [];
+            if (tab === AMBIENT && amb) {
+                AMBIENT_TABS.forEach((n, k) => rows.push([n === 'Ambient' ? 'Colour' : n, () => {
+                    if (amb.page !== k) { amb.select(k); log.info('tab ' + n); }
+                    return openRail(false);
+                }, { key: 'amb-' + k, primary: amb.page === k }]));
+            } else if (tab === DRIVING) rows.push(['Reset peaks', () => { values.resetPeaks(); demoPeaks.resetPeaks(); log.info('peaks reset'); return openRail(false); }, { key: 'peaks', confirm: true }]);
+            else if (tab === PERF) rows.push(['Reset run', () => { perf.resetRun(); return openRail(false); }, { key: 'perf-run' }]);
+            else if (tab === SEATS) rows.push(['Read again', () => { seats.again(); seats.poll(); return openRail(false); }, { key: 'seats-again' }]);
+            else if (tab === MVIEW) rows.push(['Reset misfires', () => { mview.resetMisfires(); return openRail(false); }, { key: 'misfires' }]);
+            return rows;
+        }
+        function drawRail(cv, t) {
+            const rows = railRows();
+            if (!rows.length) return;
+            if (railOpen && Date.now() - railT > RAIL_HIDE_MS) { railOpen = false; if (amb && tab === AMBIENT) amb.dirty(); }
+            if (!railOpen) {
+                // the handle: a slim tab on the left edge with a chevron
+                cv.roundRect(0, 228, 22, 84, 8, withAlpha('#ffffff', 0.16));
+                cv.text('>', 11, 278, 22, t.text, { align: 'center', font: 'bold' });
+                cv.target(0, 200, 44, 140, () => openRail(true), 'rail');
+                return;
             }
+            cv.roundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, t.bg);
+            cv.roundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
+            cv.strokeRoundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
+            let y = RAIL_TOP + 22;
+            rows.forEach((r) => {
+                if (!r) { y += 14; cv.fillRect(24, y - 8, RAIL_W - 48, 1, withAlpha('#ffffff', 0.15)); return; }
+                G.button(cv, t, 24, y, RAIL_W - 48, 56, r[0], () => { railT = Date.now(); return r[1](); }, r[2]);
+                y += 70;
+            });
+            // close: a row of its own at the bottom (or wait: it hides by itself)
+            G.button(cv, t, 24, 516 - 22 - 48, RAIL_W - 48, 48, '<  Hide', () => openRail(false), { key: 'rail-close' });
         }
 
         async function render() {
@@ -234,11 +265,11 @@ mgu.run({
                 amb.draw(cv, t);
                 G.frame(cv, t, tabs(), sel(), []);
             }
-            if (owned) pageActions(cv, t);
+            if (owned) drawRail(cv, t);
             await ui.image('MAIN_GFX', cv);
         }
         // Driving and Performance follow the car each frame; the ambient tabs only while they move or changed
-        ctx.loop('MAIN', 10, () => (tab !== AMBIENT || amb.wants() ? render() : null));
+        ctx.loop('MAIN', 10, () => (tab !== AMBIENT || amb.wants() || railOpen ? render() : null));
         resetLabel();
         log.info('started' + (amb ? '' : ' (without the ambient light)'));
     },
