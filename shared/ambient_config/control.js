@@ -28,14 +28,26 @@ const FAVS = 6;
 const DEFAULT_LOOK = { kind: 'solid', upper: { rgb: [120, 60, 255], bright: 80 }, lower: { rgb: [120, 60, 255], bright: 80 }, speed: 2 };
 const NIGHT = 0.5;
 const GLOW = [0, 230, 60], RED = [255, 0, 0];
-/* The blinks keep their own clock (not the car's indicator, nor the pace of the writes, which varies with how many
- * lights a frame has): on for the first half of each BLINK_MS from when they began, about the car's 90 a minute
- * (each frame flipping it until 2.7.2). A blink: on, then dark (the light on at no brightness: black, not the car's
- * own colour); a pulse (the hazards' red on every light): bright, then dim. */
-const BLINK_MS = 660, PULSE_DIM = 15;
-const lit = (t) => ((t % BLINK_MS) + BLINK_MS) % BLINK_MS < BLINK_MS / 2;
-const blink = (rgb) => (t) => (lit(t) ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 });
-const pulse = (rgb) => (t) => ({ rgb, bright: lit(t) ? 100 : PULSE_DIM });
+/* The blinks keep their own pace, not the car's indicator: each half (on, then dark) lasts at least BLINK_MS / 2 from
+ * when it began and is never skipped. A half is written once (one side's door lines: two writes, ~400 ms through the
+ * gateway); until Combo 2.4.0 the halves were 330 ms on a fixed clock, shorter than those writes, so the light showed
+ * whichever half a frame happened to start in: on and off of uneven lengths. Now about 65 a minute, every half alike.
+ * A blink: on, then dark (the light on at no brightness: black, not the car's own colour); a pulse (the hazards' red on
+ * every light): bright, then dim. */
+const BLINK_MS = 900, PULSE_DIM = 15;
+/** A half-by-half clock: lit(t) for t in ms since the blink began, flipping once BLINK_MS / 2 has passed in a half. */
+const halves = () => {
+    let on = true, since = 0;
+    return (t) => {
+        if (t < since) { on = true; since = 0; }                       // (began again)
+        if (t - since >= BLINK_MS / 2) { on = !on; since = t; }
+        return on;
+    };
+};
+const blink = (rgb) => { const lit = halves(); return (t) => (lit(t) ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 }); };
+const pulse = (rgb) => { const lit = halves(); return (t) => ({ rgb, bright: lit(t) ? 100 : PULSE_DIM }); };
+// the car's indicator off this long before the glow stops: its signal's short gaps don't restart the blink
+const TURN_GRACE_MS = 1500;
 const DOORS = ['driver front', 'driver rear', 'passenger front', 'passenger rear'];
 /* The lights by a side of the car (x across the cabin picture: the driver's side 0) and by a door. */
 const sideOf = (l) => (l.x <= 0.15 ? 'driver' : l.x >= 0.85 ? 'passenger' : null);
@@ -61,6 +73,7 @@ const valid = (l) => !!l && typeof l === 'object' && !!l.upper && Array.isArray(
 class Control {
     constructor(o) {
         this.settings = o.settings; this.lights = o.lights; this.ambient = o.ambient; this.log = o.log;
+        this._grace = o.turnGraceMs == null ? TURN_GRACE_MS : o.turnGraceMs; this._turnOff = null;
         this._mode = null; this._night = false; this._away = false; this._shown = null; this._flashAt = 0; this._poll = null;
         this._turn = null; this._doors = [];
         this._carDoors = {}; this._carDoorTimer = null; this._carDoorNo = false; this._carOwn = '';
@@ -132,7 +145,16 @@ class Control {
     }
 
     /** The turn signals: 'left', 'right', 'both' (hazards) or null. */
-    turn(side) { this._turn = side || null; this.signals(); }
+    turn(side) {
+        side = side || null;
+        if (this._turnOff) { clearTimeout(this._turnOff); this._turnOff = null; }
+        if (!side && this._turn && this._grace > 0) {
+            this._turnOff = setTimeout(() => { this._turnOff = null; this._turn = null; this.signals(); }, this._grace);
+            if (this._turnOff.unref) this._turnOff.unref();
+            return;
+        }
+        this._turn = side; this.signals();
+    }
     /** The doors open: some of DOORS. */
     doors(open) { this._doors = (open || []).filter((d) => DOORS.indexOf(d) >= 0); this.signals(); }
     /** The turn signal's glow, the hazards' red pulse and the open doors' red, as the settings and the car say now. */

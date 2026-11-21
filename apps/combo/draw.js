@@ -121,6 +121,7 @@ function speedColumn(cv, t, d, u, pk, s, c) {
 /* ---------- 3: xDrive ---------- */
 function xdriveColumn(cv, t, d, u, pk, s, c) {
     G.panel(cv, t, c.x, c.y, c.w, c.h, 'xDrive');
+    tyreGrid(cv, t, d.tyres, u, c);
     if (s.get('xdrive') === 'off') {
         cv.text('RWD', c.x + 22, c.y + 116, 52, t.text, { font: 'bold' });
         cv.text('xDrive card hidden in Settings', c.x + 22, c.y + 150, 18, t.dim);
@@ -130,13 +131,30 @@ function xdriveColumn(cv, t, d, u, pk, s, c) {
     cv.text(AWD[d.awd] || '--', c.x + 22, c.y + 104, 44, hot ? t.crit : AWD[d.awd] ? t.text : t.dim, { font: 'bold' });
     if (hot) cv.text('DERATED / OFF', c.x + 22, c.y + 134, 20, t.crit, { font: 'bold', spacing: 1.5 });
     else if (sp.from) cv.text(sp.from, c.x + 22, c.y + 134, 18, t.dim);
-    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(sp.nm), 0, u.tqU));
-    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(pk('lmvFront')), 0, u.tqU));
+    // (the transfer case reads +-1-2 Nm with its clutch open, a G26's log: shown as 0; a peak only above that)
+    const idle = (nm) => (G.isNum(nm) && Math.abs(nm) <= 5 ? 0 : nm), fp = pk('lmvFront');
+    kv(cv, t, c.x + 22, c.y + 168, c.w - 44, 'FRONT AXLE', withUnit(u.TQ(idle(sp.nm)), 0, u.tqU));
+    kv(cv, t, c.x + 22, c.y + 194, c.w - 44, 'FRONT PEAK', withUnit(u.TQ(G.isNum(fp) && fp > 5 ? fp : null), 0, u.tqU));
     // wheel slip: the front axle's wheels against the rear's (+ = the front turns faster), above 5 km/h
     kv(cv, t, c.x + 22, c.y + 220, c.w - 44, 'AXLE SLIP', G.isNum(d.slip) ? (d.slip > 0 ? '+' : '') + G.fmt(d.slip, 1) + ' %' : '--');
     const rear = sp.rear;
     G.bar(cv, t, c.x + 22, c.y + 240, c.w - 44, 92, { label: 'Rear', value: rear, unit: '%', ramp: 'hot' });
     G.bar(cv, t, c.x + 22, c.y + 350, c.w - 44, 92, { label: 'Front', value: G.isNum(rear) ? 100 - rear : null, unit: '%', ramp: 'hot' });
+}
+
+/**
+ * The tyres, top right of the xDrive panel beside its title, as the car stands (front on top): pressure / temperature
+ * per tyre in the units chosen, "2.4/20". Under the car's target pressure by over 0.2 bar: in the warning colour.
+ */
+function tyreGrid(cv, t, ty, u, c) {
+    if (!ty) return;
+    const dec = u.psi || u.kpa ? 0 : 1, colW = 74, xr = c.x + c.w - 22;
+    [['FL', 'FR'], ['RL', 'RR']].forEach((row, r) => row.forEach((w, k) => {
+        const x = ty[w] || {}, p = u.P(x.p), tt = u.T(x.t);
+        const text = (G.isNum(p) ? G.fmt(p, dec) : '--') + (G.isNum(tt) ? '/' + G.fmt(tt, 0) : '');
+        const low = G.isNum(x.p) && G.isNum(x.pt) && x.p < x.pt - 0.2;
+        cv.text(text, xr - (1 - k) * colW, c.y + 40 + r * 24, 18, low ? t.warn : G.isNum(p) ? t.text : t.dim, { align: 'right', font: 'bold' });
+    }));
 }
 
 /* ---------- 4: 48 V battery over 12 V battery ---------- */

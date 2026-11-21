@@ -34,7 +34,7 @@ class FakeLink extends EventEmitter {
 // app asks of it; test_ambient_*.js check the real one
 const fakeAmb = {
     calls: [], page: 0,
-    tabs: () => ['Ambient', 'Animations', 'Modes', 'Favourites'],
+    tabs: () => ['Ambient', 'Animations', 'Modes'],
     draw(cv, t) { cv.text('AMBIENT TAB ' + this.page, 100, 100, 20, t.text); },
     select(i) { this.page = i; this.calls.push('select ' + i); }, tap(x, y) { this.calls.push('tap ' + x + ',' + y); },
     wants: () => true, leave() { this.calls.push('leave'); }, dirty() {}, original() { this.calls.push('original'); },
@@ -79,7 +79,7 @@ async function boot(dir, opts) {
     opts = opts || {};
     freshKit();
     delete require.cache[MAIN];
-    ['values', 'signals', 'batteries', 'reads', 'draw', 'demo'].forEach((n) => { delete require.cache[path.join(APP, n + '.js')]; });
+    ['values', 'signals', 'batteries', 'reads', 'draw', 'demo', 'mview'].forEach((n) => { delete require.cache[path.join(APP, n + '.js')]; });
     require(MAIN);
     const settings = settingsOf(Object.assign({ demo: 'on' }, opts.settings));
     const vis = opts.vis || { shown: true, handlers: [] };
@@ -721,20 +721,23 @@ checks.push(
         const t2 = await page(Object.assign(car(), { slip: null }));
         assert(t2.includes('AXLE SLIP') && !t2.some((x) => /NaN|undefined/.test(x)));
     }],
-    ['2.0 #1 tabs: Driving, Performance, Seats, then Ambient config\'s four (no Strobe); each tab drawn', async () => {
+    ['2.0 #1 tabs: Driving, Performance, Seats, M View, then Ambient config\'s three (no Favourites, no Strobe); each tab drawn', async () => {
         fakeAmb.calls = [];
         const b = await boot(tmp('tabs'));
         assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0, 'the ambient service without the strobe: ' + fakeAmb.calls.join(' | '));
-        assert(fakeAmb.calls.some((c) => /^mount .*"strobe":false.*"names":\["Ambient","Animations","Modes","Favourites"\]/.test(c)), fakeAmb.calls.join(' | '));
+        assert(fakeAmb.calls.some((c) => /^mount .*"strobe":false.*"names":\["Ambient","Animations","Modes"\]/.test(c)), fakeAmb.calls.join(' | '));
         const t0 = await b.draw();
-        ['DRIVING', 'PERFORMANCE', 'SEATS', 'AMBIENT', 'ANIMATIONS', 'MODES', 'FAVOURITES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT', 'ANIMATIONS', 'MODES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        assert(!t0.includes('FAVOURITES'), 'Favourites still a tab');
         assert(t0.includes('Engine speed'), 'Driving first');
         const t1 = await b.tab(1);
         assert(t1.includes('Dyno') && t1.includes('Drag timer'), 'Performance: ' + t1.join(' | '));
         assert(!t1.includes('Engine speed'), 'Driving still drawn on Performance');
         const t2 = await b.tab(2);
         assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
-        const t3 = await b.tab(4);
+        const tm = await b.tab(3);
+        assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires this drive') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
+        const t3 = await b.tab(5);
         assert(t3.includes('AMBIENT TAB 1') && fakeAmb.calls.indexOf('select 1') >= 0, 'Animations: ' + t3.join(' | '));
         b.tap(300, 300);
         assert(fakeAmb.calls.indexOf('tap 300,300') >= 0, 'a tap on an ambient tab goes to it');
@@ -755,7 +758,7 @@ checks.push(
         const before = link.asked.length;
         await new Promise((r) => setTimeout(r, 1200));
         assert.strictEqual(link.asked.length, before, 'read on the Performance tab: ' + link.asked.slice(before).map((a) => a.ecu).join());
-        await b.tab(2);
+        await b.tab(4);
         await new Promise((r) => setTimeout(r, 600));
         assert.strictEqual(link.asked.length, before, 'read on an ambient tab');
     }],
@@ -764,7 +767,7 @@ checks.push(
         const b = await boot(tmp('reset'));
         await b.tab(1);
         b.clicks.BTN_RESET();
-        await b.tab(3);
+        await b.tab(4);
         b.clicks.BTN_RESET();
         assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
     }],
@@ -816,5 +819,105 @@ checks.push(
                 assert(have.has(m), f + ' needs ' + m + ', which "include" leaves out');
             });
         });
+    }],
+    ['2.4 #1 M View: oil and coolant from the car\'s own signals, the oil level from its measurement', async () => {
+        const { v, w } = signalRig();
+        w.CDS.statusEngineTemperature({ temperatureEngineDrive: 48 + 91, temperatureEngineOilDrive: 48 + 104 });
+        assert.strictEqual(v.live.coolant, 91); assert.strictEqual(v.live.oil, 104); assert(v.live.oilT > 0);
+        w.VehicleInformation.DataPowerTrain2({ temperatureEngineDrive: 48 + 93, temperatureEngineOilDrive: 255 });
+        assert.strictEqual(v.live.coolant, 93, 'DataPowerTrain2 carries them too'); assert.strictEqual(v.live.oil, 104, '255 = no value');
+        w.Vehicle2.statusOilDipstick2({ fluidLevelEngineOilRelative: 'MOTOROELSTAND_3_4' });
+        const { oilLevel } = appModule('mview');
+        assert.strictEqual(oilLevel(v.live.oilLevel), '3/4'); assert.strictEqual(oilLevel(4), '3/4'); assert.strictEqual(oilLevel('SIGNAL_UNGUELTIG'), null);
+        assert(SPEC.signals['de.bmw.infotainment.vehicle.CDS'].statusEngineTemperature && SPEC.signals['de.bmw.infotainment.vehicle.Vehicle2'].statusOilDipstick2);
+    }],
+    ['2.4 #2 M View reads: the car\'s values not asked, the gearbox from the EGS, refusals not asked again, misfires per cylinder', async () => {
+        const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
+        const asked = [];
+        let clock = 1e6;
+        // a G26: the DME answers service 01 and 06, refuses 22 F4xx; the EGS answers 22 6000 (75 deg C)
+        const fake = { available: true, async physical(ecu, sid, data) {
+            asked.push(ecu + ':' + sid.toString(16) + ':' + data.map((x) => x.toString(16)).join(''));
+            if (ecu === 0x18 && sid === 0x22 && data[0] === 0x60 && data[1] === 0) return [0x62, 0x60, 0x00, 115];
+            if (ecu === 0x12 && sid === 0x01 && data[0] === 0x0F) return [0x41, 0x0F, 40 + 31];
+            if (ecu === 0x12 && sid === 0x06 && data[0] === 0xA0) return [0x46, 0xA0, 0x7E, 0x00, 0x00, 0x00];        // A2..A7
+            if (ecu === 0x12 && sid === 0x06 && data[0] >= 0xA2 && data[0] <= 0xA7) {
+                const n = data[0] === 0xA4 ? 3 : 0;
+                return [0x46, data[0], 0x0B, 0x24, 0, 1, 0, 0, 0xFF, 0xFF, data[0], 0x0C, 0x24, 0, n, 0, 0, 0xFF, 0xFF];
+            }
+            return [0x7F, sid, 0x31];
+        } };
+        const values = { live: { oil: 100, oilT: clock, coolant: 90, coolantT: clock }, now: () => clock };
+        const logged = [], log = { info: (m) => logged.push(m), warn: (m) => logged.push(m) };
+        const m = new MView({ reader: new DidReader(fake), values, cfg: SPEC.config.mview, settings: settingsOf(), log, link: fake, now: () => clock });
+        const step = async () => { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; values.live.oilT = values.live.coolantT = clock; };
+        for (let i = 0; i < 80; i++) await step();
+        assert(!asked.some((a) => /^18:1:5c|^18:1:5$|^18:22:f45c/.test(a)), 'oil / coolant asked while the car sends them: ' + asked.join(' '));
+        assert.strictEqual(m.temp('gearbox').v, 75); assert.strictEqual(m.temp('gearbox').from, 'EGS');
+        assert.strictEqual(m.temp('iat').v, 31);
+        assert.strictEqual(m.temp('oil').from, 'car');
+        assert.strictEqual(m.mids.length, 6, 'six cylinders from A0');
+        assert.deepStrictEqual(m.shown(), [0, 0, 3, 0, 0, 0], 'cylinder 3: 3 misfires');
+        assert.strictEqual(asked.filter((a) => a === '24:22:da12').length, 0, 'the first EGS candidate answers: the second not asked');
+        assert(asked.filter((a) => a === '18:22:f40f').length <= 1, 'F40F refused once, not asked again');
+        m.resetMisfires();
+        assert.deepStrictEqual(m.shown(), [0, 0, 0, 0, 0, 0], 'Reset: from now on');
+        // drawn without NaN, the misfire in the warn colour's row
+        const tx = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; m.draw(cv, themes.theme('m_tricolour')); });
+        assert(tx.includes('Cyl 3') && tx.some((x) => /^75$/.test(x)) && !tx.some((x) => /NaN|undefined/.test(x)), tx.join(' | '));
+        // the car's own oil temperature stopped: then the DME is asked (it refuses: not asked again)
+        values.live.oilT = 0; const was = asked.length; clock += 60000;
+        for (let i = 0; i < 40; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        assert(asked.slice(was).filter((a) => a === '18:1:5c').length === 1, 'oil from the DME once (then refused): ' + asked.slice(was).join(' '));
+        assert(/Not given by this car/.test(m.why('oil')));
+    }],
+    ['2.4 #4 tyres beside xDrive: the car\'s TPMS in its own unit, "2.4/20" per tyre, a low one in the warning colour', async () => {
+        const { v, w } = signalRig();
+        // a car set to psi: 35 psi (raw 350), its temperatures in deg F + 40 (68 F = 20 C)
+        w.Vehicle.statusNewCurrentUnitsStatusExt({ unitOfMeasurementAirPressure: 'PSI', unitOfMeasurementTemperature: 'F' });
+        w.TPMS.statusTyrePressure({ actualValuePressureTyreFLH: 348, actualValuePressureTyreFRH: 348, actualValuePressureTyreRLH: 392, actualValuePressureTyreRRH: 65535 });
+        w.TPMS.statusTyreTemperature({ actualValueTemperatureTyreFLH: 108, actualValueTemperatureTyreFRH: 110, actualValueTemperatureTyreRLH: 108, actualValueTemperatureTyreRRH: 108 });
+        w.TPMS.statusTargetTyrePressure({ targetPressureTyreFLH: 348, targetPressureTyreFRH: 348, targetPressureTyreRLH: 420, targetPressureTyreRRH: 392 });
+        const ty = v.live.tyres;
+        assert(Math.abs(ty.FL.p - 2.4) < 0.01 && Math.abs(ty.FL.t - 20) < 0.01 && ty.RR.p === null, JSON.stringify(ty));
+        assert(SPEC.signals['de.bmw.infotainment.vehicle.TPMS']._optional, 'TPMS optional (a car without it still installs)');
+        const d = car(); d.tyres = ty;
+        const tx = await page(d);
+        ['2.4/20', '2.7/20', '--/20'].forEach((x) => assert(tx.includes(x), x + ' missing: ' + tx.join(' | ')));
+        assert(tx.includes('xDrive') && !tx.some((x) => /NaN|undefined/.test(x)));
+        const t2 = await page(Object.assign(car(), { tyres: null }));
+        assert(!t2.some((x) => /^\d\.\d\/\d+$/.test(x)), 'no tyres from the car: nothing drawn');
+    }],
+    ['2.4 #5 seats: every step logged; a set-up that never comes back is given up, a seat interface not offered is not called', async () => {
+        const { Seats } = appModule('seats');
+        const logged = [], log = { info: (m) => logged.push(m), warn: (m) => logged.push(m) };
+        // never answers (2.3.1 on a G26: not one seat line in the log)
+        const hang = new Seats({ signals: { proxy: () => new Promise(() => {}), call: () => new Promise(() => {}) }, log, stepMs: 50 });
+        await hang.read();
+        assert(logged.some((m) => /seats: asking the car for its seat interface/.test(m)) && logged.some((m) => /seat interface set-up: no answer/.test(m)), logged.join(' | '));
+        assert(!hang.busy, 'not left waiting');
+        // set up, but the car doesn't offer it: no call, asked again after 30 s
+        let calls = 0, clock = 1e6;
+        const off = new Seats({ signals: { proxy: async () => ({ isAvailable: () => false }), call: async () => { calls++; return {}; } }, log, now: () => clock, stepMs: 50 });
+        await off.read();
+        assert.strictEqual(calls, 0); assert(/does not offer/.test(off.state.why) && off.offered === false);
+        off.last = clock; clock += 5000; off.poll(); assert(!off.busy, 'asked again before 30 s');
+        assert(logged.some((m) => /offered by the car: false/.test(m)));
+    }],
+    ['2.4 #3 M View: an engine unit without misfire monitors is not asked again; nothing read while locked', async () => {
+        const { MView } = appModule('mview'), { DidReader } = require(path.join(KIT, 'dids'));
+        const asked = [];
+        const fake = { available: true, async physical(ecu, sid, data) { asked.push(sid); return [0x7F, sid, 0x11]; } };
+        let clock = 1e6;
+        const values = { live: {}, now: () => clock };
+        const m = new MView({ reader: new DidReader(fake), values, cfg: SPEC.config.mview, settings: settingsOf(), log: quiet, link: fake, now: () => clock });
+        for (let i = 0; i < 120; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        assert(m.misGone, 'misfires given up');
+        const n = asked.length;
+        for (let i = 0; i < 60; i++) { m.tick(); while (m.busy) await new Promise((r) => setImmediate(r)); clock += 400; }
+        assert.strictEqual(asked.length, n, 'asked again after every candidate was refused');
+        values.live.left = true; m.misGone = null; m.no = {};
+        for (let i = 0; i < 30; i++) { m.tick(); clock += 400; }
+        assert.strictEqual(asked.length, n, 'read while the car is locked and left');
     }],
 );
