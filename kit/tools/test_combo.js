@@ -1023,4 +1023,23 @@ checks.push(
         assert(out.includes('Seat module 0x6D  0F2A31') && out.includes('Forward / back') && out.includes('23600') && !out.includes('Headrest height') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
         assert(/modules 0x6D/.test(s.summary()));
     }],
+    ['2.4.5 Seats: a request the transport refuses now and then is asked again; a failed search starts again, not stuck "finding"', async () => {
+        const { SeatModules } = appModule('seatmod');
+        const logs = [], log = { info: (m) => logs.push(m), warn: (m) => logs.push(m) };
+        let refuse = 2, discoverFails = 1;
+        const link = { available: true,
+            async discover() { if (discoverFails-- > 0) throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED'); return new Map([[0x6D, '0F21F0'], [0x6E, '0F21F0']]); },
+            async read(a, did) {
+                if (a === 0x6D && did === 0xD702 && refuse-- > 0) throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED');
+                if (did === 0xD702) return [0x62, 0xD7, 0x02].concat(new Array(22).fill(0).map((x, i) => (i % 2 ? 0 : 0x60)));
+                return [0x7F, 0x22, 0x31];
+            } };
+        let clock = 1e6;
+        const m = new SeatModules({ link, log, now: () => clock, values: { live: {} } });
+        m.tick(); while (m.busy) await new Promise((r) => setTimeout(r, 5));
+        assert.strictEqual(m.state, 'none', 'the failed search is over: ' + m.state);
+        clock += 6000; m.tick(); while (m.busy) await new Promise((r) => setTimeout(r, 5));
+        assert.strictEqual(m.state, 'found', m.state + ' ' + logs.join(' | '));
+        assert.deepStrictEqual(m.seats.map((x) => x.addr), [0x6D, 0x6E], 'the refused one asked again');
+    }],
 );

@@ -21,7 +21,7 @@ const { hex } = require('./kit/diag');
 
 const AXES = ['SLV', 'SHV', 'LNV', 'SNV', 'KHV', 'STV', 'LBV', 'LKV'];
 const POS = 0xD702, MOTOR = 0xD708, SWITCH = 0xD712, INIT = 0xD704;
-const LO = 8192, HI = 57344, MOVED = 20;
+const LO = 8192, HI = 57344, MOVED = 20, TRIES = 4, RETRY_MS = 300, FAILED_AGAIN_MS = 5000;
 const POLL_MS = 400, INIT_MS = 10000, FIND_AGAIN_MS = 60000, YIELD_MS = 600, YIELD_STEP = 50, LOG_MAX = 120;
 
 const A = (a) => '0x' + hex(a);
@@ -54,10 +54,22 @@ class SeatModules {
             if (this.yieldTo) { const t0 = this.now(); while (this.yieldTo() && this.now() - t0 < YIELD_MS) await new Promise((r) => setTimeout(r, YIELD_STEP)); }
             return fn();
         };
-        return go().catch((e) => { this.why = String(e && e.message || e); this.log.warn('seat modules: ' + this.why); })
+        return go().catch((e) => {
+            this.why = String(e && e.message || e); this.log.warn('seat modules: ' + this.why);
+            // a search that failed part way (2.4.4 on a G26: one refused request left it "finding" for good): again soon
+            if (this.state === 'finding') { this.state = 'none'; this.foundAt = this.now() - FIND_AGAIN_MS + FAILED_AGAIN_MS; }
+        })
             .then(() => { this.busy = false; });
     }
 
+    /** One read, tried again when the transport refuses it now and then ("temporarily not accepted"): the reply or null. */
+    async read(a, did) {
+        for (let i = 0; i < TRIES; i++) {
+            try { return (await this.link.read(a, did, 800)) || null; } catch (e) { if (i === TRIES - 1) throw e; }
+            await new Promise((r) => setTimeout(r, RETRY_MS));
+        }
+        return null;
+    }
     /** Every unit asked who it is, then for its seat counters. */
     async find() {
         this.state = 'finding'; this.why = null;
@@ -70,7 +82,8 @@ class SeatModules {
         for (let i = 0; i < list.length; i += 12) this.log.info('units: ' + list.slice(i, i + 12).map((a) => A(a) + (units.get(a) ? ' ' + units.get(a) : '')).join(', '));
         const seats = [];
         for (const a of list) {
-            const u = await this.link.read(a, POS, 800);
+            let u = null;
+            try { u = await this.read(a, POS); } catch (e) { this.log.info('seat modules: ' + A(a) + ' not read (' + (e && e.message || e) + ')'); }
             const d = data(u, POS);
             if (d && d.length >= 16) seats.push({ addr: a, index: units.get(a) || '', pos: positions(d), motor: [], sw: [], init: null, at: this.now(), logged: positions(d), loggedAt: 0 });
         }
@@ -85,15 +98,15 @@ class SeatModules {
         const s = this.seats[this.turn % this.seats.length];
         const step = Math.floor(this.turn / this.seats.length) % 3;
         this.turn++;
-        const d = data(await this.link.read(s.addr, POS, 800), POS);
+        const d = data(await this.read(s.addr, POS), POS);
         if (d) { s.pos = positions(d); s.at = this.now(); this.moved(s); }
-        if (step === 1) { const m = data(await this.link.read(s.addr, MOTOR, 800), MOTOR); if (m) s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); }
+        if (step === 1) { const m = data(await this.read(s.addr, MOTOR), MOTOR); if (m) s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); }
         if (step === 2) {
-            const w = data(await this.link.read(s.addr, SWITCH, 800), SWITCH);
+            const w = data(await this.read(s.addr, SWITCH), SWITCH);
             if (w) { const was = s.sw; s.sw = AXES.map((a, i) => (w[i * 2] === 1 ? '+' : w[i * 2 + 1] === 1 ? '-' : '')); this.pressed(s, was); }
         }
         if (s.init === null || this.now() - (s.initAt || 0) >= INIT_MS) {
-            const n = data(await this.link.read(s.addr, INIT, 800), INIT);
+            const n = data(await this.read(s.addr, INIT), INIT);
             s.initAt = this.now();
             if (n && n.length) { if (s.init !== n[0]) this.log.info('seat ' + A(s.addr) + ': initialisation ' + ({ 0: 'not done', 1: 'OK', 255: 'not OK' }[n[0]] || hex(n[0]))); s.init = n[0]; }
         }
