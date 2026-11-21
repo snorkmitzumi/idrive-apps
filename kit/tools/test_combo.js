@@ -88,12 +88,12 @@ async function boot(dir, opts) {
     booted.push(vis);
     const clicks = {};
     let frame = null, last = null, tab = null, tap = null, tilt = null;
-    const hidden = [];
+    const hidden = [], opened = [];
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
-        onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
+        onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, mapStyle: () => !!opts.map, openSettings() { opened.push('settings'); }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
         theme: () => themes.theme('m_tricolour'),
         canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = opts.own !== false; last = cv; return cv; },
     };
@@ -101,7 +101,7 @@ async function boot(dir, opts) {
     return {
         ctx, settings, vis, clicks,
         draw: () => textsOf(() => frame()),
-        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden, tilt: (d) => tilt(d),
+        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden, opened, tilt: (d) => tilt(d),
         /** press the page button with this key (drawn on the last frame) */
         press: (key) => { const b = ((last && last.targets) || []).find((x) => x.key === key); assert(b, 'no button ' + key + ': ' + ((last && last.targets) || []).map((x) => x.key).join(' ')); return textsOf(() => b.run()); },
         canvas: () => last,
@@ -1084,5 +1084,25 @@ checks.push(
         await b.tab(4);
         assert.strictEqual(b.tilt('E'), true, 'the Ambient tab opened it by itself the first time: right closes it');
         assert.strictEqual(b.tilt('W'), 'amb-0', 'Ambient: the knob onto Colour');
+    }],
+    ['2.5.0 map style: the pages in a left bar, the tab\'s action and Settings in a right one, no tabs needed', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('map'), { map: true });
+        await b.draw();
+        assert.strictEqual(b.tilt('W'), 'nav-0', 'pushed left: the pages, the knob on Driving');
+        const tl = await b.draw();
+        ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT', 'COLOUR', 'ANIMATIONS', 'MODES'].forEach((x) => assert(tl.includes(x), x + ' missing: ' + tl.join(' | ')));
+        await b.press('nav-3');
+        const tm = await b.draw();
+        assert(tm.includes('this drive') && !tm.includes('COLOUR') && tm.includes('>') && tm.includes('<'), 'M View shown, the bar closed (a handle each side): ' + tm.join(' | '));
+        assert.strictEqual(b.tilt('E'), 'misfires', 'pushed right: the knob on Reset misfires');
+        const tr = await b.draw();
+        assert(tr.includes('RESET MISFIRES') && tr.includes('SETTINGS'), 'the right bar: ' + tr.join(' | '));
+        assert.strictEqual(b.tilt('W'), true, 'pushed left: the right bar closes');
+        await b.draw(); await b.press('rail-r'); await b.press('settings');
+        assert.deepStrictEqual(b.opened, ['settings'], 'Settings from the right bar');
+        await b.draw(); await b.press('rail'); await b.press('amb-2');
+        const ta = await b.draw();
+        assert(ta.includes('AMBIENT TAB 2') && fakeAmb.calls.indexOf('select 2') >= 0, 'Ambient\'s Modes from the left bar: ' + ta.join(' | '));
     }],
 );

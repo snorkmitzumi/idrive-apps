@@ -89,7 +89,7 @@ const FULL = {
     // the side margins are trimmed a little, so the content can be scaled up further
     src: { x: 12, y: 38, w: 1576, h: 482 },
 };
-const LAYOUTS = ['full', 'standard'];
+const LAYOUTS = ['full', 'standard', 'map'];
 const CTL_RETRIES = 3, CTL_RETRY_MS = 30000;   // connecting again for the controller (_ctlRetry)
 
 // the HMI's page animation when a screen opens (the picture shows after it)
@@ -251,12 +251,18 @@ class Display {
     ownable() {
         const g = this.gpu;
         const h = geometryFor(g && g.screen);
-        return !!(g && g.ready && g.native && g.touch && this.layout() === 'full' && g.screen.w === h.screen.w && g.screen.h === h.screen.h);
+        return !!(g && g.ready && g.native && g.touch && (this.layout() === 'full' || this.layout() === 'map') && g.screen.w === h.screen.w && g.screen.h === h.screen.h);
     }
     /** Settings is the header's last tab where the kit runs the screen (the app has a Settings button). */
     hasSettings() { return !!(this.screen && (this.screen.buttons || []).some((b) => b[0] === 'BTN_SETTINGS')); }
+    /**
+     * Map style (layout "map", as BMW's map): the full layout without tabs in the header - it names the page shown;
+     * the app moves between its pages and opens Settings itself (side bars), ctx.openSettings().
+     */
+    mapStyle() { return this.layout() === 'map' && this.own(); }
     /** The header's tabs: the app's, then Settings. { tabs, sel, badges, settings: index or -1 } */
     _tabList() {
+        if (this.mapStyle()) return { tabs: [], sel: -1, badges: (this.tabInfo && this.tabInfo.badges) || [], settings: -1 };
         const base = this.tabInfo || { tabs: [], sel: -1, badges: [] };
         const tabs = (base.tabs || []).slice();
         const settings = this.own() && this.hasSettings() ? tabs.push('Settings') - 1 : -1;
@@ -290,6 +296,8 @@ class Display {
         this.log.info('display: back (controller pushed left)');
         Promise.resolve(this.ui.close(this.screen.name)).catch((e) => this.log.warn('back: ' + e));
     }
+    /** The app's Settings, as its Settings button opens them (map style: from the app's own side bar). */
+    openSettings() { if (this.hasSettings()) this._click('BTN_SETTINGS'); }
     /** A sheet can be shown now (else the app falls back to the HMI's own screens). */
     canSheet() { return this.own() && this.active(); }
 
@@ -885,8 +893,10 @@ class Display {
         // compact header in the HMI strip's own black, only as wide as its name, tabs and badges:
         // right of it the HMI's strip shows through (radio station, phone signal, status icons)
         const hx = HMI.left - pl.x;
+        // map style: the header names the page shown (its tab's name), no tabs
+        const ti = this.tabInfo, page = this.mapStyle() && ti && ti.tabs && ti.tabs[ti.sel];
         const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
-            this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
+            this.sheet && this.mapStyle() ? (this.sheet.title || 'Settings') : page || this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
         // the HMI's own title is in the strip under the header: a narrower header (a sheet: no tabs) stays
         // as wide as the app's widest, so none of that title shows beside it
         if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);

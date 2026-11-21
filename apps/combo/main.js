@@ -147,7 +147,7 @@ mgu.run({
         // with its pages as sub-tabs, so Settings fits in the header as its last tab; each tab's Reset is on its page and
         // the bottom bar is gone (2.4.6). Elsewhere (the HMI's own bar and title) as before.
         let owned = false;
-        const tabs = () => TABS.concat(!amb ? [] : owned ? ['Ambient'] : amb.tabs());
+        const tabs = () => TABS.concat(!amb ? [] : owned ? [owned && ctx.mapStyle && ctx.mapStyle() ? 'Ambient · ' + ['Colour', 'Animations', 'Modes'][amb.page || 0] : 'Ambient'] : amb.tabs());
         const sel = () => (tab === AMBIENT ? AMBIENT + (owned ? 0 : amb.page) : tab);
         if (ctx.hideButton) ctx.hideButton('BTN_RESET');
 
@@ -177,15 +177,15 @@ mgu.run({
             if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { railOpen = false; if (owned && tab === AMBIENT && !railShown) { railShown = true; railOpen = true; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
         // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
-        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb && !(owned && (railOpen ? x < RAIL_W : x < 44 && y > 200 && y < 340)) ? amb.touch(phase, x, y) : false));
-        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb && !(owned && railOpen && x < RAIL_W) ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb && !onRail(x, y) ? amb.touch(phase, x, y) : false));
+        if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb && !onRail(x, y) ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
 
         function drawDriving(cv, t) {
             const d = data();
@@ -199,59 +199,89 @@ mgu.run({
         }
 
         /*
-         * The side rail where the kit runs the screen (2.4.8; the strip over the cards is under the kit's header there,
-         * so 2.4.6's buttons in it were cut off): a handle on the page's left edge opens a panel with the tab's own
-         * actions - Ambient's three pages, each tab's Reset - that hides itself RAIL_HIDE_MS after the last touch.
-         * Opened once by itself the first time the Ambient tab shows, so its pages are found.
+         * Side bars where the kit runs the screen. Full screen (2.4.8): one rail on the left with the tab's own actions
+         * (Ambient's three pages, each tab's Reset; the strip over the cards is under the kit's header there). Map style
+         * (2.5.0, layout "map", as BMW's map): no tabs in the header - the left bar has the pages (Ambient's three under
+         * it), the right one the tab's action and Settings. A handle on the edge opens a bar by touch (hidden again
+         * RAIL_HIDE_MS after the last touch), the controller pushed left / right too (open until pushed back or a row
+         * is pressed). The full layout's rail opens by itself the first time the Ambient tab shows, so its pages are found.
          */
-        const RAIL_W = 300, RAIL_HIDE_MS = 5000, RAIL_TOP = 50;
-        let railOpen = false, railT = 0, railShown = false, railByKnob = false;
-        const openRail = (on, knob) => { railOpen = on; railByKnob = !!(on && knob); railT = Date.now(); if (amb && tab === AMBIENT) amb.dirty(); return render(); };
-        /** The rail's rows for this tab: [label, run, { primary, confirm, key }] */
-        function railRows() {
+        const RAIL_W = 300, MAP_W = 340, RAIL_HIDE_MS = 5000, RAIL_TOP = 50;
+        let railOpen = null, railT = 0, railShown = false, railByKnob = false;      // railOpen: null, 'L' or 'R'
+        const mapped = () => owned && !!(ctx.mapStyle && ctx.mapStyle());
+        const barW = () => (mapped() ? MAP_W : RAIL_W);
+        const openRail = (side, knob) => { railOpen = side || null; railByKnob = !!(side && knob); railT = Date.now(); if (amb && tab === AMBIENT) amb.dirty(); return render(); };
+        /** The tab's own actions: [label, run, { primary, confirm, key }] */
+        function actionRows() {
             const rows = [];
-            if (tab === AMBIENT && amb) {
-                AMBIENT_TABS.forEach((n, k) => rows.push([n === 'Ambient' ? 'Colour' : n, () => {
-                    if (amb.page !== k) { amb.select(k); log.info('tab ' + n); }
-                    return openRail(false);
-                }, { key: 'amb-' + k, primary: amb.page === k }]));
-            } else if (tab === DRIVING) rows.push(['Reset peaks', () => { values.resetPeaks(); demoPeaks.resetPeaks(); log.info('peaks reset'); return openRail(false); }, { key: 'peaks', confirm: true }]);
-            else if (tab === PERF) rows.push(['Reset run', () => { perf.resetRun(); return openRail(false); }, { key: 'perf-run' }]);
-            else if (tab === SEATS) rows.push(['Read again', () => { seats.again(); seats.poll(); return openRail(false); }, { key: 'seats-again' }]);
-            else if (tab === MVIEW) rows.push(['Reset misfires', () => { mview.resetMisfires(); return openRail(false); }, { key: 'misfires' }]);
+            if (tab === DRIVING) rows.push(['Reset peaks', () => { values.resetPeaks(); demoPeaks.resetPeaks(); log.info('peaks reset'); return openRail(null); }, { key: 'peaks', confirm: true }]);
+            else if (tab === PERF) rows.push(['Reset run', () => { perf.resetRun(); return openRail(null); }, { key: 'perf-run' }]);
+            else if (tab === SEATS) rows.push(['Read again', () => { seats.again(); seats.poll(); return openRail(null); }, { key: 'seats-again' }]);
+            else if (tab === MVIEW) rows.push(['Reset misfires', () => { mview.resetMisfires(); return openRail(null); }, { key: 'misfires' }]);
             return rows;
         }
-        // the controller pushed left opens the rail with the knob on its first row, pushed right closes it (BMW's map)
+        const ambRows = (sub) => AMBIENT_TABS.map((n, k) => [n === 'Ambient' ? 'Colour' : n, () => {
+            if (tab !== AMBIENT) pick(AMBIENT);
+            if (amb.page !== k) { amb.select(k); amb.dirty(); log.info('tab ' + n); }
+            return openRail(null);
+        }, { key: 'amb-' + k, primary: tab === AMBIENT && amb.page === k, sub }]);
+        /** A bar's rows (null: a line between groups). */
+        function railRows(side) {
+            if (!mapped()) return side !== 'L' ? [] : tab === AMBIENT && amb ? ambRows(false) : actionRows();
+            if (side === 'L') {
+                const rows = TABS.map((n, i) => [n, () => { pick(i); return openRail(null); }, { key: 'nav-' + i, primary: tab === i }]);
+                if (amb) { rows.push(['Ambient', () => { pick(AMBIENT); return openRail(null); }, { key: 'nav-' + AMBIENT, primary: tab === AMBIENT, head: true }]); ambRows(true).forEach((r) => rows.push(r)); }
+                return rows;
+            }
+            const rows = actionRows();
+            if (rows.length) rows.push(null);
+            rows.push(['Settings', () => { openRail(null); if (ctx.openSettings) ctx.openSettings(); return null; }, { key: 'settings' }]);
+            return rows;
+        }
+        /** Where the controller goes when a bar opens: the row of the page shown, else the first. */
+        const knobRow = (side) => { const rows = railRows(side).filter(Boolean); const on = rows.find((r) => r[2].primary && !r[2].head) || rows[0]; return on ? on[2].key : true; };
+        // the controller: pushed left / right opens that side's bar (the knob on its row), pushed back closes it
         if (ctx.onTilt) ctx.onTilt((dir) => {
-            if (!owned || !railRows().length) return null;
-            if (dir === 'W' && !railOpen) { openRail(true, true); const first = railRows().find(Boolean); return first ? first[2].key : true; }
-            if (dir === 'W' && railOpen) return true;          // (already open: not "back", which would leave the app)
-            if (dir === 'E' && railOpen) { openRail(false); return true; }
+            if (!owned) return null;
+            if (!mapped()) {
+                if (!railRows('L').length) return null;
+                if (dir === 'W' && !railOpen) { openRail('L', true); return knobRow('L'); }
+                if (dir === 'W' && railOpen) return true;          // (already open: not "back", which would leave the app)
+                if (dir === 'E' && railOpen) { openRail(null); return true; }
+                return null;
+            }
+            if (dir === 'W') { if (railOpen === 'R') { openRail(null); return true; } if (!railOpen) { openRail('L', true); return knobRow('L'); } return true; }
+            if (dir === 'E') { if (railOpen === 'L') { openRail(null); return true; } if (!railOpen) { openRail('R', true); return knobRow('R'); } return true; }
             return null;
         });
+        /** A touch on an open bar or a handle is the bar's, not the page's (the colour ring under it). */
+        const onRail = (x, y) => owned && (railOpen === 'L' ? x < barW() : railOpen === 'R' ? x > W - barW()
+            : (y > 200 && y < 340 && (x < 44 || (mapped() && x > W - 44))));
         function drawRail(cv, t) {
-            const rows = railRows();
-            if (!rows.length) return;
-            // (opened with the controller: open until it is pushed right or a row is pressed)
-            if (railOpen && !railByKnob && Date.now() - railT > RAIL_HIDE_MS) { railOpen = false; if (amb && tab === AMBIENT) amb.dirty(); }
-            if (!railOpen) {
-                // the handle: a slim tab on the left edge with a chevron
-                cv.roundRect(0, 228, 22, 84, 8, withAlpha('#ffffff', 0.16));
-                cv.text('>', 11, 278, 22, t.text, { align: 'center', font: 'bold' });
-                cv.target(0, 200, 44, 140, () => openRail(true), 'rail');
-                return;
-            }
-            cv.roundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, t.bg);
-            cv.roundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
-            cv.strokeRoundRect(0, RAIL_TOP, RAIL_W, 516 - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
-            let y = RAIL_TOP + 22;
+            // (opened with the controller: open until it is pushed back or a row is pressed)
+            if (railOpen && !railByKnob && Date.now() - railT > RAIL_HIDE_MS) { railOpen = null; if (amb && tab === AMBIENT) amb.dirty(); }
+            const handle = (side) => {
+                if (!railRows(side).length) return;
+                const x = side === 'L' ? 0 : W - 22;
+                cv.roundRect(x, 228, 22, 84, 8, withAlpha('#ffffff', 0.16));
+                cv.text(side === 'L' ? '>' : '<', x + 11, 278, 22, t.text, { align: 'center', font: 'bold' });
+                cv.target(side === 'L' ? 0 : W - 44, 200, 44, 140, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
+            };
+            if (!railOpen) { handle('L'); if (mapped()) handle('R'); return; }
+            const side = railOpen, rows = railRows(side), bw = barW(), x0 = side === 'L' ? 0 : W - bw;
+            cv.roundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, t.bg);
+            cv.roundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, withAlpha('#ffffff', 0.05));
+            cv.strokeRoundRect(x0, RAIL_TOP, bw, 516 - RAIL_TOP, 12, 1.5, withAlpha('#ffffff', 0.18));
+            let y = RAIL_TOP + 18;
+            const big = rows.length <= 4;
             rows.forEach((r) => {
-                if (!r) { y += 14; cv.fillRect(24, y - 8, RAIL_W - 48, 1, withAlpha('#ffffff', 0.15)); return; }
-                G.button(cv, t, 24, y, RAIL_W - 48, 56, r[0], () => { railT = Date.now(); return r[1](); }, r[2]);
-                y += 70;
+                if (!r) { y += 10; cv.fillRect(x0 + 24, y - 6, bw - 48, 1, withAlpha('#ffffff', 0.15)); return; }
+                const sub = r[2].sub, h = sub ? 40 : big ? 56 : 46, ix = x0 + 20 + (sub ? 30 : 0);
+                G.button(cv, t, ix, y, bw - 40 - (sub ? 30 : 0), h, r[0], () => { railT = Date.now(); return r[1](); }, r[2]);
+                y += h + (sub ? 6 : 10);
             });
             // close: a row of its own at the bottom (or wait: it hides by itself)
-            G.button(cv, t, 24, 516 - 22 - 48, RAIL_W - 48, 48, '<  Hide', () => openRail(false), { key: 'rail-close' });
+            G.button(cv, t, x0 + 20, 516 - 18 - 44, bw - 40, 44, side === 'L' ? '<  Hide' : 'Hide  >', () => openRail(null), { key: side === 'L' ? 'rail-close' : 'rail-r-close' });
         }
 
         async function render() {

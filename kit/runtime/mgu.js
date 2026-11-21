@@ -666,6 +666,10 @@ async function runInner(impl) {
          * Else the kit's own: the nearest place that way, left with nothing there = back.
          */
         onTilt(fn) { display.onTilt = fn; },
+        /** openSettings(): the app's Settings, as its Settings button (or tab) opens them. */
+        openSettings() { display.openSettings(); },
+        /** mapStyle(): the screen in map style (layout "map": no tabs in the header, the app's own side bars). */
+        mapStyle() { return display.mapStyle(); },
         /** onTap(fn): fn(x, y) for a tap on the page (app drawing px), where the kit runs the screen. */
         onTap(fn) { display.onTap = fn; },
         /**
