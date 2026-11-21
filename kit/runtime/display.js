@@ -378,7 +378,14 @@ class Display {
             if (tilt === 'W') this._sheetResult(() => this.sheet.back());
             return;
         }
-        // pushed up / down / left / right: the nearest place that way; left with nothing there goes back (leaves the app)
+        // pushed up / down / left / right: the app first (ctx.onTilt: true = taken, a page button's key = taken and the
+        // knob onto that button once it is drawn, e.g. a side panel opened by a push left as on BMW's map), else
+        // the nearest place that way; left with nothing there goes back (leaves the app)
+        if (tilt && this.onTilt) {
+            let r = null;
+            try { r = this.onTilt(tilt, this.focusKey); } catch (e) { this.log.error('tilt', e); }
+            if (r) { if (typeof r === 'string') this.pendingFocus = 'tgt:' + r; this._repaint(); return; }
+        }
         if (tilt) {
             const to = this._toward(tilt, here);
             if (to) { this._focus(to); this._repaint(); } else if (tilt === 'W') this._back();
@@ -728,7 +735,12 @@ class Display {
         if (!(r instanceof Recorder)) return softImage(name, r);
         if (r.chrome && r.chrome.tabs) this.tabInfo = r.chrome.tabs;
         else if (r.tabInfo) this.tabInfo = r.tabInfo;
-        if (!this.sheet) { this.pageTargets = r.targets || []; this.pageScroll = r.scroll && typeof r.scroll === 'object' ? r.scroll : !!r.scroll; }
+        if (!this.sheet) {
+            this.pageTargets = r.targets || []; this.pageScroll = r.scroll && typeof r.scroll === 'object' ? r.scroll : !!r.scroll;
+            // the knob onto the button ctx.onTilt named, once it is on the page
+            const pf = this.pendingFocus && this.pageTargets.find((q) => 'tgt:' + q.key === this.pendingFocus);
+            if (pf) { this._focus({ k: this.pendingFocus, tgt: pf }); this.pendingFocus = null; }
+        }
         // a sheet is over the page: the app's frames wait (the last one comes back when it closes)
         if (this.sheet && this.active() && this.place.full) {
             if (r.chrome) this.saved = Object.assign({}, this.saved || {}, {

@@ -205,8 +205,8 @@ mgu.run({
          * Opened once by itself the first time the Ambient tab shows, so its pages are found.
          */
         const RAIL_W = 300, RAIL_HIDE_MS = 5000, RAIL_TOP = 50;
-        let railOpen = false, railT = 0, railShown = false;
-        const openRail = (on) => { railOpen = on; railT = Date.now(); if (amb && tab === AMBIENT) amb.dirty(); return render(); };
+        let railOpen = false, railT = 0, railShown = false, railByKnob = false;
+        const openRail = (on, knob) => { railOpen = on; railByKnob = !!(on && knob); railT = Date.now(); if (amb && tab === AMBIENT) amb.dirty(); return render(); };
         /** The rail's rows for this tab: [label, run, { primary, confirm, key }] */
         function railRows() {
             const rows = [];
@@ -221,10 +221,19 @@ mgu.run({
             else if (tab === MVIEW) rows.push(['Reset misfires', () => { mview.resetMisfires(); return openRail(false); }, { key: 'misfires' }]);
             return rows;
         }
+        // the controller pushed left opens the rail with the knob on its first row, pushed right closes it (BMW's map)
+        if (ctx.onTilt) ctx.onTilt((dir) => {
+            if (!owned || !railRows().length) return null;
+            if (dir === 'W' && !railOpen) { openRail(true, true); const first = railRows().find(Boolean); return first ? first[2].key : true; }
+            if (dir === 'W' && railOpen) return true;          // (already open: not "back", which would leave the app)
+            if (dir === 'E' && railOpen) { openRail(false); return true; }
+            return null;
+        });
         function drawRail(cv, t) {
             const rows = railRows();
             if (!rows.length) return;
-            if (railOpen && Date.now() - railT > RAIL_HIDE_MS) { railOpen = false; if (amb && tab === AMBIENT) amb.dirty(); }
+            // (opened with the controller: open until it is pushed right or a row is pressed)
+            if (railOpen && !railByKnob && Date.now() - railT > RAIL_HIDE_MS) { railOpen = false; if (amb && tab === AMBIENT) amb.dirty(); }
             if (!railOpen) {
                 // the handle: a slim tab on the left edge with a chevron
                 cv.roundRect(0, 228, 22, 84, 8, withAlpha('#ffffff', 0.16));

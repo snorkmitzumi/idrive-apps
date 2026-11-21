@@ -93,6 +93,22 @@ test('the bottom bar in the standard layout: hidden while idle, a touch on the p
     } finally { t.end(); }
 });
 
+test('ctx.onTilt: the app takes a push (a key: the knob onto that button once drawn), else the kit\'s own', async () => {
+    const t = await setup();
+    try {
+        const seen = [];
+        t.d.onTilt = (dir) => { seen.push(dir); return dir === 'W' ? 'rail-1' : null; };
+        const r = t.d.canvas(1600, 520); r.target(20, 100, 200, 50, () => null, 'rail-1'); r.target(400, 100, 200, 50, () => null, 'other');
+        t.c.send(X_CCU, ccu(0, 0, 0)); t.c.send(X_CCU, ccu(0, 0, 10)); await sleep(50);      // pushed left
+        t.d.present('MAIN', r, () => Promise.resolve()); await sleep(30);
+        assert.deepStrictEqual(seen, ['W']);
+        assert.strictEqual(t.d.focusKey, 'tgt:rail-1', 'the knob on the named button: ' + t.d.focusKey);
+        t.c.send(X_CCU, ccu(0, 0, 0)); t.c.send(X_CCU, ccu(0, 0, 4)); await sleep(50);       // pushed right: not taken
+        assert.deepStrictEqual(seen, ['W', 'E']);
+        assert(t.d.focusKey !== 'tgt:rail-1', 'not taken: the kit moved the knob itself: ' + t.d.focusKey);
+    } finally { t.end(); }
+});
+
 test('unchanged frames: not sent again, but one a second (the renderer hides an app quiet for 3 s)', async () => {
     const t = await setup(), c = t.c;
     try {
