@@ -87,13 +87,13 @@ async function boot(dir, opts) {
     const vis = opts.vis || { shown: true, handlers: [] };
     booted.push(vis);
     const clicks = {};
-    let frame = null, last = null, tab = null, tap = null;
+    let frame = null, last = null, tab = null, tap = null, tilt = null;
     const hidden = [];
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
-        onTab(fn) { tab = fn; }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
+        onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
         theme: () => themes.theme('m_tricolour'),
         canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = opts.own !== false; last = cv; return cv; },
     };
@@ -101,7 +101,7 @@ async function boot(dir, opts) {
     return {
         ctx, settings, vis, clicks,
         draw: () => textsOf(() => frame()),
-        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden,
+        tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden, tilt: (d) => tilt(d),
         /** press the page button with this key (drawn on the last frame) */
         press: (key) => { const b = ((last && last.targets) || []).find((x) => x.key === key); assert(b, 'no button ' + key + ': ' + ((last && last.targets) || []).map((x) => x.key).join(' ')); return textsOf(() => b.run()); },
         canvas: () => last,
@@ -1069,5 +1069,20 @@ checks.push(
         assert(!t0.includes('RESET PEAKS'), 'no page buttons where the HMI has the bar');
         const t3 = await b.tab(5);
         assert(t3.includes('AMBIENT TAB 1'), 'Animations as a tab: ' + t3.join(' | '));
+    }],
+    ['2.4.10 the side rail with the controller: pushed left opens it (the knob on its first row), right closes it', async () => {
+        const b = await boot(tmp('tilt'));
+        await b.tab(3); await b.draw();
+        assert.strictEqual(b.tilt('W'), 'misfires', 'M View: the knob onto Reset misfires');
+        const t1 = await b.draw();
+        assert(t1.includes('RESET MISFIRES'), 'the rail open: ' + t1.join(' | '));
+        assert.strictEqual(b.tilt('W'), true, 'open: left again is taken (not back, which leaves the app)');
+        assert.strictEqual(b.tilt('E'), true, 'right closes it');
+        const t2 = await b.draw();
+        assert(!t2.includes('RESET MISFIRES'), 'closed');
+        assert.strictEqual(b.tilt('E'), null, 'closed: right is the kit\'s');
+        await b.tab(4);
+        assert.strictEqual(b.tilt('E'), true, 'the Ambient tab opened it by itself the first time: right closes it');
+        assert.strictEqual(b.tilt('W'), 'amb-0', 'Ambient: the knob onto Colour');
     }],
 );

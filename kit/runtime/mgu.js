@@ -660,6 +660,12 @@ async function runInner(impl) {
          * screen, fn(i, true) when that tap or press closed a sheet (Settings) over the page.
          */
         onTab(fn) { display.onTab = fn; },
+        /**
+         * onTilt(fn): fn(dir, focusKey) when the controller is pushed 'N' / 'E' / 'S' / 'W' where the kit runs the screen
+         * (no sheet open); true = the app took it, a page button's key = taken and the knob goes onto that button.
+         * Else the kit's own: the nearest place that way, left with nothing there = back.
+         */
+        onTilt(fn) { display.onTilt = fn; },
         /** onTap(fn): fn(x, y) for a tap on the page (app drawing px), where the kit runs the screen. */
         onTap(fn) { display.onTap = fn; },
         /**
