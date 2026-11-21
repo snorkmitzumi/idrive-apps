@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",

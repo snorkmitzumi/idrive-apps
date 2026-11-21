@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.5.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP).
+**Version 2.5.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP).
 
 ---
 
@@ -102,7 +102,10 @@ Settings > Screen > **Screen layout** picks one of three:
 | **Map style** | BMW's map: no tabs, the header names the page | a left side bar | a right side bar |
 | **Standard** | BMW's own title and bottom bar | in the page | BMW's bottom bar, hidden 5 s after the last touch |
 
-**Map style:**
+**Map style:** the cards use the whole height of the screen (no bar under them), and a slim handle on each edge shows where the bars are.
+
+<img src="docs/screens/combo_map.png" alt="Map style: Driving over the whole height, a slim handle on each edge" width="100%">
+
 
 <img src="docs/screens/combo_map_pages.png" alt="Map style with the left bar open: the pages" width="49%"> <img src="docs/screens/combo_map_actions.png" alt="Map style with the right bar open: Reset misfires and Settings" width="49%">
 

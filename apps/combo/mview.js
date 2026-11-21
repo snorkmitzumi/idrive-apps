@@ -167,11 +167,17 @@ class MView {
     draw(cv, t, o) {
         const demo = !!(o && o.demo), U = require('./draw').units(this.settings || { get: () => null });
         const D = demo ? demoValues(this.now()) : null, T = (c) => U.T(c);
-        this.drawTyres(cv, t, 24, 44, 452, 468, D ? D.tyres : this.tyres(), U);
+        // the room below the page (cv.extra, no bar: 2.5.1) shared by both rows, laid out here with the kit's own
+        // stretch off (it would give each bottom tile all of it, so the rows came out uneven)
+        const ex = cv.extra || 0, e = ex / 2;
+        flat(cv, () => this.drawPage(cv, t, D, U, T, ex, e));
+    }
+    drawPage(cv, t, D, U, T, ex, e) {
+        this.drawTyres(cv, t, 24, 44, 452, 468 + ex, D ? D.tyres : this.tyres(), U);
         const tile = (k, label, x, y, zones) => {
             const x0 = D ? { v: D[k], from: 'demo' } : this.temp(k);
             const pk = D ? null : this.peak[k], why = x0 ? null : this.why(k);
-            G.stat(cv, t, x, y, 300, 228, {
+            G.stat(cv, t, x, y, 300, 228 + e, {
                 label, value: x0 ? T(x0.v) : null, unit: U.tU, decimals: 0, size: 72, zones,
                 history: D ? [] : (this.hist[k] || []).map(T),
                 sub: why || ((isNum(pk) ? 'Max ' + Math.round(T(pk)) + U.tU + '  ·  ' : '') + 'from ' + x0.from),
@@ -180,11 +186,11 @@ class MView {
         const hot = (warn, crit, cold) => [{ from: T(crit), to: 9999, color: 'crit' }, { from: T(warn), to: T(crit), color: 'warn' }].concat(cold != null ? [{ from: -999, to: T(cold), color: 'cold' }] : []);
         tile('oil', 'Engine oil', 488, 44, hot(130, 145, 70));
         tile('coolant', 'Coolant', 800, 44, hot(110, 118, 60));
-        tile('gearbox', 'Gearbox oil', 488, 284, hot(110, 125, 50));
+        tile('gearbox', 'Gearbox oil', 488, 284 + e, hot(110, 125, 50));
         // (intake air: 74 deg C parked in traffic is heat soak, not a fault - warn from 65, red from 80)
-        tile('iat', 'Intake air', 800, 284, hot(65, 80));
-        this.drawMisfires(cv, t, 1112, 44, 464, 300, D);
-        this.drawFuel(cv, t, 1112, 356, 464, 156, D);
+        tile('iat', 'Intake air', 800, 284 + e, hot(65, 80));
+        this.drawMisfires(cv, t, 1112, 44, 464, 300 + e, D);
+        this.drawFuel(cv, t, 1112, 356 + e, 464, 156 + e, D);
     }
     /** The car's tyres while fresh (signals.js L.tyres), else null. */
     tyres() { const L = this.values.live; return L.tyresT && this.now() - L.tyresT < 5 * 60000 ? L.tyres : null; }
@@ -245,18 +251,26 @@ class MView {
     }
     /** Short and long term fuel trim (%), ignition advance (degrees), side by side. */
     drawFuel(cv, t, x, y, w, h, D) {
+        const dy = Math.max(0, (h - 156) / 2);         // (taller with room below the page: the values in its middle)
         G.panel(cv, t, x, y, w, h, 'Fuel trims & timing');
         const cw = (w - 36) / 3;
         [['stft', 'Short trim', '%'], ['ltft', 'Long trim', '%'], ['timing', 'Timing', '°']].forEach((c, i) => {
             const k = c[0], v = D ? D[k] : this.fuel(k), cx = x + 18 + i * cw, trim = k !== 'timing';
             const a = isNum(v) ? Math.abs(v) : 0, col = !isNum(v) ? t.dim : trim && a >= TRIM_CRIT ? t.crit : trim && a >= TRIM_WARN ? t.warn : t.text;
-            cv.text(c[1], cx, y + 84, 18, t.dim, { font: 'bold' });
+            cv.text(c[1], cx, y + 84 + dy, 18, t.dim, { font: 'bold' });
             const txt = !isNum(v) ? '--' : (trim && v > 0 ? '+' : '') + G.fmt(v, 1);
-            cv.text(txt, cx, y + 138, 40, col, { font: 'num' });
-            if (isNum(v)) cv.text(c[2], cx + cv.textWidth(txt, 40, { font: 'num' }) + 4, y + 138, 20, t.dim);
+            cv.text(txt, cx, y + 138 + dy, 40, col, { font: 'num' });
+            if (isNum(v)) cv.text(c[2], cx + cv.textWidth(txt, 40, { font: 'num' }) + 4, y + 138 + dy, 20, t.dim);
         });
         if (!D && !FUEL.some((k) => isNum(this.fuel(k)))) cv.text(FUEL.every((k) => !this.live(this.c[k]).length) ? 'Not given by this car' : this.why('stft'), x + w - 18, y + 40, 16, t.dim, { align: 'right' });
     }
+}
+
+/** fn() with the canvas's room below the page hidden from the kit's panels (G.panel / G.stat would stretch by it). */
+function flat(cv, fn) {
+    const k = cv._extra !== undefined ? '_extra' : 'extra', was = cv[k];
+    try { cv[k] = 0; } catch (e) { return fn(); }
+    try { return fn(); } finally { cv[k] = was; }
 }
 
 /** A request the read-only link didn't send (kit/runtime/readonly-diag.js check()). */
