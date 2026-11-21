@@ -734,7 +734,10 @@ checks.push(
         const t0 = await b.draw();
         ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
         assert(!t0.includes('ANIMATIONS') && !t0.includes('MODES'), 'the kit runs the screen: one Ambient tab (Settings fits after it)');
-        assert(t0.includes('RESET PEAKS') && b.hidden.indexOf('BTN_RESET') >= 0, 'Reset peaks on the page, not in the bar');
+        assert(!t0.includes('RESET PEAKS') && b.hidden.indexOf('BTN_RESET') >= 0, 'Reset peaks not in the bar, the rail closed');
+        const tr = await b.press('rail');
+        assert(tr.includes('RESET PEAKS'), 'the rail opened: Reset peaks in it: ' + tr.join(' | '));
+        await b.press('rail-close');
         assert(!t0.includes('FAVOURITES'), 'Favourites still a tab');
         assert(t0.includes('Engine speed'), 'Driving first');
         const t1 = await b.tab(1);
@@ -781,9 +784,10 @@ checks.push(
         b.clicks.BTN_RESET();
         assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
         // the kit runs the screen: each tab's own button on the page
-        await b.tab(3); await b.press('misfires');
-        await b.tab(2); await b.press('seats-again');
-        await b.tab(0); await b.press('peaks');
+        // the kit runs the screen: each tab's own action in the side rail (a handle on the left edge opens it)
+        await b.tab(3); await b.draw(); await b.press('rail'); await b.press('misfires');
+        await b.tab(2); await b.draw(); await b.press('rail'); await b.press('seats-again');
+        await b.tab(0); await b.draw(); await b.press('rail'); await b.press('peaks');
     }],
     ['2.0 #4 dyno: a pull in one gear makes a run (power from m*a*v, torque from power), saved; demo runs not', async () => {
         const { Perf } = appModule('perf');
