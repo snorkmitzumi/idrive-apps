@@ -50,6 +50,8 @@ const PAGE = { w: 1600, h: 520 };
 const PAGER = ['BTN_PAGE', 'BTN_PREV'];
 // px between the header (and the screen's bottom) and a page with no bar under it
 const PAGE_GAP = 6;
+// the HMI's bar hidden this long after the last touch (setting "barHide")
+const BAR_IDLE_MS = Number(process.env.MGU_BAR_IDLE_MS) || 5000;
 
 /* HMI geometry on the 1920 x 720 centre display (measured on the unit's HMI) */
 const HMI7 = {
@@ -119,7 +121,7 @@ class Display {
         this.ui.onVisible((name, v) => {
             if (name === 'SETTINGS') { this._syncVisible(); if (!v) this._lost(); return; }
             if (name !== this.screen.name) return;
-            if (v) this.barOff = 0;                   // the HMI builds the screen afresh
+            if (v) { this.barOff = 0; this._activity(); }   // the HMI builds the screen afresh (the bar shown)
             if (!v) this.closeSheet();
             this._syncVisible();
         });
@@ -129,7 +131,11 @@ class Display {
             if (k === 'layout') { this._place(); this.lastWords = null; }
             if (k === 'theme') this.bgShown = null;
             if (k === 'renderer') this._mode();
+            if (k === 'barHide' || k === 'layout') { this.barIdle = false; this.barT = Date.now(); this._hmiBar(); }
         });
+        this.barIdle = false; this.barT = Date.now();
+        const barTimer = setInterval(() => this._barTick(), 1000);
+        if (barTimer.unref) barTimer.unref();
         this._mode();
         // slim bar: light the button the controller is on (HMI focus events) and flash on press
         (this.screen.buttons || []).forEach((b) => {
@@ -143,13 +149,14 @@ class Display {
             const inFront = () => { if (this.ui._setFocus) this.ui._setFocus(this.screen.name, true); };
             c.on('action', () => {
                 inFront();
+                this._activity();               // (the bar hidden while idle: a press keeps it)
                 this._syncVisible();            // a tap on the bar went to the HMI: the renderer hid us
                 this.pressed = b[0]; this.pressedT = Date.now(); this._repaint();
                 setTimeout(() => this._repaint(), 320);              // end of the press flash
             });
             c.on('focus', (ev) => {
                 if (!ev || typeof ev.value !== 'boolean') return;          // (row-only events)
-                if (ev.value) { inFront(); this.focused = b[0]; this.focusTab = null; this.focusKey = 'bar:' + b[0]; this._scroll(); } else if (this.focused === b[0]) this.focused = null;
+                if (ev.value) { inFront(); this._activity(); this.focused = b[0]; this.focusTab = null; this.focusKey = 'bar:' + b[0]; this._scroll(); } else if (this.focused === b[0]) this.focused = null;
                 this._repaint();
             });
         });
@@ -446,6 +453,7 @@ class Display {
      * running the screen also on a bar button (pressed), a sheet's targets, or the page (ctx.onTap).
      */
     _touch(phase, x, y) {
+        if (phase === 1) this._activity();
         const inside = (r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
         // the app takes a whole gesture (ctx.onTouch: a dial or a slider under the finger): every move goes to it, and no
         // tap, scroll or target follows from it
@@ -559,10 +567,29 @@ class Display {
     /** The HMI's own bar buttons: hidden where the kit runs the screen (its bar, tabs and page buttons
      *  take their place), so none shows around an HMI popup; shown for every other path. */
     _hmiBar() {
-        const hide = this.ownable() && !this.blocked;
+        const hide = (this.ownable() && !this.blocked) || (this._barAuto() && this.barIdle);
         if (this.hmiBarHidden === hide) return;
         this.hmiBarHidden = hide;
         (this.screen.buttons || []).forEach((b) => { if (this.ui.visible) this.ui.visible(b[0], !hide); });
+    }
+
+    /**
+     * The HMI's bar hidden while idle (setting "barHide": "auto"), as BMW's map hides its controls: in the standard
+     * layout on a renderer with touch (it claims the page, so a touch on it reaches the app and shows the bar again).
+     * Not with the software path (no touch: the bar could not come back).
+     */
+    _barAuto() {
+        const g = this.gpu;
+        return this.settings.get('barHide') === 'auto' && !!(g && g.ready && g.touch && !this.blocked) && !this.ownable();
+    }
+    /** A touch, a bar press, the screen shown again: the bar back (if hidden), hidden again BAR_IDLE_MS later. */
+    _activity() {
+        this.barT = Date.now();
+        if (this.barIdle) { this.barIdle = false; this._hmiBar(); }
+    }
+    _barTick() {
+        if (!this.barIdle && this._barAuto() && Date.now() - (this.barT || 0) >= BAR_IDLE_MS) { this.barIdle = true; this._hmiBar(); }
+        else if (this.barIdle && !this._barAuto()) { this.barIdle = false; this._hmiBar(); }
     }
 
     layout() {

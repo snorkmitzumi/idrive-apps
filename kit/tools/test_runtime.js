@@ -15,6 +15,7 @@ const path = require('path');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mgu-rt-'));
 process.env.MGU_RENDERD_SOCKET = path.join(dir, 'render.sock');
 ['MGU_RENDERER', 'MGU_RENDERD_FILE', 'MGU_RENDERD_PROTO', 'MGU_NO_GRAB'].forEach((k) => delete process.env[k]);
+process.env.MGU_BAR_IDLE_MS = '1200';         // (display.js: the bar hidden while idle, sooner here)
 const { Display } = require('../runtime/display');
 const { RenderClient } = require('../runtime/renderd');
 const themes = require('../runtime/themes');
@@ -55,7 +56,7 @@ const ccu = (k, pb, df) => { const b = Buffer.alloc(5); b.writeUInt16BE(k, 1); b
 const touch = (phase, x, y) => { const b = Buffer.alloc(12); b.writeUInt32LE(phase, 0); b.writeFloatLE(x, 4); b.writeFloatLE(y, 8); return b; };
 
 /** A Display on the stand-in renderer, the kit running the screen (full-screen layout, touch), shown. */
-async function setup() {
+async function setup(o) {
     let conn = null;
     onConn = (c) => { conn = c; ready(c); };
     const log = { errors: [], info() {}, warn() {}, debug() {}, error: (...a) => log.errors.push(a) };
@@ -65,9 +66,11 @@ async function setup() {
         setVisible: (v) => { if (v) vis.add('MAIN'); else vis.delete('MAIN'); visH.forEach((fn) => fn('MAIN', v)); },
     };
     const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', buttons: [['BTN_SETTINGS', 'Settings']] }] };
-    const d = new Display(ui, log, spec, { get: () => undefined, onChange() {} }, () => themes.theme());
-    assert(await waitFor(() => conn && d.active() && d.own()), 'display on the renderer');
-    return { d, ui, log, c: conn, end() { d.closeSheet(); d.gpu.close(); clearInterval(d.keepTimer); } };
+    const set = (o && o.settings) || {}, shownBar = [];
+    ui.visible = (name, on) => shownBar.push(name + ':' + (on ? 1 : 0));
+    const d = new Display(ui, log, spec, { get: (k) => set[k], onChange() {} }, () => themes.theme());
+    assert(await waitFor(() => conn && d.active() && (o && o.standard ? d.gpu && d.gpu.ready : d.own())), 'display on the renderer');
+    return { d, ui, log, c: conn, shownBar, end() { d.closeSheet(); d.gpu.close(); clearInterval(d.keepTimer); } };
 }
 /** The app draws its page (v: what changes) and hands it over, as ui.image does. */
 function page(d, v) {
@@ -78,6 +81,17 @@ function page(d, v) {
 
 const cases = [];
 const test = (name, fn) => cases.push([name, fn]);
+
+test('the bottom bar in the standard layout: hidden while idle, a touch on the page shows it (setting barHide)', async () => {
+    const t = await setup({ standard: true, settings: { layout: 'standard', barHide: 'auto' } });
+    try {
+        assert(!t.d.own(), 'standard layout: the HMI has its bar');
+        assert(await waitFor(() => t.shownBar.indexOf('BTN_SETTINGS:0') >= 0, 3000), 'hidden after the idle time: ' + t.shownBar.join(' '));
+        t.shownBar.length = 0;
+        t.c.send(TOUCH, touch(1, 800, 300)); t.c.send(TOUCH, touch(3, 800, 300));
+        assert(await waitFor(() => t.shownBar.indexOf('BTN_SETTINGS:1') >= 0, 1000), 'a touch shows it again: ' + t.shownBar.join(' '));
+    } finally { t.end(); }
+});
 
 test('unchanged frames: not sent again, but one a second (the renderer hides an app quiet for 3 s)', async () => {
     const t = await setup(), c = t.c;
