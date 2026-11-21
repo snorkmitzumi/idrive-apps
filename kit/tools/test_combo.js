@@ -984,4 +984,43 @@ checks.push(
         const tx = await textsOf(() => { const cv = new Canvas(1600, 520); cv.own = true; m.draw(cv, themes.theme('m_tricolour')); });
         assert(tx.includes('Fuel trims & timing') && tx.includes('+1.6') && tx.includes('+10.2') && tx.includes('14.0') && !tx.some((x) => /NaN|undefined|oil level/i.test(x)), tx.join(' | '));
     }],
+    ['2.4.4 Seats: the seat modules found (22 F1 50, then 22 D702), each axis shown, a move and a switch logged, reading only', async () => {
+        const { Seats } = appModule('seats');
+        const logs = [], log = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error() {} };
+        const sent = [];
+        let slv = 23000, pressed = 0;
+        const be = (n) => [n >> 8, n & 255];
+        const link = { available: true,
+            async discover() { sent.push('22F150'); return new Map([[0x10, '000F01'], [0x12, '00A1B2'], [0x6D, '0F2A31']]); },
+            async read(a, did) {
+                sent.push(a.toString(16) + ':' + did.toString(16));
+                if (a !== 0x6D) return [0x7F, 0x22, 0x31];
+                if (did === 0xD702) return [0x62, 0xD7, 0x02].concat(be(slv), be(30000), be(41000), be(20000), be(65535), be(0), be(0), be(0), be(0), be(0), be(0));
+                if (did === 0xD708) return [0x62, 0xD7, 0x08, slv > 23000 ? 1 : 0, 0, 0, 0, 3, 3, 3, 3, 0, 0, 0];
+                if (did === 0xD712) { const b = new Array(19).fill(0); if (pressed) b[0] = 1; return [0x62, 0xD7, 0x12].concat(b); }
+                if (did === 0xD704) return [0x62, 0xD7, 0x04, 1];
+                return [0x7F, 0x22, 0x31];
+            } };
+        let clock = 1e6;
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log, now: () => clock, link, values: { live: {} } });
+        const spin = async (n) => { for (let k = 0; k < n; k++) { s.poll(); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r)); clock += 450; } };
+        await spin(20);
+        const m = s.modules;
+        assert.strictEqual(m.state, 'found', m.state + ' ' + m.why);
+        assert.deepStrictEqual(m.seats.map((x) => x.addr), [0x6D]);
+        assert.deepStrictEqual(m.seats[0].pos.slice(0, 5), [23000, 30000, 41000, 20000, null], 'KHV 65535: no counter');
+        assert(logs.some((x) => /^units: 0x10 000F01, 0x12 00A1B2, 0x6D 0F2A31/.test(x)) && logs.some((x) => /seat modules: 0x6D \(0F2A31\) SLV 23000/.test(x)), logs.join(' | '));
+        // the driver moves the seat forward with its own switch
+        pressed = 1; slv = 23600; await spin(12);
+        assert(logs.some((x) => /seat 0x6D: SLV 23000>23600/.test(x)), 'move logged: ' + logs.join(' | '));
+        assert(logs.some((x) => /seat 0x6D switch: SLV\+/.test(x)), 'switch logged');
+        assert(logs.some((x) => /initialisation OK/.test(x)));
+        // only reads: the discovery and 22 to single units
+        assert(sent.every((x) => x === '22F150' || /^[0-9a-f]+:d70[248]$|^[0-9a-f]+:d712$/.test(x)), sent.join(' '));
+        const cv = new Canvas(1600, 520), out = [];
+        cv.own = true; const tx = cv.text; cv.text = function (x, ...r2) { out.push(String(x)); return tx.call(this, x, ...r2); };
+        s.draw(cv, themes.theme('m_tricolour'));
+        assert(out.includes('Seat module 0x6D  0F2A31') && out.includes('Forward / back') && out.includes('23600') && !out.includes('Headrest height') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
+        assert(/modules 0x6D/.test(s.summary()));
+    }],
 );
