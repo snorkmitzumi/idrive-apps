@@ -13,5 +13,4 @@
         "kit/tools/localize.py", "kit/tools/locale-revisions.json", "kit/tools/oapgen", "oap-sdk"]
     }
   }
-
 }
