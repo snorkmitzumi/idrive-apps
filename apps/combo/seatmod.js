@@ -10,8 +10,8 @@
  * (2E D708 <motor> <STOP|PLUS|MINUS> <PWM %> drives a motor: not sent - this link only reads.)
  *
  * Which units are seat modules: every unit is asked who it is (22 F1 50 to all), then 22 D702; the ones that answer
- * with the counters are seat modules (the address differs between cars). Each move is logged ("seat 0x6D: SLV
- * 23011>23480"), so a car's log shows which axis is which and how far it moves.
+ * with the counters are seat modules (the address differs between cars). Each move is logged once it has settled ("seat 0x6D: SLV
+ * 23011>23480 (+469 in 1.6 s)") and each change of the motors running ("seat 0x6D motors: SLV+"), so a car's log shows which axis is which and how far it moves.
  *
  *   const m = new SeatModules({ link, log, now, values, yieldTo })
  *   m.tick()          while the Seats tab shows: the next read when one is due
@@ -20,8 +20,9 @@
 const { hex } = require('./kit/diag');
 
 const AXES = ['SLV', 'SHV', 'LNV', 'SNV', 'KHV', 'STV', 'LBV', 'LKV'];
+const USUAL = [0x6D, 0x6E];
 const POS = 0xD702, MOTOR = 0xD708, SWITCH = 0xD712, INIT = 0xD704;
-const LO = 8192, HI = 57344, MOVED = 20, TRIES = 4, RETRY_MS = 300, FAILED_AGAIN_MS = 5000;
+const LO = 8192, HI = 57344, MOVED = 3, SETTLED_MS = 1200, TRIES = 4, RETRY_MS = 300, FAILED_AGAIN_MS = 5000;
 const POLL_MS = 400, INIT_MS = 10000, FIND_AGAIN_MS = 60000, YIELD_MS = 600, YIELD_STEP = 50, LOG_MAX = 120;
 
 const A = (a) => '0x' + hex(a);
@@ -81,11 +82,14 @@ class SeatModules {
         // the units in lines of 12 (a log line is kept short)
         for (let i = 0; i < list.length; i += 12) this.log.info('units: ' + list.slice(i, i + 12).map((a) => A(a) + (units.get(a) ? ' ' + units.get(a) : '')).join(', '));
         const seats = [];
-        for (const a of list) {
+        // the seat modules' usual addresses first (0x6D driver, 0x6E passenger on a G26): the others only when neither answers
+        const first = list.filter((a) => USUAL.indexOf(a) >= 0), rest = list.filter((a) => USUAL.indexOf(a) < 0);
+        for (const a of first.concat(rest)) {
+            if (seats.length && first.indexOf(a) < 0) break;
             let u = null;
             try { u = await this.read(a, POS); } catch (e) { this.log.info('seat modules: ' + A(a) + ' not read (' + (e && e.message || e) + ')'); }
             const d = data(u, POS);
-            if (d && d.length >= 16) seats.push({ addr: a, index: units.get(a) || '', pos: positions(d), motor: [], sw: [], init: null, at: this.now(), logged: positions(d), loggedAt: 0 });
+            if (d && d.length >= 16) seats.push({ addr: a, index: units.get(a) || '', pos: positions(d), motor: [], sw: [], init: null, at: this.now() });
         }
         this.seats = seats;
         this.state = seats.length ? 'found' : 'none';
@@ -96,12 +100,14 @@ class SeatModules {
     /** The next seat's counters, and in turn its motors, switches and initialisation. */
     async poll() {
         const s = this.seats[this.turn % this.seats.length];
-        const step = Math.floor(this.turn / this.seats.length) % 3;
+        const step = Math.floor(this.turn / this.seats.length) % 2;
         this.turn++;
         const d = data(await this.read(s.addr, POS), POS);
         if (d) { s.pos = positions(d); s.at = this.now(); this.moved(s); }
-        if (step === 1) { const m = data(await this.read(s.addr, MOTOR), MOTOR); if (m) s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); }
-        if (step === 2) {
+        // the motors each round (which one runs, which way: an axis named by its own motor), the switches every other
+        const m = data(await this.read(s.addr, MOTOR), MOTOR);
+        if (m) { const was = this.running(s); s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); const now = this.running(s); if (now !== was) this.line('seat ' + A(s.addr) + ' motors: ' + (now || 'stopped')); }
+        if (step === 1) {
             const w = data(await this.read(s.addr, SWITCH), SWITCH);
             if (w) { const was = s.sw; s.sw = AXES.map((a, i) => (w[i * 2] === 1 ? '+' : w[i * 2 + 1] === 1 ? '-' : '')); this.pressed(s, was); }
         }
@@ -112,12 +118,21 @@ class SeatModules {
         }
     }
 
-    /** A move to the log once it has gone MOVED counts and 2 s since the last line of that seat. */
+    /** The motors running now, e.g. 'SLV+ SNV-' ('' none). */
+    running(s) { return AXES.map((a, i) => (s.motor[i] === 1 ? a + '+' : s.motor[i] === 2 ? a + '-' : null)).filter(Boolean).join(' '); }
+    /** Each axis's move to the log once it has settled (SETTLED_MS without a change): where from, where to, how long. */
     moved(s) {
-        const ch = AXES.map((a, i) => (s.pos[i] !== null && s.logged[i] !== null && Math.abs(s.pos[i] - s.logged[i]) >= MOVED ? a + ' ' + s.logged[i] + '>' + s.pos[i] : null)).filter(Boolean);
-        if (!ch.length || this.now() - s.loggedAt < 2000) return;
-        this.line('seat ' + A(s.addr) + ': ' + ch.join(' '));
-        s.logged = s.pos.slice(); s.loggedAt = this.now();
+        const now = this.now();
+        if (!s.from) { s.from = s.pos.map(() => null); s.since = s.pos.map(() => 0); s.last = s.pos.slice(); }
+        AXES.forEach((a, i) => {
+            const v = s.pos[i];
+            if (v === null || s.last[i] === null) { s.last[i] = v; return; }
+            if (Math.abs(v - s.last[i]) >= MOVED) { if (s.from[i] === null) { s.from[i] = s.last[i]; s.t0 = s.t0 || []; s.t0[i] = now; } s.since[i] = now; s.last[i] = v; }
+            else if (s.from[i] !== null && now - s.since[i] >= SETTLED_MS) {
+                this.line('seat ' + A(s.addr) + ': ' + a + ' ' + s.from[i] + '>' + v + ' (' + (v - s.from[i] > 0 ? '+' : '') + (v - s.from[i]) + ' in ' + ((s.since[i] - s.t0[i]) / 1000).toFixed(1) + ' s)');
+                s.from[i] = null;
+            }
+        });
     }
     pressed(s, was) {
         const on = AXES.map((a, i) => (s.sw[i] && s.sw[i] !== (was && was[i]) ? a + s.sw[i] : null)).filter(Boolean);

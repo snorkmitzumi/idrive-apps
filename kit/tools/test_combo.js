@@ -1026,7 +1026,8 @@ checks.push(
         assert(logs.some((x) => /^units: 0x10 000F01, 0x12 00A1B2, 0x6D 0F2A31/.test(x)) && logs.some((x) => /seat modules: 0x6D \(0F2A31\) SLV 23000/.test(x)), logs.join(' | '));
         // the driver moves the seat forward with its own switch
         pressed = 1; slv = 23600; await spin(12);
-        assert(logs.some((x) => /seat 0x6D: SLV 23000>23600/.test(x)), 'move logged: ' + logs.join(' | '));
+        assert(logs.some((x) => /seat 0x6D: SLV 23000>23600 \(\+600 in \d\.\d s\)/.test(x)), 'move logged once settled: ' + logs.join(' | '));
+        assert(logs.some((x) => /seat 0x6D motors: SLV\+/.test(x)), 'the motor running logged');
         assert(logs.some((x) => /seat 0x6D switch: SLV\+/.test(x)), 'switch logged');
         assert(logs.some((x) => /initialisation OK/.test(x)));
         // only reads: the discovery and 22 to single units
