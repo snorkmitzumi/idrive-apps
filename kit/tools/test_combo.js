@@ -43,7 +43,7 @@ const stubs = {
     './kit/mgu': { run(a) { app = a; } },
     './ambient_page': { background: async (bg, o) => { fakeAmb.calls.push('background ' + JSON.stringify(o)); return {}; },
         mount: (ctx, parts, o) => { fakeAmb.calls.push('mount ' + JSON.stringify({ strobe: o.strobe, names: o.names })); fakeAmb.page = 0; return fakeAmb; } },
-    './kit/readonly-diag': { ReadOnlyDiag: FakeLink, MAX_DIDS: 8 },
+    './kit/readonly-diag': { ReadOnlyDiag: FakeLink, MAX_DIDS: 8, seatMotors: (l) => (target, motor, action, pwm) => l.physical(target, 0x2E, [0xD7, 0x08, motor, action, pwm]) },
 };
 const load = Module._load;
 Module._load = function (req, parent, isMain) {
@@ -744,7 +744,7 @@ checks.push(
         assert(t1.includes('Dyno') && t1.includes('Drag timer'), 'Performance: ' + t1.join(' | '));
         assert(!t1.includes('Engine speed'), 'Driving still drawn on Performance');
         const t2 = await b.tab(2);
-        assert(t2.some((x) => /^Reading only for now/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
+        assert(t2.some((x) => /^Only while the car stands still/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
         assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
         const ta = await b.tab(4);
@@ -1039,7 +1039,9 @@ checks.push(
         const cv = new Canvas(1600, 520), out = [];
         cv.own = true; const tx = cv.text; cv.text = function (x, ...r2) { out.push(String(x)); return tx.call(this, x, ...r2); };
         s.draw(cv, themes.theme('m_tricolour'));
-        assert(out.includes('Seat module 0x6D  0F2A31') && out.includes('Forward / back') && out.includes('23600') && !out.includes('Headrest height') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
+        // without the seat writer: the seat drawn, no arrows, no memory
+        assert(out.includes('Driver seat') && !out.includes('Fore / aft') && !out.includes('SAVE') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
+        assert(!(cv.targets || []).some((x) => /^seat-/.test(x.key)), 'nothing to press');
         assert(/modules 0x6D/.test(s.summary()));
     }],
     ['2.4.5 Seats: a request the transport refuses now and then is asked again; a failed search starts again, not stuck "finding"', async () => {
@@ -1144,5 +1146,246 @@ checks.push(
             assert(tiles.every((x) => !x[3]), 'drawn with the kit\'s stretch off');
             assert.strictEqual(cv.extra, 49, 'the room given back afterwards');
         } finally { G.stat = stat; }
+    }],
+);
+
+// 2.6.0 seat memory: a seat module simulated as the G26's (ISTA's trace, 2026-11-22): the motors move at the speeds
+// measured on the car while 2E D7 08 says so, until a STOP; D704 the real reply (initialised, the learned end stops)
+const D704_G26 = [0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02,
+    0x02, 0x02, 0x00, 0x02, 0x01, 0x02, 0x02, 0x05, 0x06, 0x06, 0x06, 0x09, 0x05, 0x05, 0x0C, 0x0C, 0x09, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x02,
+    0x02, 0x02, 0x02, 0x02, 0x02, 0x82, 0x0E, 0x7F, 0xEE, 0x80, 0x76, 0x7E, 0x97, 0x80, 0x34, 0x7A, 0x51, 0x80, 0x64, 0x7F, 0x92, 0x80, 0x84, 0x7F,
+    0x90, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01];
+function seatRig(o) {
+    o = o || {};
+    const C = 32768, SPEED = [38, 62, 59, 40, 80];
+    const st = { clock: 1e6, pos: [C + 345, C - 355, C - 380, C + 93, C - 9], run: [0, 0, 0, 0, 0], frac: [0, 0, 0, 0, 0], sent: [], maxAtOnce: 0, sw: false, init: 1, stuck: -1 };
+    const step = (ms) => {
+        for (let i = 0; i < 5; i++) {
+            if (!st.run[i] || i === st.stuck) continue;
+            st.frac[i] += SPEED[i] * ms / 1000 * (st.run[i] === 1 ? 1 : -1);
+            const n = Math.trunc(st.frac[i]); st.pos[i] += n; st.frac[i] -= n;
+        }
+        st.clock += ms;
+    };
+    const be = (n) => [n >> 8, n & 255];
+    const reply = (a, did) => {
+        if (did === 0xD702) return [0x62, 0xD7, 0x02].concat(...st.pos.map(be), be(C), be(C), be(C));
+        if (did === 0xD708) return [0x62, 0xD7, 0x08].concat(st.run, [3, 3, 3, 0, 0, 0, 0]);
+        if (did === 0xD712) { const b = new Array(17).fill(0); if (st.sw) b[0] = 1; return [0x62, 0xD7, 0x12].concat(b); }
+        if (did === 0xD704) { const d = D704_G26.slice(); d[0] = st.init; return [0x62, 0xD7, 0x04].concat(d); }
+        return [0x7F, 0x22, 0x31];
+    };
+    const link = { available: true, async discover() { return new Map([[0x6D, '0F2A31']]); },
+        async read(a, did) { step(25); st.sent.push('22 ' + did.toString(16).toUpperCase()); return a === 0x6D ? reply(a, did) : null; } };
+    const motor = async (a, m, act, pwm) => {
+        step(20);
+        st.sent.push('2E ' + a.toString(16).toUpperCase() + ' ' + m + ' ' + act + ' ' + pwm);
+        if (o.refuse) return [0x7F, 0x2E, 0x22];
+        st.run[m] = act;
+        st.maxAtOnce = Math.max(st.maxAtOnce, st.run.filter((x) => x).length);
+        return [0x6E, 0xD7, 0x08];
+    };
+    const values = { live: { speed: 0 } };
+    const logs = [], log = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push('ERROR ' + m) };
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'seatmem-'));
+    const { SeatModules } = appModule('seatmod'), { SeatMover } = appModule('seatmove');
+    const modules = new SeatModules({ link, log, now: () => st.clock, values });
+    modules.seats = [{ addr: 0x6D, index: '0F2A31', pos: st.pos.concat([C, C, C]), motor: [], sw: [], init: 1, at: 0 }];
+    modules.state = 'found';
+    const sleep = async (ms) => { step(ms); if (o.during) o.during(st); };
+    const mover = new SeatMover({ motor, modules, values, log, now: () => st.clock, sleep, dataDir: dir });
+    return { st, mover, modules, values, logs, dir, C, link, motor };
+}
+const writes = (st) => st.sent.filter((x) => x.startsWith('2E'));
+
+checks.push(
+    ['2.6.0 seat memory: the link lets out 2E D7 08 to 0x6D / 0x6E alone, handed out once; a STOP is not dropped by cancel()', async () => {
+        const sent = [];
+        stubDiag = class { constructor() { this.p = {}; } async init() {} async physical(target, sid, data) { sent.push([target, sid].concat(data)); return [0x6E, 0xD7, 0x08]; } };
+        delete require.cache[path.join(KIT, 'readonly-diag.js')];
+        const R = require(path.join(KIT, 'readonly-diag.js'));
+        stubDiag = null;
+        R.checkSeat(0x6D, [0xD7, 0x08, 4, 1, 100]);
+        R.checkSeat(0x6E, [0xD7, 0x08, 0, 0, 1]);
+        [[0x6F, [0xD7, 0x08, 0, 1, 100]], [0x12, [0xD7, 0x08, 0, 1, 100]], [0x6D, [0xD7, 0x19, 0, 1, 100]], [0x6D, [0xDA, 0xFC, 0, 1, 100]],
+            [0x6D, [0xD7, 0x08, 5, 1, 100]], [0x6D, [0xD7, 0x08, 0, 3, 100]], [0x6D, [0xD7, 0x08, 0, 1, 0]], [0x6D, [0xD7, 0x08, 0, 1, 101]], [0x6D, [0xD7, 0x08, 0, 1]],
+            [0x6D, [0xD7, 0x08, 0, 1, 100, 0]]].forEach(([a, d]) => assert.throws(() => R.checkSeat(a, d), /seat motors/, JSON.stringify([a, d])));
+        // the reading check still refuses every write
+        assert.throws(() => R.check(0x6D, 0x2E, [0xD7, 0x08, 0, 1, 100], false), /not allowed/);
+        const l = new R.ReadOnlyDiag({}, quiet);
+        await l.init();
+        const motor = R.seatMotors(l);
+        assert.throws(() => R.seatMotors(l), /already handed out/, 'a second writer');
+        await assert.rejects(motor(0x6F, 0, 1, 100), /not a front seat module/);
+        await assert.rejects(motor(0x6D, 7, 1, 100), /bad motor/);
+        assert.strictEqual(sent.length, 0, 'nothing refused was sent');
+        const go = motor(0x6D, 0, 1, 100), read = l.read(0x6D, 0xD702), stop = motor(0x6D, 0, 0, 100);
+        l.cancel();
+        await go;                         // (a start may be dropped: the run's own stop follows anyway)
+        assert.strictEqual(await read, undefined, 'a read is dropped by cancel()');
+        assert.deepStrictEqual(await stop, [0x6E, 0xD7, 0x08], 'the stop still went');
+        assert(sent.some((x) => x.join(',') === [0x6D, 0x2E, 0xD7, 0x08, 0, 0, 100].join(',')), JSON.stringify(sent));
+    }],
+    ['2.6.0 seat memory: a saved position recalled - at most two motors at once, each stopped at its target, nothing else written', async () => {
+        const r = seatRig(), { st, mover, C } = r;
+        assert(await mover.save(0x6D, '1'));
+        const saved = st.pos.slice();
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(r.dir, 'seatmem.json'), 'utf8'))['6D']['1'], saved, 'kept in seatmem.json');
+        // the seat moved elsewhere with its own switches
+        st.pos = [C + 150, C - 200, C - 900, C + 20, C + 100];
+        const res = await mover.recall(0x6D, '1');
+        assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
+        st.pos.forEach((v, i) => assert(Math.abs(v - saved[i]) <= 4, 'axis ' + i + ': ' + (v - saved[i])));
+        assert(st.run.every((x) => x === 0), 'every motor stopped');
+        assert(st.maxAtOnce <= 2, 'at most two at once: ' + st.maxAtOnce);
+        const w = writes(st);
+        assert(w.length && w.every((x) => /^2E 6D [0-4] [012] 100$/.test(x)), w.join(' | '));
+        assert.deepStrictEqual(w.filter((x) => / [12] 100$/.test(x)).slice(0, 2).map((x) => x.split(' ')[2]), ['0', '2'], 'fore / aft and backrest first, as the module itself');
+        // each motor started was stopped afterwards, once more on the way out
+        [0, 1, 2, 3, 4].forEach((i) => { const mine = w.filter((x) => x.split(' ')[2] === String(i)); if (mine.length) assert(/ 0 100$/.test(mine[mine.length - 1]), 'axis ' + i + ' ends with STOP: ' + mine.join(',')); });
+        assert(r.logs.some((x) => /seat 0x6D: Memory 1 reached in \d+\.\d s/.test(x)), r.logs.join(' | '));
+        assert(!mover.run && !r.modules.paused, 'the run is over, the modules read again');
+    }],
+    ['2.6.0 seat memory: a seat switch, the car rolling or the driver\'s own motor ends a move at once, its motors stopped', async () => {
+        for (const [what, during, why] of [
+            ['switch', (st) => { if (st.clock > 1e6 + 900) st.sw = true; }, /a seat switch was pressed/],
+            ['rolling', null, /the car is moving/],
+            ['own motor', (st) => { if (st.clock > 1e6 + 900) st.run[1] = 1; }, /moved by hand/],
+        ]) {
+            let r;
+            const o = { during: (st) => { if (during) during(st); if (what === 'rolling' && st.clock > 1e6 + 900) r.values.live.speed = 6; } };
+            r = seatRig(o);
+            const { st, mover, C } = r;
+            mover.mem['6D'] = { '2': [C + 345, C - 355, C + 20, C + 93, C - 9] };
+            st.pos[2] = C - 1300;                 // the backrest far off: a long move, interrupted
+            const res = await mover.recall(0x6D, '2');
+            assert(!res.ok && why.test(res.why), what + ': ' + res.why);
+            assert(st.run.every((x, i) => x === 0 || (what === 'own motor' && i === 1)), what + ': motors left running ' + st.run);
+            assert(st.pos[2] < C - 1100, what + ': stopped soon, not at the target (' + (st.pos[2] - C) + ')');
+        }
+    }],
+    ['2.6.0 seat memory: not started when moving, locked, not initialised or refused; the target kept inside the end stops', async () => {
+        let r = seatRig();
+        r.mover.mem['6D'] = { '1': [32768 + 400, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
+        r.values.live.speed = 30;
+        assert(/stands still/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'driving');
+        r.values.live.speed = undefined;
+        assert(/No speed/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'no speed known');
+        r.values.live.speed = 0; r.values.live.left = true;
+        assert(/locked/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'locked');
+        r = seatRig(); r.st.init = 0; r.mover.mem['6D'] = { '1': [32768 + 400, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
+        assert(/not initialised/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'not initialised');
+        assert(/not saved/.test((await r.mover.recall(0x6D, '3')).why), 'an empty slot');
+        r = seatRig({ refuse: true }); r.mover.mem['6D'] = { '1': [32768 + 400, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
+        const ref = await r.mover.recall(0x6D, '1');
+        assert(!ref.ok && /not started \(refused 22\)/.test(ref.why), ref.why);
+        // beyond the learned end stop (SLV +526): kept MARGIN inside it
+        r = seatRig(); r.mover.mem['6D'] = { '1': [32768 + 900, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
+        await r.mover.recall(0x6D, '1');
+        assert(Math.abs(r.st.pos[0] - (32768 + 526 - 3)) <= 4, 'clamped: ' + (r.st.pos[0] - 32768));
+        // a motor that doesn't move: stopped
+        r = seatRig(); r.st.stuck = 2; r.mover.mem['6D'] = { '1': [32768 + 345, 32768 - 355, 32768 - 900, 32768 + 93, 32768 - 9] };
+        const st = await r.mover.recall(0x6D, '1');
+        assert(/LNV does not move/.test(st.why) && r.st.run.every((x) => !x), st.why);
+    }],
+    ['2.6.0 easy entry: the driving position kept, Back returns to it; the tab\'s buttons', async () => {
+        const r = seatRig(), { st, mover, C } = r;
+        const drive = st.pos.slice();
+        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
+        assert((await mover.recall(0x6D, 'E')).ok);
+        assert(Math.abs(st.pos[0] - (C + 30)) <= 4 && Math.abs(st.pos[2] - (C - 900)) <= 4 && st.pos[1] === drive[1], 'only the axes saved move');
+        assert.deepStrictEqual(mover.slots(0x6D).R, drive, 'the driving position kept');
+        assert((await mover.recall(0x6D, 'R')).ok);
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back: axis ' + i));
+        // the tab: 1 2 3, Easy entry, Save; Save then 2 keeps the position in 2
+        const { Seats } = appModule('seats');
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: async () => [0x6E, 0xD7, 0x08] });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found'; s.modules.seats[0].pos = st.pos.concat([C, C, C]); s.mover.mem = mover.mem;
+        const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
+        let { cv, out } = draw();
+        ['1', '2', '3', 'EASY ENTRY', 'SAVE'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
+        const press = (c, key) => { const b = c.targets.find((x) => x.key === key); assert(b, key + ' not pressable: ' + c.targets.map((x) => x.key).join(',')); return b.run(); };
+        assert(!cv.targets.some((x) => x.key === 'seat-109-2'), 'an empty slot is not pressable');
+        press(cv, 'seat-109-save');
+        ({ cv, out } = draw());
+        assert(out.some((x) => /^Press 1, 2, 3 or Entry spot/.test(x)), out.join(' | '));
+        press(cv, 'seat-109-2');
+        for (let k = 0; k < 20 && !s.mover.slots(0x6D)['2']; k++) await new Promise((res) => setImmediate(res));
+        assert.deepStrictEqual(s.mover.slots(0x6D)['2'], st.pos, 'saved in 2');
+    }],
+);
+
+checks.push(
+    ['2.6.1 hold to move: the motor runs while held, a STOP the moment it is let go; never past the end stop; 10 s at most', async () => {
+        // let go after ~1 s
+        let r = seatRig({ during: (st) => { if (st.clock > 1e6 + 1000 && !st.let) { st.let = true; r.mover.release(); } } });
+        let { st, mover, C } = r;
+        const kh0 = st.pos[4];
+        let res = await mover.hold(0x6D, 4, 1);
+        assert(res.ok && res.why === 'Let go', res.why);
+        assert(st.pos[4] > kh0 + 30 && st.pos[4] < kh0 + 120, 'the headrest went up a little: ' + (st.pos[4] - kh0));
+        assert(st.run.every((x) => !x), 'stopped');
+        const w = writes(st);
+        assert(w[0] === '2E 6D 4 1 100' && w.slice(1).every((x) => x === '2E 6D 4 0 100'), w.join(' | '));
+        assert(r.logs.some((x) => /seat 0x6D: KHV\+ held \d+\.\d s, \d+>\d+$/.test(x)), r.logs.join(' | '));
+        // the height down at -355, its end stop -361: no further than MARGIN from it
+        r = seatRig(); ({ st, mover, C } = r);
+        res = await mover.hold(0x6D, 1, 2);
+        assert(res.ok && /end of its travel/.test(res.why), res.why);
+        assert(st.pos[1] >= C - 361 + 3 - 2, 'past the end stop: ' + (st.pos[1] - C));
+        r = seatRig(); ({ st, mover, C } = r);
+        st.pos[1] = C - 300;
+        res = await mover.hold(0x6D, 1, 2);
+        assert(res.ok && /end of its travel/.test(res.why) && st.pos[1] < C - 340, res.why + ' at ' + (st.pos[1] - C));
+        assert(st.pos[1] >= C - 361 + 3 - 2, 'from further up, past the end stop: ' + (st.pos[1] - C));
+        // never let go (a lost touch): 10 s, then stopped
+        r = seatRig(); ({ st, mover, C } = r);
+        st.pos[2] = C - 1300;
+        res = await mover.hold(0x6D, 2, 1);
+        assert(/Held 10 s/.test(res.why) && st.run.every((x) => !x), res.why);
+        // the driver's own switch meanwhile: stopped
+        r = seatRig({ during: (st2) => { if (st2.clock > 1e6 + 700) st2.run[0] = 2; } }); ({ st, mover } = r);
+        res = await mover.hold(0x6D, 4, 2);
+        assert(!res.ok && /moved by hand/.test(res.why) && st.run[4] === 0, res.why);
+        // driving: not started
+        r = seatRig(); r.values.live.speed = 20;
+        res = await r.mover.hold(0x6D, 4, 1);
+        assert(!res.ok && !writes(r.st).length, res.why);
+    }],
+    ['2.6.1 Seats tab: a seat drawn with an arrow pair by each part; a finger down holds, sliding off or up lets go', async () => {
+        const r = seatRig(), { st, C } = r;
+        const { Seats } = appModule('seats');
+        const sent = [];
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link,
+            motor: async (a, m, act, pwm) => { sent.push([a, m, act]); return r.motor(a, m, act, pwm); } });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found';
+        s.mover.sleep = async (ms) => { st.clock += ms; await new Promise((res) => setImmediate(res)); };
+        const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
+        const { cv, out } = draw();
+        ['Driver seat', 'Headrest', 'Backrest', 'Height', 'Tilt', 'Fore / aft', 'Hold an arrow to move the seat'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
+        assert.strictEqual(s.holds.length, 10, 'five pairs');
+        assert(['SLV+', 'SLV-', 'KHV+', 'KHV-'].every((k) => cv.targets.some((x) => x.key === 'seat-109-' + k)), 'the controller can press them');
+        const up = s.holds.find((h) => h.axis === 4 && h.dir === 1);
+        assert(s.touch(1, up.x + 3, up.y - 2), 'a finger on the arrow takes the touch');
+        for (let k = 0; k < 30; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[4], 1, 'the headrest runs while held');
+        assert(s.touch(2, up.x + 10, up.y));
+        assert.strictEqual(st.run[4], 1, 'a small slide keeps it');
+        s.touch(2, up.x + 120, up.y);
+        for (let k = 0; k < 30 && st.run[4]; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[4], 0, 'slid off: stopped');
+        for (let k = 0; k < 60 && s.mover.run; k++) await new Promise((res) => setImmediate(res));
+        assert(!s.mover.run, 'the hold ended');
+        assert(!s.touch(1, 5, 5), 'a touch elsewhere is the kit\'s');
+        // up on the arrow (no slide)
+        const back = s.holds.find((h) => h.axis === 2 && h.dir === 2);
+        s.touch(1, back.x, back.y);
+        for (let k = 0; k < 30; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[2], 2, 'the backrest reclines while held');
+        s.touch(3, back.x, back.y);
+        for (let k = 0; k < 30 && st.run[2]; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[2], 0, 'let go: stopped');
+        assert(sent.every((x) => x[0] === 0x6D && x[2] <= 2), JSON.stringify(sent));
     }],
 );

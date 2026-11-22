@@ -7,7 +7,7 @@
  *   22 D708  MOTOR         each motor's state, 8 x u8: 0 off, 1 plus, 2 minus, 3 not fitted / coded, 4 invalid
  *   22 D712  SCHALTER_SV   the seat's own switches, 16 x u8 (each axis plus, minus): 1 = pressed
  *   22 D704  INITIALISIERUNG_SITZ  first byte: 0 not initialised, 1 initialised, FF initialisation not OK
- * (2E D708 <motor> <STOP|PLUS|MINUS> <PWM %> drives a motor: not sent - this link only reads.)
+ * (2E D708 <motor> <STOP|PLUS|MINUS> <PWM %> drives a motor: sent only by seatmove.js, the seat memory.)
  *
  * Which units are seat modules: every unit is asked who it is (22 F1 50 to all), then 22 D702; the ones that answer
  * with the counters are seat modules (the address differs between cars). Each move is logged once it has settled ("seat 0x6D: SLV
@@ -29,6 +29,17 @@ const A = (a) => '0x' + hex(a);
 const u16 = (b, i) => (b.length > i + 1 ? b[i] * 256 + b[i + 1] : null);
 /** The reply's data after 62 <DID>, or null (a refusal, another reply, none). */
 const data = (u, did) => (u && u[0] === 0x62 && u[1] === (did >> 8) && u[2] === (did & 0xFF) ? u.slice(3) : null);
+/** D704: initialised (byte 0 is 1), and each fitted motor's learned end stops { plus, minus } (null: none / not plausible). */
+const LIMITS_AT = 48, FITTED = 5;
+function limitsOf(d) {
+    if (!d || !d.length) return { init: null, limits: [] };
+    const limits = [];
+    for (let i = 0; i < FITTED; i++) {
+        const plus = u16(d, LIMITS_AT + i * 4), minus = u16(d, LIMITS_AT + i * 4 + 2);
+        limits.push(plus !== null && minus !== null && plus !== 0xFFFF && minus !== 0 && plus - minus >= 12 ? { plus, minus } : null);
+    }
+    return { init: d[0], limits };
+}
 /** D702's counters: an axis outside 8192..57344 has none (null). */
 function positions(d) {
     return AXES.map((a, i) => { const v = u16(d, i * 2); return v !== null && v >= LO && v <= HI ? v : null; });
@@ -44,7 +55,8 @@ class SeatModules {
 
     tick() {
         const now = this.now();
-        if (this.busy || !this.link || !this.link.available || this.values.live.left) return;
+        // (paused while seatmove.js drives a seat: it reads the positions itself, faster)
+        if (this.busy || this.paused || !this.link || !this.link.available || this.values.live.left) return;
         if (this.state === 'idle' || (this.state === 'none' && now - this.foundAt >= FIND_AGAIN_MS)) return this.run(() => this.find());
         if (this.state === 'found' && now - this.last >= POLL_MS) { this.last = now; return this.run(() => this.poll()); }
         return undefined;
@@ -114,6 +126,7 @@ class SeatModules {
         if (s.init === null || this.now() - (s.initAt || 0) >= INIT_MS) {
             const n = data(await this.read(s.addr, INIT), INIT);
             s.initAt = this.now();
+            if (n && n.length >= LIMITS_AT + FITTED * 4) s.limits = limitsOf(n).limits;
             if (n && n.length) { if (s.init !== n[0]) this.log.info('seat ' + A(s.addr) + ': initialisation ' + ({ 0: 'not done', 1: 'OK', 255: 'not OK' }[n[0]] || hex(n[0]))); s.init = n[0]; }
         }
     }
@@ -142,4 +155,4 @@ class SeatModules {
     show(pos) { return AXES.map((a, i) => (pos[i] === null ? null : a + ' ' + pos[i])).filter(Boolean).join(' '); }
 }
 
-module.exports = { SeatModules, AXES, positions, LO, HI };
+module.exports = { SeatModules, AXES, positions, limitsOf, LO, HI };
