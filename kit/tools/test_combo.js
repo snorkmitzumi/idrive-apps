@@ -1661,3 +1661,39 @@ checks.push(
         assert.strictEqual(m.state, 'found');
     }],
 );
+
+checks.push(
+    ['2.6.7 easy entry: the door closed again takes the seat back (1.5 s later, still closed); opened again meanwhile: not; mid-move: stopped, then back', async () => {
+        const r = seatRig(), { st, mover, C } = r;
+        const drive = st.pos.slice();
+        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
+        const { Seats } = appModule('seats');
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: settingsOf() });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found'; s.mover.mem = mover.mem; s.mover.sleep = mover.sleep;
+        const settle = async () => { for (let k = 0; k < 400 && (s.mover.run || k < 3); k++) await new Promise((res) => setImmediate(res)); await s.entryQueue; };
+        const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+        s.doors([]);                                            // (the first report)
+        s.doors(['driver front']); await settle();
+        assert(Math.abs(st.pos[2] - (C - 900)) <= 4 && s.mover.entered(0x6D), 'at the entry position');
+        // closed, opened again within 1.5 s (still getting in): nothing moves
+        const n = writes(st).length;
+        s.doors([]); await wait(300); s.doors(['driver front']); await wait(1600); await settle();
+        assert.strictEqual(writes(st).length, n, 'opened again before 1.5 s: not moved');
+        // closed for good: back to the driving position
+        s.doors([]); await wait(1700); await settle();
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back: axis ' + i + ' ' + (v - drive[i])));
+        assert(!s.mover.entered(0x6D));
+        // closed while the entry move still goes: it stops, then back
+        st.pos[2] = drive[2];
+        const fast = s.mover.sleep;
+        s.mover.sleep = async (ms) => { await wait(4); return fast(ms); };     // (a move that takes real time, to close the door in)
+        s.doors(['driver front']);
+        await wait(60);
+        assert(s.mover.run && s.mover.run.slot === 'E', 'easy entry under way');
+        s.doors([]); await wait(1800);
+        s.mover.sleep = fast;
+        for (let k = 0; k < 100 && (s.mover.run || s.mover.entered(0x6D)); k++) { await settle(); await wait(20); }
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back after a stopped entry: axis ' + i + ' ' + (v - drive[i])));
+        assert(st.run.every((x) => !x), 'every motor stopped');
+    }],
+);

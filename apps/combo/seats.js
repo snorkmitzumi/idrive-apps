@@ -21,6 +21,7 @@ const { SeatMover } = require('./seatmove');
 const IFACE = 'de.bmw.body.seat.SeatTargetAdjustment', INSTANCE = '1';
 const DRIVER = 0, POLL_MS = 2000, CALL_MS = 3000;
 const NUDGE_MS = 600;               // the controller pressed on an arrow: the motor this long
+const CLOSE_MS = 1500;              // a front door closed this long (still closed): its seat back from easy entry
 // a step that doesn't finish in this long is given up (2.3.1 on a G26: the tab opened three times, not one seat line
 // in the log - a set-up or call that never came back); an interface the car doesn't offer: asked again after RETRY_MS
 const STEP_MS = 8000, RETRY_MS = 30000;
@@ -281,7 +282,7 @@ class Seats {
             const e = k === 'E';
             bx += G.button(cv, t, bx, y, e ? 170 : 70, H, e ? 'Easy entry' : k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 10;
         });
-        // after easy entry: back to where the seat was (only by this button)
+        // after easy entry: back to where the seat was (also by itself once its door closed)
         if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 110, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 10;
         bx += G.button(cv, t, bx, y, 110, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
             { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run }) + 10;
@@ -294,9 +295,10 @@ class Seats {
     easyEntry() { return !this.settings || this.settings.get('easyEntry') !== false; }
 
     /**
-     * The doors open now (DoorsWindowsRoofMirrors, as the ambient light reads them): a front door that just opened takes
-     * its seat to its easy entry position. Only a door does: not the engine starting or stopping (2.6.1 took the seats
-     * back when the engine started - start-stop restarts it at every light, so they moved while driving). Back: by hand.
+     * The doors open now (DoorsWindowsRoofMirrors, as the ambient light reads them). Only a door moves a seat by itself:
+     * a front door that just opened takes its seat to its easy entry position, and closed again (CLOSE_MS later, still
+     * closed) takes it back to where it was before (2.6.6 left that to Back). Not the engine starting or stopping (2.6.1
+     * took the seats back when the engine started - start-stop restarts it at every light, so they moved while driving).
      */
     doors(open) {
         // (the first report, as Combo starts: a door open already then did not just open)
@@ -304,9 +306,24 @@ class Seats {
         this.open = open || [];
         if (first) return;
         if (!this.mover || !this.easyEntry()) return;
+        this.closing = this.closing || {};
         [['driver front', 0x6D], ['passenger front', 0x6E]].forEach(([d, a]) => {
-            if (this.open.indexOf(d) < 0 || was.indexOf(d) >= 0) return;
-            this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.entry(a)).catch((e) => this.log.warn('easy entry: ' + e));
+            const now = this.open.indexOf(d) >= 0, before = was.indexOf(d) >= 0;
+            if (now && !before) {
+                clearTimeout(this.closing[a]); this.closing[a] = null;
+                this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.entry(a)).catch((e) => this.log.warn('easy entry: ' + e));
+            } else if (!now && before) {
+                // closed while easy entry still moves: that move stops, the way back follows it
+                const r = this.mover.run;
+                if (r && r.addr === a && r.slot === 'E') this.mover.stop('Stopped: the door closed');
+                clearTimeout(this.closing[a]);
+                this.closing[a] = setTimeout(() => {
+                    this.closing[a] = null;
+                    if (this.open.indexOf(d) >= 0) return;
+                    this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.back(a)).catch((e) => this.log.warn('easy entry back: ' + e));
+                }, CLOSE_MS);
+                if (this.closing[a].unref) this.closing[a].unref();
+            }
         });
     }
 
