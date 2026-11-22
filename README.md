@@ -67,9 +67,12 @@ moves lights up, also when the seat's own switches move it.
 **Hold an arrow** by a part and that motor moves while you hold it; it stops the moment you let go or slide off, at the
 end of its travel, or after 10 s. A press with the controller moves it for a moment.
 
-Each seat has **memory 1–3** and **easy entry** (2.6.0). Press **Save**, then a slot, to keep the seat's position
-there; press the slot to go back to it. **Easy entry** moves the seat to its saved entry spot and keeps the driving
-position, so the same button then says **Back**. A move:
+Each seat has **memory 1–3**. Press **Save**, then a slot, to keep the seat's position there; press the slot to go
+back to it.
+
+**Easy entry** (2.6.1, Settings > Seats, on by default): Memory 3 is the entry position. When a front door opens with
+the engine off, its seat moves to Memory 3, after keeping where it was. When the engine starts, the seat goes back
+there. **Back** does the same by hand. Nothing moves until Memory 3 has been saved for that seat. A move:
 
 - runs only while the car stands still and isn't locked, on a seat module that reports itself initialised;
 - stops at once when any seat switch is pressed, the seat is moved by hand, the car rolls, or **Stop** is pressed;

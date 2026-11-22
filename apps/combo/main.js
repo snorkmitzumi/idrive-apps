@@ -107,7 +107,13 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
-        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
+        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
+        // easy entry: a front door opened takes its seat to Memory 3, the engine started takes it back (seats.js doors())
+        const DOOR_FIELDS = { statusDoorSwitchDRD: 'driver front', statusDoorSwitchPSD: 'passenger front' };
+        ctx.signals.watch('de.bmw.body.DoorsWindowsRoofMirrors', '1', { CentralLockingSystemAndPanelStatus: (v) => seats.doors(Object.keys(DOOR_FIELDS)
+            .filter((k) => v && (v[k] === 1 || /_OFFEN$/.test(String(v[k])))).map((k) => DOOR_FIELDS[k])) }, log)
+            .catch((e) => log.warn('doors: ' + (e && e.message || e)));
+        setInterval(() => seats.watchEngine(), 500);
         // the M View tab: temperatures, fuel trims and timing, misfires; its reads only while the tab shows (mview.js)
         const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });

@@ -114,11 +114,14 @@ class SeatModules {
         const s = this.seats[this.turn % this.seats.length];
         const step = Math.floor(this.turn / this.seats.length) % 2;
         this.turn++;
+        // after one of seatmove.js's moves (s.quiet): from where the seat is now, that move not logged again
+        const quiet = !!s.quiet;
         const d = data(await this.read(s.addr, POS), POS);
-        if (d) { s.pos = positions(d); s.at = this.now(); this.moved(s); }
+        if (d) { s.pos = positions(d); s.at = this.now(); if (quiet) { s.last = s.pos.slice(); s.from = s.pos.map(() => null); s.since = s.pos.map(() => 0); } else this.moved(s); }
         // the motors each round (which one runs, which way: an axis named by its own motor), the switches every other
         const m = data(await this.read(s.addr, MOTOR), MOTOR);
-        if (m) { const was = this.running(s); s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); const now = this.running(s); if (now !== was) this.line('seat ' + A(s.addr) + ' motors: ' + (now || 'stopped')); }
+        if (m) { const was = this.running(s); s.motor = AXES.map((a, i) => (m.length > i ? m[i] : null)); const now = this.running(s); if (now !== was && !quiet) this.line('seat ' + A(s.addr) + ' motors: ' + (now || 'stopped')); }
+        if (quiet && d) s.quiet = false;
         if (step === 1) {
             const w = data(await this.read(s.addr, SWITCH), SWITCH);
             if (w) { const was = s.sw; s.sw = AXES.map((a, i) => (w[i * 2] === 1 ? '+' : w[i * 2 + 1] === 1 ? '-' : '')); this.pressed(s, was); }
@@ -129,6 +132,22 @@ class SeatModules {
             if (n && n.length >= LIMITS_AT + FITTED * 4) s.limits = limitsOf(n).limits;
             if (n && n.length) { if (s.init !== n[0]) this.log.info('seat ' + A(s.addr) + ': initialisation ' + ({ 0: 'not done', 1: 'OK', 255: 'not OK' }[n[0]] || hex(n[0]))); s.init = n[0]; }
         }
+    }
+
+    /**
+     * A seat module at its usual address, without the search (easy entry when the Seats tab hasn't been open yet): the
+     * unit asked for its counters; it joins the seats when it answers. Resolves with the seat, or null.
+     */
+    async adopt(addr) {
+        const had = this.seats.find((s) => s.addr === addr);
+        if (had) return had;
+        if (!this.link || !this.link.available) return null;
+        const d = data(await this.read(addr, POS).catch(() => null), POS);
+        if (!d || d.length < 16) return null;
+        const s = { addr, index: '', pos: positions(d), motor: [], sw: [], init: null, at: this.now() };
+        this.seats.push(s);
+        this.log.info('seat modules: ' + A(addr) + ' answered at its usual address ' + this.show(s.pos));
+        return s;
     }
 
     /** The motors running now, e.g. 'SLV+ SNV-' ('' none). */
