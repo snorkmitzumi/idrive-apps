@@ -189,6 +189,13 @@ builds it from this repository's `main` branch, so a merged change is its next v
   seat modules' `STEUERN ARG;MOTOR` job, as ISTA sends it: no session change, no security access), for the five motors
   a G26's seats have. Every other write is refused before it leaves the head unit.
 
+## Load on the head unit
+
+Each tab is drawn only as often as it needs (2.6.4; before, every tab was drawn 60 times a second with the GPU
+renderer, a still one too): Driving and Performance at Settings > Screen > **Gauges frame rate** (30 by default; 15 is
+the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. Once a
+minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log).
+
 ## Reporting a problem: the QR log
 
 Settings > **QR log** shows the app's recent log as a few QR codes. Photograph every page; the decoder turns the

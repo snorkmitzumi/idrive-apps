@@ -66,6 +66,7 @@ mgu.run({
         const startT = Date.now();
         // tab: DRIVING, PERF, SEATS, MVIEW or AMBIENT (then amb.page says which of its tabs)
         let tab = DRIVING;
+        let loop = null;                 // the frame loop (ctx.loop's handle), set at the end of start-up
 
         // the ambient light: its tabs, over the service background() started (a failure leaves the other tabs working)
         let amb = null, ambLights = null;
@@ -180,13 +181,17 @@ mgu.run({
         // a new boost source: its peak starts over (M Vitals)
         settings.onChange((k) => { if (k === 'boostSource') { delete values.peaks.boost; delete demoPeaks.peaks.boost; } });
 
+        /** The frame rate the tab shown needs (0: as fast as the renderer, the ambient tabs: they draw only while they change). */
+        function rateOf() { return tab === DRIVING || tab === PERF ? Number(settings.get('frameRate')) || 30 : tab === SEATS ? 10 : tab === MVIEW ? 5 : 0; }
+        function setRate() { if (loop && loop.fps) loop.fps(rateOf()); }
+
         /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, Seats, M View, then the ambient tabs. */
         function pick(i) {
             const was = tab;
             if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + '; ' + seatProbe.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { setRate(); railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + '; ' + seatProbe.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));
@@ -304,6 +309,7 @@ mgu.run({
         }
 
         async function render() {
+            drawn++;
             const t = ctx.theme(), cv = ctx.canvas(W, H).clear(t.bg);
             if (!!cv.own !== owned) { owned = !!cv.own; if (amb && tab === AMBIENT) amb.dirty(); }
             if (tab === DRIVING) drawDriving(cv, t);
@@ -327,7 +333,21 @@ mgu.run({
             await ui.image('MAIN_GFX', cv);
         }
         // Driving and Performance follow the car each frame; the ambient tabs only while they move or changed
-        ctx.loop('MAIN', 10, () => (tab !== AMBIENT || amb.wants() || railOpen ? render() : null));
+        loop = ctx.loop('MAIN', 10, () => (tab !== AMBIENT || amb.wants() || railOpen ? render() : null));
+        // how often each tab is drawn (2.6.4: with the GPU renderer every tab was drawn 60 times a second, a still one too,
+        // which slowed the head unit): the gauges at the frameRate setting, Seats 10 (its picture follows a move), M View 5
+        // (its values change every few seconds); the ambient tabs as fast as the renderer while they change (the colour
+        // ring under a finger), else not at all
+        setRate();
+        settings.onChange((k) => { if (k === 'frameRate') setRate(); });
+        // once a minute in the log (the QR log keeps it): the app's CPU share, its memory and the frames it drew
+        let cpu0 = process.cpuUsage(), t0 = Date.now(), drawn = 0;
+        setInterval(() => {
+            const c = process.cpuUsage(cpu0), now = Date.now(), m = process.memoryUsage(), s = (now - t0) / 1000;
+            log.info('perf: cpu ' + Math.round((c.user + c.system) / 10 / (now - t0)) + '%, rss ' + Math.round(m.rss / 1048576) + ' MB, heap ' + Math.round(m.heapUsed / 1048576)
+                + ' MB, ' + (drawn / s).toFixed(1) + ' frames/s drawn (' + (tab === AMBIENT ? 'Ambient' : TABS[tab]) + ' at ' + (rateOf() || 'renderer') + ')');
+            cpu0 = process.cpuUsage(); t0 = now; drawn = 0;
+        }, 60000);
         resetLabel();
         log.info('started' + (amb ? '' : ' (without the ambient light)'));
     },
