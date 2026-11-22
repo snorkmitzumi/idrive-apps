@@ -206,10 +206,24 @@ Cockpit starts with the car (the ambient light needs it running) and shows up in
 
 Until 2.7.0 this app was **Combo**, with the id `combo`. Since 2.8.0 it is **Cockpit**, with the id `cockpit_combo`, as
 the MGU Store asks for an id of its own. For the head unit that is a different app: the Store installs Cockpit next to
-Combo instead of updating it, and your settings and saved seat positions stay with Combo.
+Combo instead of updating it, and each keeps its own saved data.
 
-1. **Uninstall Combo** in the MGU Store.
-2. **Install Cockpit**, then set Settings up again and save memory 1, 2 and the easy entry position again.
+1. **Install Cockpit** and open it once. On its first start it copies what Combo saved: every setting (the ambient
+   light's colours and looks among them), memory 1 and 2 and the easy entry position, and the dyno baseline and best
+   drag times. Nothing of Combo's is changed.
+2. **Check** your seat positions and colours in Cockpit. The QR log says what was copied (`migrate:` lines).
+3. **Uninstall Combo** in the MGU Store.
+
+The copy happens only while Cockpit has saved no settings of its own, and only if the head unit lets one app read
+another's folder. If it doesn't, the log says so (`migrate: ... not readable`) and Cockpit starts fresh: set Settings up
+again and save the seat positions again. Or, with root over SSH, copy them yourself with the two folders that log line
+names (`<combo>` and `<cockpit>` below): the files must then belong to Cockpit's user, or it can't save them.
+
+```bash
+cd <combo>/data && cp -n settings.json seatmem.json perf.json <cockpit>/ && chown --reference=<cockpit> <cockpit>/*.json
+```
+
+Then restart Cockpit (or the head unit).
 
 Both installed would both start with the car. While the old Combo still runs, Cockpit leaves easy entry to it and its
 Seats tab says so, so one door never moves a seat from two apps at once. (Cockpit sees the old Combo through its ambient

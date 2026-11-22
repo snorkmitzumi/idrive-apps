@@ -644,6 +644,10 @@ async function runInner(impl) {
     }
     await app.start();
     active();
+    // app.json "migrateFrom": an app with a new id takes what it saved under the old one, before its settings are read
+    if (SPEC.migrateFrom) {
+        try { require('./migrate').migrate({ from: SPEC.migrateFrom.id, files: SPEC.migrateFrom.files, appRoot: APP_ROOT, dataDir: DATA_DIR, log }); } catch (e) { log.warn('migrate: ' + (e && e.message || e)); }
+    }
     const settings = new Settings(SPEC.settings);
     // impl.background(bg): what the app does with or without its screens (app.json "autostart": true, an app the
     // platform starts by itself); bg = { app, log, settings, signals, spec, dataDir }. What it returns is
