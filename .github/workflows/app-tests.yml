@@ -3,24 +3,9 @@ name: App tests
 # The kit runtime and the apps' synthetic checks (no SDK, renderer or car needed). Live Adjustments and
 # ZF 8HP have theirs in experimental-apps.yml; the renderer's are in renderd.yml.
 on:
+  # every pull request, whatever it changes: main requires both jobs to pass (the "Protect main" ruleset), so a PR
+  # that changes only docs must get them too
   pull_request:
-    paths:
-      - 'apps/**'
-      - 'shared/**'               # code Combo takes at build time (shared/ambient_config)
-      - 'kit/runtime/**'
-      - 'kit/tools/test_*'
-      - 'kit/tools/redline_*.js' # the tests' shared harness and sample turns
-      - 'kit/tools/fixtures/**'   # recorded car data the tests replay (redline-nav-carplay-*.txt)
-      - 'kit/localization/**'
-      - 'kit/tools/build.py'
-      - 'kit/tools/pack_data.py'
-      - 'kit/tools/localize.py'
-      - 'kit/tools/import_diagnostic_ru.py'
-      - 'kit/tools/build_diagnostic_ru.py'
-      - 'kit/tools/build_diagnostic_zh.py'
-      - 'kit/tools/bake_cjk.py'
-      - 'kit/tools/locale-revisions.json'
-      - '.github/workflows/app-tests.yml'
   push:
     paths:
       - 'apps/**'
