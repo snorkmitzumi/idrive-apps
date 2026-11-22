@@ -778,7 +778,7 @@ mgu.run({
 | `ctx.signals` | raw SOME/IP access: `watch(iface, instance, handlers)`, `proxy`, `call`, `set(proxy, field, value)` (needs `w`) |
 | `require('./kit/parked')` | `watch(ctx, log)` -> `{ moving(), speed() }`: is the car driving (above 3 km/h)? For games and anything that mustn't run while driving. A quiet speed signal keeps the last reading (parked stays parked, driving stays driving); no speed at all (VM, bench) = parked. Needs `Vehicle2.statusCarSpeed2` ("rs"). **Every game has a bool setting `parkedOnly`, on by default**, and pauses while `moving()` |
 | `ctx.controller` | `grab(on)`: the iDrive controller's knob, press and tilt go to this app only while it is shown (the HMI stops reacting to them; BACK, MENU and touch still work). `onInput(fn)`: fn gets each held-back event (`frontRotaryEncoderOperation`, `frontRotaryEncoderPushButton`, `frontRotaryEncoderDeflection`, numbers as in FrontCCU). Needs the GPU renderer and the controller gate (5.1) |
-| `ctx.log` | `info/warn/error` → system log + `data/<id>.log` |
+| `ctx.log` | `info/warn/error` → the app's log in RAM (`/tmp/mgu-log-<id>-<uid>/<id>.log`, copied to `data/<id>.log` at most every 10 min and at exit); warnings and errors also to the system log (DLT) |
 | `ctx.dataDir` | the app's writable folder (persistent) |
 
 **Drawing** (`ctx.canvas()`): `fillRect`, `gradientRect`, `roundRect`, `strokeRoundRect`,
@@ -910,8 +910,9 @@ explore it.
 ## 8. Troubleshooting and gotchas
 
 - **The tile shows "Loading app" forever.** The app's process isn't reaching the HMI. Look at
-  `/var/opt/public/oap/oap_<uid>/data/<id>.log` (the kit logs startup steps and fatal errors
-  there) and `sh deploy-car.sh status`.
+  `/tmp/mgu-log-<id>-<uid>/<id>.log` (the kit logs startup steps and fatal errors there, in RAM; a copy
+  is in `/var/opt/public/oap/oap_<uid>/data/<id>.log`, written at most every 10 minutes and when the
+  app exits) and `sh deploy-car.sh status`.
 - **An app vanished after crashing.** That's MainApp's crash handler (4.3). Fix the crash, then
   run `install` again.
 - **The tiles are there but no app opens; the log says "the SDK created no RHMI application".**

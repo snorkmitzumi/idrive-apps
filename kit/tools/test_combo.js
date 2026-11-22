@@ -1727,3 +1727,36 @@ checks.push(
         assert(mover.slots(0x6D).coast.some((c) => c >= 8), 'a coast learned: ' + mover.slots(0x6D).coast);
     }],
 );
+
+checks.push(
+    ['2.6.8 the log: written in RAM (no eMMC write a line), copied to the eMMC on demand, copied back after a restart; no RAM: the eMMC', async () => {
+        const src = fs.readFileSync(path.join(KIT, 'mgu.js'), 'utf8');
+        const a = src.indexOf('const LOG_DISK = '), b = src.indexOf('// The SDK can swallow');
+        assert(a > 0 && b > a, 'the logging part of mgu.js');
+        const part = src.slice(a, b);
+        const load = (ram, data) => {
+            const env = Object.assign({}, process.env, { MGU_LOG_RAM: ram });
+            // eslint-disable-next-line no-new-func
+            return new Function('fs', 'path', 'SPEC', 'DATA_DIR', 'process', 'setInterval', part + '\nreturn { LOG_FILE, LOG_DISK, fileLog, copyLog };')(
+                fs, path, { id: 'combo' }, data, { env, getuid: process.getuid }, () => ({ unref() {} }));
+        };
+        const ram = tmp('ram'), data = tmp('data');
+        const L = load(ram, data);
+        assert(L.LOG_FILE.indexOf(ram) === 0, 'the log in RAM: ' + L.LOG_FILE);
+        for (let k = 0; k < 50; k++) L.fileLog('INFO', 'line ' + k);
+        assert(/line 49/.test(fs.readFileSync(L.LOG_FILE, 'utf8')), 'written');
+        assert(!fs.existsSync(L.LOG_DISK), 'nothing on the eMMC yet');
+        L.copyLog();
+        assert.strictEqual(fs.readFileSync(L.LOG_DISK, 'utf8'), fs.readFileSync(L.LOG_FILE, 'utf8'), 'the copy on the eMMC, whole');
+        assert(!fs.existsSync(L.LOG_DISK + '.tmp'), 'no temp file left');
+        // the head unit started again: RAM empty, the copy from the eMMC first, then on
+        const ram2 = tmp('ram2');
+        const L2 = load(ram2, data);
+        L2.fileLog('INFO', 'after the restart');
+        const t = fs.readFileSync(L2.LOG_FILE, 'utf8');
+        assert(/line 49/.test(t) && /after the restart$/m.test(t), 'the old log kept, the new line after it');
+        // no RAM to write in: the eMMC as before
+        const L3 = load('/nonexistent-dir/x', data);
+        assert.strictEqual(L3.LOG_FILE, L3.LOG_DISK, 'falls back to the eMMC');
+    }],
+);

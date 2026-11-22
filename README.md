@@ -199,7 +199,9 @@ builds it from this repository's `main` branch, so a merged change is its next v
 Each tab is drawn only as often as it needs (2.6.4; before, every tab was drawn 60 times a second with the GPU
 renderer, a still one too): Driving and Performance at Settings > Screen > **Gauges frame rate** (30 by default; 15 is
 the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. Once a
-minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log).
+minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log). The log
+itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes, rather than written
+to the storage line by line.
 
 ## Reporting a problem: the QR log
 

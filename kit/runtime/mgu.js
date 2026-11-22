@@ -37,7 +37,28 @@ const DATA_DIR = fs.existsSync(path.join(APP_ROOT, 'data')) ? path.join(APP_ROOT
 const RHMI_RES = path.join(APP_ROOT, 'rhmiData', 'resources');
 
 /* ---------------- logging: SDK logger (DLT) + small rotating file ---------------- */
-const LOG_FILE = path.join(DATA_DIR, SPEC.id + '.log');
+// The log is written in RAM (tmpfs, as the frames are: no eMMC write a line - 2.6.7 opened, wrote and closed the file on
+// the eMMC for every line, after a stat), with a copy on the eMMC at most every LOG_COPY_MS and as the app exits, so a
+// log survives the head unit starting again (then copied back to RAM first). Where RAM can't be written: the eMMC as before.
+const LOG_DISK = path.join(DATA_DIR, SPEC.id + '.log');
+const LOG_COPY_MS = 10 * 60 * 1000, LOG_MAX = 256 * 1024;
+const LOG_FILE = (() => {
+    const dir = path.join(process.env.MGU_LOG_RAM || '/tmp', 'mgu-log-' + SPEC.id + '-' + (process.getuid ? process.getuid() : 0));
+    try {
+        try { fs.mkdirSync(dir, 0o700); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+        const f = path.join(dir, SPEC.id + '.log');
+        if (!fs.existsSync(f)) { let old = ''; try { old = fs.readFileSync(LOG_DISK); } catch (e) { /* none yet */ } fs.writeFileSync(f, old); }
+        fs.accessSync(f, fs.constants ? fs.constants.W_OK : 2);
+        return f;
+    } catch (e) { return LOG_DISK; }
+})();
+let logSize = null, logDirty = false;
+/** The RAM log copied to the eMMC (written whole: a temp file renamed over the old one), when it changed. */
+function copyLog() {
+    if (LOG_FILE === LOG_DISK || !logDirty) return;
+    try { const tmp = LOG_DISK + '.tmp'; fs.writeFileSync(tmp, fs.readFileSync(LOG_FILE)); fs.renameSync(tmp, LOG_DISK); logDirty = false; } catch (e) { /* not writable (host preview) */ }
+}
+if (LOG_FILE !== LOG_DISK) { const t = setInterval(copyLog, LOG_COPY_MS); if (t.unref) t.unref(); }
 const RUN_TAG = Date.now().toString(36);
 // Drawn frames (the HMI screens' images without the GPU renderer, the home-screen widgets) are written to RAM, not to the
 // eMMC: /tmp is tmpfs (one mount for every process), and the HMI takes a frame from there as from the app's resource
@@ -81,9 +102,13 @@ function frameRefused(file, e) {
 }
 function fileLog(level, msg) {
     try {
-        const st = fs.existsSync(LOG_FILE) ? fs.statSync(LOG_FILE) : null;
-        if (st && st.size > 256 * 1024) fs.renameSync(LOG_FILE, LOG_FILE + '.1');
-        fs.appendFileSync(LOG_FILE, new Date().toISOString() + ' ' + level + ' ' + msg + '\n');
+        // (the size kept here: no stat a line)
+        if (logSize === null) { try { logSize = fs.statSync(LOG_FILE).size; } catch (e) { logSize = 0; } }
+        if (logSize > LOG_MAX) { fs.renameSync(LOG_FILE, LOG_FILE + '.1'); logSize = 0; }
+        const line = new Date().toISOString() + ' ' + level + ' ' + msg + '\n';
+        fs.appendFileSync(LOG_FILE, line);
+        logSize += Buffer.byteLength(line);
+        logDirty = true;
     } catch (e) { /* data dir not writable (host preview) */ }
 }
 // The SDK can swallow the first RHMI resource error and fail later with a misleading
@@ -110,14 +135,15 @@ const log = {};
 ['error', 'warn', 'info', 'debug'].forEach((lvl) => {
     log[lvl] = (...a) => {
         const msg = a.map((x) => (x && x.stack) ? x.stack : (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' ');
-        try { sdkLog[lvl](SPEC.id + ': ' + msg); } catch (e) {}
+        // BMW's system log (DLT) gets the warnings and errors only: every info line was a message to its daemon
+        if (lvl === 'warn' || lvl === 'error') { try { sdkLog[lvl](SPEC.id + ': ' + msg); } catch (e) {} }
         if (lvl !== 'debug' || process.env.MGU_DEBUG) fileLog(lvl.toUpperCase(), msg);
     };
 });
 
 // crashes otherwise only reach DLT; keep the reason next to the app's log
 process.on('uncaughtException', (e) => { fileLog('FATAL', 'uncaught: ' + (e && e.stack || e)); process.exit(1); });
-process.on('exit', (code) => fileLog(code ? 'FATAL' : 'INFO', 'exit code ' + code + ' rss=' + Math.round(process.memoryUsage().rss / 1048576) + 'MB'));
+process.on('exit', (code) => { fileLog(code ? 'FATAL' : 'INFO', 'exit code ' + code + ' rss=' + Math.round(process.memoryUsage().rss / 1048576) + 'MB'); copyLog(); });
 
 /* ---------------- settings (persisted in data/settings.json) ---------------- */
 class Settings {
