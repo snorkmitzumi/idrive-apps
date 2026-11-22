@@ -36,6 +36,7 @@ const { DidReader } = require('./kit/dids');
 const { Reads } = require('./reads');
 const { Perf, PerfDemo } = require('./perf');
 const { Seats } = require('./seats');
+const { probe } = require('./seatprobe');
 const { MView } = require('./mview');
 const ambientPage = require('./ambient_page');
 
@@ -110,6 +111,8 @@ mgu.run({
         const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         // easy entry: only a front door opening takes its seat to its easy entry position (seats.js doors()); back by hand
         const DOOR_FIELDS = { statusDoorSwitchDRD: 'driver front', statusDoorSwitchPSD: 'passenger front' };
+        // BMW's own seat functions, listened to (reading only): does the car let an app hear its memory buttons? (seatprobe.js)
+        const seatProbe = probe(ctx.signals, log);
         ctx.signals.watch('de.bmw.body.DoorsWindowsRoofMirrors', '1', { CentralLockingSystemAndPanelStatus: (v) => seats.doors(Object.keys(DOOR_FIELDS)
             .filter((k) => v && (v[k] === 1 || /_OFFEN$/.test(String(v[k])))).map((k) => DOOR_FIELDS[k])) }, log)
             .catch((e) => log.warn('doors: ' + (e && e.message || e)));
@@ -183,7 +186,7 @@ mgu.run({
             if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + '; ' + seatProbe.summary() + ')' : '')); resetLabel(); }
             return render();
         }
         ctx.onTab((i) => pick(i));

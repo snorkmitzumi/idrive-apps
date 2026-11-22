@@ -79,6 +79,10 @@ happens when the engine starts or stops (start-stop at a light). **Back** takes 
 - keeps every target inside the end stops the seat module has learned, runs every motor that has to move at once (fewer
   if the module turns one away), and stops each motor itself: the module keeps a motor running until it is told to stop.
 
+2.6.3 also listens (reading only) to BMW's own seat interfaces on the head unit: the memory buttons, the seat's memory
+status and the car's own easy entry setting. The log shows whether the car lets an app hear them; if it does, a later
+version can use the seat's own memory recall.
+
 ### M View
 
 <img src="docs/screens/combo_mview.png" alt="M View: the tyres, engine oil, coolant, gearbox oil, intake air, misfires per cylinder, fuel trims and timing" width="100%">
