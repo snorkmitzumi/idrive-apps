@@ -118,10 +118,10 @@ Settings > Screen > **Screen layout** picks one of three:
 | Layout | Looks like | Tabs | Reset, Settings |
 |---|---|---|---|
 | **Full screen** (default) | Combo draws the whole screen | in the header; Ambient's three pages in a side rail | a side rail on the left; Settings is the header's last tab |
-| **Map style** | BMW's map: no tabs, the header names the page | a left side bar | a right side bar |
+| **Map style** | BMW's map: none of the app's, the head unit's own top bar shows | a left side bar | a right side bar |
 | **Standard** | BMW's own title and bottom bar | in the page | BMW's bottom bar, hidden 5 s after the last touch |
 
-**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges, as on BMW's map. An open bar covers one column and dims the rest of the page.
+**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges or over the head unit's top bar, as on BMW's map. An open bar covers one column and dims the rest of the page.
 
 <img src="docs/screens/combo_map.png" alt="Map style: Driving over the whole height" width="100%">
 

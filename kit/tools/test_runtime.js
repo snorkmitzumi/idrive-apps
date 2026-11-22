@@ -121,6 +121,13 @@ test('map style (layout "map"): the full layout, no tabs in the header (it names
         assert(Math.abs(lx - rx) <= 2 && lx < 40, 'the cards as far from the left edge as from the right: ' + lx + ' / ' + rx);
         const cl = JSON.parse(t.d.gpu.claimed || '[]');
         assert(cl.some((q) => q.x * pl.scale + pl.ox <= 1 && q.y * pl.scale + pl.oy >= 70), 'the page claimed from the left edge: ' + t.d.gpu.claimed);
+        // 2.6.4: no header of the kit's over the HMI's top bar - nothing claimed there, the page's name not drawn
+        assert(!cl.some((q) => q.y * pl.scale + pl.oy < 40 && q.w > 1), 'the top bar left to the HMI: ' + t.d.gpu.claimed);
+        const texts = [], rec = t.d.chromeRec, tx = rec.text;
+        rec.text = function (str, ...rest) { texts.push(String(str)); return tx.call(this, str, ...rest); };
+        t.d._drawChrome(t.d.canvas(1600, 520));
+        rec.text = tx;
+        assert(texts.indexOf('M View') < 0 && texts.indexOf('Driving') < 0, 'no page name over the top bar: ' + texts.join(' | '));
         let opened = 0;
         t.d._click = (id) => { if (id === 'BTN_SETTINGS') opened++; };
         t.d.openSettings();
