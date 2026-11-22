@@ -287,7 +287,8 @@ for your own unit needs BMW's app SDK from it; see [KIT.md](KIT.md).
 
 **Releasing:** raise `version` in `apps/cockpit_combo/app.json` in a pull request, merge it, then publish a GitHub release
 tagged `v<version>` on `main`. The *Release package* workflow builds `cockpit_cockpit_combo@<version>.tgz` with
-`kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release. For an
+`kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release, with `mgu-store.json` and the icon
+(the title, description and icon the MGU Store shows for a release's app; without them it shows the bare id). For an
 earlier release, run that workflow by hand with its tag.
 
 ## How the seats were worked out
