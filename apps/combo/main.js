@@ -47,9 +47,16 @@ const TABS = ['Driving', 'Performance', 'Seats', 'M View'];
 // M View took its place, 2.4.0)
 const AMBIENT_TABS = ['Ambient', 'Animations', 'Modes'];
 const DRIVING = 0, PERF = 1, SEATS = 2, MVIEW = 3, AMBIENT = 4;
+// the tabs Settings > Tabs switches off (2.7.0; Driving always there): an app beside Combo doing the same job (Ambient
+// config, another seats app) gets it to itself, and an unused tab costs nothing - Seats off reads no seat and moves none
+// (no easy entry), Ambient off gives the lights back and leaves them alone (owner.js: another app of ours takes them)
+const TAB_KEYS = { [PERF]: 'tabPerformance', [SEATS]: 'tabSeats', [MVIEW]: 'tabMView', [AMBIENT]: 'tabAmbient' };
+const isOn = (settings, id) => !TAB_KEYS[id] || !settings || settings.get(TAB_KEYS[id]) !== false;
+const AMB_OFF_MS = 3000;             // Ambient switched off: the give-back's writes go out this long, then none at all
 
-/** The ambient light, without screens (and the start with them): Ambient config's service, without the strobe. */
-const background = (bg) => ambientPage.background(bg, { strobe: false });
+/** The ambient light, without screens (and the start with them): Ambient config's service, without the strobe; none with the Ambient tab off. */
+const ambientService = (bg) => ambientPage.background(bg, { strobe: false });
+const background = (bg) => (isOn(bg.settings, AMBIENT) ? ambientService(bg) : Promise.resolve(null));
 
 mgu.run({
     background,
@@ -69,13 +76,42 @@ mgu.run({
         let tab = DRIVING;
         let loop = null;                 // the frame loop (ctx.loop's handle), set at the end of start-up
 
-        // the ambient light: its tabs, over the service background() started (a failure leaves the other tabs working)
-        let amb = null, ambLights = null;
-        try {
-            const parts = ctx.background || await background(ctx);
-            ambLights = parts.lights;
-            amb = ambientPage.mount(ctx, parts, { strobe: false, names: AMBIENT_TABS, redraw: () => render() });
-        } catch (e) { log.error('ambient light: ' + (e && e.stack || e)); }
+        const enabled = (id) => isOn(settings, id);
+        // the ambient light: its tabs, over the service background() started (a failure leaves the other tabs working);
+        // with the Ambient tab off, none until it is switched on
+        let amb = null, ambLights = null, ambParts = ctx.background || null, ambOff = null;
+        async function ambientUp() {
+            if (amb || !enabled(AMBIENT)) return;
+            try {
+                if (!ambParts) ambParts = await ambientService(ctx);
+                ambLights = ambParts.lights;
+                amb = ambientPage.mount(ctx, ambParts, { strobe: false, names: AMBIENT_TABS, redraw: () => render() });
+            } catch (e) { log.error('ambient light: ' + (e && e.stack || e)); }
+        }
+        await ambientUp();
+        /** The Ambient tab switched on or off: off gives every light back to the car, then writes nothing and lets another app of ours have them. */
+        function ambientSwitched() {
+            clearTimeout(ambOff); ambOff = null;
+            if (enabled(AMBIENT)) {
+                if (!ambParts) return ambientUp().then(() => render()).catch((e) => log.error('ambient light: ' + e));
+                ambParts.lights.hold('off', false);
+                // (started again as a new one: an app of ours that took the lights meanwhile keeps them)
+                if (ambParts.owner && ambParts.ownerOff) { ambParts.ownerOff = false; ambParts.owner.since = Date.now(); ambParts.owner.start(); }
+                ambParts.control.apply();
+                log.info('ambient: switched on');
+                return null;
+            }
+            if (!ambParts) return null;
+            log.info('ambient: switched off, the lights given back to the car');
+            ambParts.lights.carColour();
+            ambOff = setTimeout(() => {
+                ambOff = null;
+                if (enabled(AMBIENT)) return;
+                ambParts.lights.hold('off', true).catch((e) => log.warn('ambient: hold: ' + e));
+                if (ambParts.owner && !ambParts.ownerOff) { ambParts.ownerOff = true; ambParts.owner.stop(); }
+            }, AMB_OFF_MS);
+            return null;
+        }
 
         watches(values, engine, sc, log).forEach(([iface, h]) => {
             // (the tyres also read every 10 s: BMW's own app only ever reads them, so a car may not notify them)
@@ -110,13 +146,16 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
-        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held),
+        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, enabled: () => enabled(SEATS), yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held),
             // while a seat moves the ambient light writes nothing (its red door blink took the link from the seat)
             quietOthers: (on) => (ambLights && ambLights.hold ? ambLights.hold('seats', on) : null) });
         // easy entry: only a front door opening takes its seat to its easy entry position (seats.js doors()); back by hand
         const DOOR_FIELDS = { statusDoorSwitchDRD: 'driver front', statusDoorSwitchPSD: 'passenger front' };
         // BMW's own seat functions, listened to (reading only): does the car let an app hear its memory buttons? (seatprobe.js)
-        const seatProbe = probe(ctx.signals, log);
+        // (only with the Seats tab on: asked once it is)
+        let seatProbe = null;
+        const probeSeats = () => { if (!seatProbe && enabled(SEATS)) seatProbe = probe(ctx.signals, log); };
+        probeSeats();
         ctx.signals.watch('de.bmw.body.DoorsWindowsRoofMirrors', '1', { CentralLockingSystemAndPanelStatus: (v) => seats.doors(Object.keys(DOOR_FIELDS)
             .filter((k) => v && (v[k] === 1 || /_OFFEN$/.test(String(v[k])))).map((k) => DOOR_FIELDS[k])) }, log)
             .catch((e) => log.warn('doors: ' + (e && e.message || e)));
@@ -126,12 +165,13 @@ mgu.run({
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
         values.onPut = (k, v) => {
-            if (perf.isDemo || !SAMPLE[k]) return;
+            if (perf.isDemo || !SAMPLE[k] || !enabled(PERF)) return;
             const now = Date.now(), L = values.live;
             if (k === 'speed') perf.speed(now, v);
             perf.sample({ rpm: L.rpm, speed: L.speed, gLong: L.gLong, torque: L.torque }, now);
         };
         setInterval(() => {
+            if (!enabled(PERF)) return;
             const now = Date.now();
             perf.demo(usingDemo());
             if (!perf.isDemo) { perf.idle(now); return; }
@@ -160,8 +200,11 @@ mgu.run({
         // with its pages as sub-tabs, so Settings fits in the header as its last tab; each tab's Reset is on its page and
         // the bottom bar is gone (2.4.6). Elsewhere (the HMI's own bar and title) as before.
         let owned = false;
-        const tabs = () => TABS.concat(!amb ? [] : owned ? [owned && ctx.mapStyle && ctx.mapStyle() ? 'Ambient · ' + ['Colour', 'Animations', 'Modes'][amb.page || 0] : 'Ambient'] : amb.tabs());
-        const sel = () => (tab === AMBIENT ? AMBIENT + (owned ? 0 : amb.page) : tab);
+        /** The tabs switched on, by id: Driving, Performance, Seats, M View (Ambient after them, ambOn()). */
+        const shownIds = () => [DRIVING, PERF, SEATS, MVIEW].filter(enabled);
+        const ambOn = () => !!amb && enabled(AMBIENT);
+        const tabs = () => shownIds().map((i) => TABS[i]).concat(!ambOn() ? [] : owned ? [owned && ctx.mapStyle && ctx.mapStyle() ? 'Ambient · ' + ['Colour', 'Animations', 'Modes'][amb.page || 0] : 'Ambient'] : amb.tabs());
+        const sel = () => { const ids = shownIds(); return tab === AMBIENT ? ids.length + (owned ? 0 : amb.page) : Math.max(0, ids.indexOf(tab)); };
         if (ctx.hideButton) ctx.hideButton('BTN_RESET');
 
         // the bar's Reset button, by tab: Reset peaks (Driving: the first press asks, a second one within CONFIRM_MS
@@ -188,16 +231,31 @@ mgu.run({
         function rateOf() { return tab === DRIVING || tab === PERF ? Number(settings.get('frameRate')) || 30 : tab === SEATS ? 10 : tab === MVIEW ? 5 : 0; }
         function setRate() { if (loop && loop.fps) loop.fps(rateOf()); }
 
-        /** A tab picked on the tab bar (touch or controller): i counts Driving, Performance, Seats, M View, then the ambient tabs. */
-        function pick(i) {
+        /** The tab at place i of the tab bar (the tabs switched on, then the ambient ones): { id, page }. */
+        function at(i) {
+            const ids = shownIds();
+            return i < ids.length ? { id: ids[i] } : ambOn() ? { id: AMBIENT, page: i - ids.length } : { id: DRIVING };
+        }
+        /** A tab picked, by id (page: which of the ambient tabs, on the HMI's own bar); one switched off: Driving. */
+        function pick(id, page) {
             const was = tab;
-            if (i >= AMBIENT && amb) { tab = AMBIENT; if (!owned) amb.select(i - AMBIENT); } else tab = i === PERF ? PERF : i === SEATS ? SEATS : i === MVIEW ? MVIEW : DRIVING;
+            if (!enabled(id) || (id === AMBIENT && !amb)) id = DRIVING;
+            tab = id;
+            if (tab === AMBIENT && !owned && page !== undefined) amb.select(page);
             if (was === AMBIENT && tab !== AMBIENT) amb.leave();
             if (tab === DRIVING && was !== DRIVING) reads.opened();          // back on Driving: a round at once
-            if (tab !== was) { setRate(); railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + '; ' + seatProbe.summary() + ')' : '')); resetLabel(); }
+            if (tab !== was) { setRate(); railOpen = null; if (owned && !mapped() && tab === AMBIENT && !railShown) { railShown = true; railOpen = 'L'; railT = Date.now(); } log.info('tab ' + (tab === AMBIENT ? AMBIENT_TABS[amb.page] : tabs()[sel()]) + (tab === SEATS ? ' (seats: ' + seats.summary() + '; ' + (seatProbe ? seatProbe.summary() : 'seat functions not asked') + ')' : '')); resetLabel(); }
             return render();
         }
-        ctx.onTab((i) => pick(i));
+        ctx.onTab((i) => { const a = at(i); return pick(a.id, a.page); });
+        // a tab switched on or off (Settings > Tabs): the one shown, switched off, gives way to Driving
+        settings.onChange((k) => {
+            if ([PERF, SEATS, MVIEW, AMBIENT].every((id) => TAB_KEYS[id] !== k)) return;
+            if (k === TAB_KEYS[SEATS]) { if (enabled(SEATS)) probeSeats(); else seats.off(); }
+            if (k === TAB_KEYS[AMBIENT]) ambientSwitched();
+            log.info('tabs: ' + tabs().join(', '));
+            if (!enabled(tab)) pick(DRIVING).catch((e) => log.error('tab', e)); else if (amb) amb.dirty();
+        });
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
         // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
@@ -248,10 +306,10 @@ mgu.run({
         }, { key: 'amb-' + k, primary: tab === AMBIENT && amb.page === k, sub }]);
         /** A bar's rows (null: a line between groups). */
         function railRows(side) {
-            if (!mapped()) return side !== 'L' ? [] : tab === AMBIENT && amb ? ambRows(false) : actionRows();
+            if (!mapped()) return side !== 'L' ? [] : tab === AMBIENT && ambOn() ? ambRows(false) : actionRows();
             if (side === 'L') {
-                const rows = TABS.map((n, i) => [n, () => { pick(i); return openRail(null); }, { key: 'nav-' + i, primary: tab === i }]);
-                if (amb) { rows.push(['Ambient', () => { pick(AMBIENT); return openRail(null); }, { key: 'nav-' + AMBIENT, primary: tab === AMBIENT, head: true }]); ambRows(true).forEach((r) => rows.push(r)); }
+                const rows = shownIds().map((i) => [TABS[i], () => { pick(i); return openRail(null); }, { key: 'nav-' + i, primary: tab === i }]);
+                if (ambOn()) { rows.push(['Ambient', () => { pick(AMBIENT); return openRail(null); }, { key: 'nav-' + AMBIENT, primary: tab === AMBIENT, head: true }]); ambRows(true).forEach((r) => rows.push(r)); }
                 return rows;
             }
             const rows = actionRows();
@@ -361,6 +419,6 @@ mgu.run({
             cpu0 = process.cpuUsage(); t0 = now; drawn = 0;
         }, 60000);
         resetLabel();
-        log.info('started' + (amb ? '' : ' (without the ambient light)'));
+        log.info('started' + (amb ? '' : enabled(AMBIENT) ? ' (without the ambient light)' : ' (the Ambient tab switched off)') + '; tabs: ' + tabs().join(', '));
     },
 });

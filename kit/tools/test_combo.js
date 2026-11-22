@@ -39,9 +39,15 @@ const fakeAmb = {
     select(i) { this.page = i; this.calls.push('select ' + i); }, tap(x, y) { this.calls.push('tap ' + x + ',' + y); },
     wants: () => true, leave() { this.calls.push('leave'); }, dirty() {}, original() { this.calls.push('original'); },
 };
+// the ambient service's parts main.js switches (Settings > Tabs > Ambient): each call kept in fakeAmb.calls
+const fakeParts = () => ({
+    lights: { hold: (k, on) => { if (k === 'off') fakeAmb.calls.push('hold off ' + on); return Promise.resolve(); }, carColour: () => fakeAmb.calls.push('carColour') },
+    control: { apply: () => fakeAmb.calls.push('apply') },
+    owner: { since: 0, start() { fakeAmb.calls.push('owner start'); }, stop() { fakeAmb.calls.push('owner stop'); } },
+});
 const stubs = {
     './kit/mgu': { run(a) { app = a; } },
-    './ambient_page': { background: async (bg, o) => { fakeAmb.calls.push('background ' + JSON.stringify(o)); return {}; },
+    './ambient_page': { background: async (bg, o) => { fakeAmb.calls.push('background ' + JSON.stringify(o)); return fakeParts(); },
         mount: (ctx, parts, o) => { fakeAmb.calls.push('mount ' + JSON.stringify({ strobe: o.strobe, names: o.names })); fakeAmb.page = 0; return fakeAmb; } },
     './kit/readonly-diag': { ReadOnlyDiag: FakeLink, MAX_DIDS: 8, seatMotors: (l) => (target, motor, action, pwm) => l.physical(target, 0x2E, [0xD7, 0x08, motor, action, pwm]) },
 };
@@ -130,7 +136,7 @@ const checks = [
         const others = fs.readdirSync(path.join(ROOT, 'apps')).filter((d) => d !== 'combo' && fs.existsSync(path.join(ROOT, 'apps', d, 'app.json')))
             .map((d) => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', d, 'app.json'), 'utf8')).loggingId);
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
-        const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
+        const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
             'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
@@ -760,6 +766,60 @@ checks.push(
         assert.strictEqual(SPEC.autostart, true, 'autostart: the ambient light runs with the app closed');
         assert(!SPEC.settings.some((x) => /^strobe|^police|showRate/.test(x.key)), 'no strobe settings');
     }],
+    ['2.7.0 tabs switched off (Settings > Tabs): gone from the tabs and the bars, the next tab at its place', async () => {
+        fakeAmb.calls = [];
+        // the platform's start without screens: Ambient off starts no ambient service (owner.js: no claim on the lights)
+        assert.strictEqual(await app.background({ settings: settingsOf({ tabAmbient: false }) }), null);
+        assert.deepStrictEqual(fakeAmb.calls, [], 'Ambient off: nothing of the ambient service started');
+        const b = await boot(tmp('tabs-off'), { settings: { tabSeats: false, tabAmbient: false } });
+        assert(!fakeAmb.calls.some((c) => /^background|^mount/.test(c)), 'Ambient off: not mounted: ' + fakeAmb.calls.join(' | '));
+        const t0 = await b.draw();
+        ['DRIVING', 'PERFORMANCE', 'M VIEW'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
+        assert(!t0.includes('SEATS') && !t0.includes('AMBIENT'), 'Seats and Ambient still tabs: ' + t0.join(' | '));
+        const t2 = await b.tab(2);
+        assert(t2.includes('Engine oil') && t2.includes('Misfires'), 'place 2 is M View now: ' + t2.join(' | '));
+        assert.strictEqual(b.rates[b.rates.length - 1], 5, 'M View drawn at its own rate');
+        // map style: the left bar without them
+        const m = await boot(tmp('tabs-off-map'), { map: true, settings: { tabSeats: false, tabAmbient: false, tabPerformance: false } });
+        await m.draw(); m.tilt('W');
+        const tl = await m.draw(), keys = (m.canvas().targets || []).map((q) => q.key);
+        assert(tl.includes('Driving') && tl.includes('M View') && !tl.includes('Seats') && !tl.includes('Performance') && !tl.includes('Colour'), tl.join(' | '));
+        assert(keys.indexOf('nav-3') >= 0 && keys.indexOf('nav-2') < 0 && keys.indexOf('nav-1') < 0, keys.join());
+        // their settings hidden with them
+        const S = settingsOf({ tabSeats: false, tabAmbient: false });
+        const shown = (k) => { const x = SPEC.settings.find((q) => q.key === k); return !x.when || Object.keys(x.when).every((w) => [].concat(x.when[w]).indexOf(S.get(w)) >= 0); };
+        assert(!shown('easyEntry') && !shown('follow') && shown('weight') && shown('theme'), 'the Seats and Ambient light groups hidden');
+    }],
+    ['2.7.0 tabs switched off and on while Combo runs: the tab shown gives way to Driving; Ambient off gives the lights back, then writes nothing', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('tabs-live'));
+        await b.tab(2);
+        b.settings.set('tabSeats', false);
+        const t = await b.draw();
+        assert(t.includes('GEAR · SHIFT AT') && !t.includes('SEATS'), 'Seats switched off while shown: Driving: ' + t.join(' | '));
+        b.settings.set('tabSeats', true);
+        assert((await b.draw()).includes('SEATS'), 'Seats back');
+        await b.tab(4);
+        b.settings.set('tabAmbient', false);
+        assert(fakeAmb.calls.indexOf('carColour') >= 0, 'the lights given back at once: ' + fakeAmb.calls.join(' | '));
+        assert(fakeAmb.calls.indexOf('hold off true') < 0, 'held only once the give-back is out');
+        const t4 = await b.draw();
+        assert(t4.includes('GEAR · SHIFT AT') && !t4.includes('AMBIENT'), 'Ambient switched off while shown: Driving: ' + t4.join(' | '));
+        await new Promise((r) => setTimeout(r, 3100));
+        assert(fakeAmb.calls.indexOf('hold off true') >= 0 && fakeAmb.calls.indexOf('owner stop') >= 0, 'then no writes, the lights free for another app: ' + fakeAmb.calls.join(' | '));
+        fakeAmb.calls = [];
+        b.settings.set('tabAmbient', true);
+        assert.deepStrictEqual(fakeAmb.calls, ['hold off false', 'owner start', 'apply'], 'on again: writing, claimed anew, the look put on');
+        assert((await b.draw()).includes('AMBIENT'), 'Ambient back');
+    }],
+    ['2.7.0 Ambient off at the start, switched on later: the service starts then', async () => {
+        fakeAmb.calls = [];
+        const b = await boot(tmp('amb-later'), { settings: { tabAmbient: false } });
+        b.settings.set('tabAmbient', true);
+        await new Promise((r) => setTimeout(r, 20));
+        assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0 && fakeAmb.calls.some((c) => /^mount/.test(c)), fakeAmb.calls.join(' | '));
+        assert((await b.draw()).includes('AMBIENT'));
+    }],
     ['2.0 #2 the diagnostic link reads only on the Driving tab', async () => {
         const b = await boot(tmp('reads'), { settings: { demo: 'off' } });
         link.available = true; link.ready = true;
@@ -1307,6 +1367,21 @@ checks.push(
         r = seatRig(); r.st.stuck = 2; r.mover.mem['6D'] = { '1': [32768 + 345, 32768 - 355, 32768 - 900, 32768 + 93, 32768 - 9] };
         const st = await r.mover.recall(0x6D, '1');
         assert(/LNV does not move/.test(st.why) && r.st.run.every((x) => !x), st.why);
+    }],
+    ['2.7.0 the Seats tab off: a door opening moves no seat, and a move under way stops', async () => {
+        const r = seatRig(), { st, mover, C } = r;
+        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
+        const { Seats } = appModule('seats');
+        const S2 = settingsOf({ tabSeats: false });
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: S2, enabled: () => S2.get('tabSeats') !== false });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found'; s.mover.mem = mover.mem; s.mover.sleep = mover.sleep;
+        const settle = async () => { for (let k = 0; k < 400 && (s.mover.run || k < 3); k++) await new Promise((res) => setImmediate(res)); await s.entryQueue; };
+        s.doors([]); s.doors(['driver front']); await settle();
+        assert.strictEqual(writes(st).length, 0, 'moved with the Seats tab off');
+        let ended = null;
+        s.mover.run = { addr: 0x6D, slot: 'E' };
+        s.off(); ended = s.mover.run.end;
+        assert(/Seats tab was switched off/.test(ended), 'a move under way stopped: ' + ended);
     }],
     ['2.6.2 easy entry: only a front door opening moves a seat (to its easy entry position); the engine never does; Back by hand', async () => {
         const r = seatRig(), { st, mover, C } = r;

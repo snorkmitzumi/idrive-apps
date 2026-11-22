@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.6.10.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.7.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Combo moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -28,7 +28,7 @@ with the MGU should work for the values they send. The seats are tested on a G26
 
 - [The tabs](#the-tabs)
 - [Screen layouts and controls](#screen-layouts-and-controls)
-- [Settings](#settings)
+- [Settings](#settings) (and [only the tabs you need](#only-the-tabs-you-need))
 - [Install](#install)
 - [What Combo reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
 - [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
@@ -77,7 +77,7 @@ end of its travel, or after 10 s. A press with the controller moves it for a mom
 Each seat has **memory 1 and 2**. Press **Save**, then a slot, to keep the seat's position there; press the slot to
 go back to it.
 
-**Easy entry** (Settings > Seats, on by default): press **Save**, then **Easy entry**, to keep the position for getting in
+**Easy entry** (Settings > Seats, on by default; off with the Seats tab, Settings > Tabs): press **Save**, then **Easy entry**, to keep the position for getting in
 and out. When a front door opens, its seat moves there, after keeping where it was; when the door is closed again, the seat
 goes back there. Only the door moves it: nothing happens when the engine starts or stops (start-stop at a light).
 **Back** does the same by hand. **Clear** (pressed twice)
@@ -121,7 +121,8 @@ taken from the source repo at build time.
 - **Signals:** the turn signals blink the door lines at an even pace of their own, and an open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
-first drives the lights and the other leaves them alone.
+first drives the lights and the other leaves them alone. To leave the lights to another app for good, switch Combo's
+Ambient tab off (Settings > Tabs, [below](#only-the-tabs-you-need)).
 
 ## Screen layouts and controls
 
@@ -155,10 +156,11 @@ Settings > Screen > **Screen layout** picks one of three:
 
 <img src="docs/screens/combo_settings.png" alt="Settings in groups" width="100%">
 
-Six groups:
+Seven groups:
 
 | Group | What it holds |
 |---|---|
+| **Tabs** | which tabs Combo has: Performance, Seats, M View and Ambient each switch off (Driving is always there) |
 | **Gauges** | engine type, redline, rev scale, boost and torque scales, power and boost sources, peak markers and hold, xDrive card, 48 V battery |
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
@@ -167,6 +169,17 @@ Six groups:
 | **Screen** | colour theme, layout, bottom bar (Standard), gauges frame rate, renderer, demo data |
 
 **QR log** is at the bottom of Settings (see below).
+
+### Only the tabs you need
+
+Settings > **Tabs** switches Performance, Seats, M View and Ambient off and on again, while Combo runs. A tab switched
+off is gone from the tab bar and the side bars, its settings are hidden, and it costs nothing:
+
+- **Seats off:** no seat is read and none moves. Easy entry is off too, so another seat app can have the seats.
+- **Ambient off:** Combo gives every light back to the car and then writes nothing to them. Another ambient app
+  (Ambient config, or IterioDev's) has them to itself. Switched off, the ambient light isn't started with the car either.
+- **Performance off:** the dyno and the drag timer stop sampling.
+- **M View off:** its reads are never made (they run only while the tab shows anyway).
 
 ## Install
 
@@ -195,7 +208,7 @@ builds it from this repository's `main` branch, so a merged change is its next v
   exception: the seat motors (below). It is used for the values the car doesn't send: front axle torque, battery
   details, gearbox oil, misfires, fuel trims, the seat positions.
 - **Reads only while the tab that needs them is on screen,** and none once the car is locked and left, so a parked car
-  can sleep.
+  can sleep. A tab switched off in Settings > Tabs reads nothing at all (Seats off: no door moves a seat either).
 - **The ambient light is the one thing written:** through the body module, as BMW's own menu does. *Original colour*
   gives the car its own colours back.
 - **The seat motors are the one diagnostic write:** `2E D7 08 <motor> <action> <power>` to 0x6D and 0x6E only (the
