@@ -6,8 +6,8 @@
  *   Driving      engine speed and boost, speed / power / torque, xDrive, the 48 V and 12 V batteries, in M Vitals'
  *                look (design: docs/superpowers/specs/2026-11-08-combo-screen-design.md); draw.js
  *   Performance  Virtual Dyno on the left half, Drag Timer on the right (perf.js)
- *   Seats        the driver seat's position from the car (seats.js; reading only for now: memory 1-3 and easy entry
- *                next, once a car's log shows the position reply)
+ *   Seats        both front seats' positions from their seat modules, memory 1-3 and easy entry (seats.js, seatmove.js:
+ *                standing only, the seat's own switches stop a move)
  *   M View       engine oil, coolant, gearbox oil and intake air temperatures, fuel trims and timing, misfires per cylinder
  *                (mview.js; read only while the tab shows)
  *   Ambient, Animations, Modes
@@ -31,7 +31,7 @@ const draw = require('./draw');
 const Demo = require('./demo');
 const { Values, PEAKS } = require('./values');
 const { watches } = require('./signals');
-const { ReadOnlyDiag } = require('./kit/readonly-diag');
+const { ReadOnlyDiag, seatMotors } = require('./kit/readonly-diag');
 const { DidReader } = require('./kit/dids');
 const { Reads } = require('./reads');
 const { Perf, PerfDemo } = require('./perf');
@@ -106,7 +106,8 @@ mgu.run({
         // the timer's clock runs with the tab hidden too, so a launch is caught from any tab
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
-        const seats = new Seats({ signals: ctx.signals, log, link, values, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
+        // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
+        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         // the M View tab: temperatures, fuel trims and timing, misfires; its reads only while the tab shows (mview.js)
         const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });

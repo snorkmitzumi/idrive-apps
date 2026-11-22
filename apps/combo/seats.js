@@ -1,6 +1,7 @@
 'use strict';
 /**
- * seats.js - Combo's Seats tab, stage 1: the driver seat's position, read from the car (reading only).
+ * seats.js - Combo's Seats tab: both front seats' positions from their seat modules, and memory 1-3 and easy entry
+ * (seatmove.js drives the motors: standing only, any seat switch stops it).
  *
  * BMW's own seat interface on the head unit (de.bmw.body.seat.SeatTargetAdjustment, from the unit's SOME/IP catalog):
  * getCurrentPosition(seat) -> each motor's position. Its setTargetPosition(seat, [axis, position]...) moves every
@@ -15,6 +16,7 @@
 const G = require('./kit/gauges');
 const { withAlpha } = require('./kit/canvas');
 const { SeatModules, AXES: MOD_AXES, LO, HI } = require('./seatmod');
+const { SeatMover } = require('./seatmove');
 
 const IFACE = 'de.bmw.body.seat.SeatTargetAdjustment', INSTANCE = '1';
 const DRIVER = 0, POLL_MS = 2000, CALL_MS = 3000;
@@ -43,6 +45,9 @@ class Seats {
         this.p = null; this.busy = false; this.last = 0; this.shapes = {};
         // the seat modules themselves over the diagnostic link (seatmod.js), when Combo has one
         this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
+        // memory 1-3 and easy entry: with the link's seat writer only (kit/readonly-diag.js seatMotors)
+        this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir }) : null;
+        this.saving = null;          // { addr, until }: Save pressed, the next slot pressed takes the position
     }
 
     /** While the tab shows: the position again every POLL_MS. */
@@ -110,7 +115,7 @@ class Seats {
 
     draw(cv, t) {
         G.panel(cv, t, 24, 44, 1552, 468, 'Seats');
-        cv.text('Reading only for now: each seat motor\'s position from the seat modules. Moving the seats comes next.', 1556, 80, 16, t.dim, { align: 'right' });
+        cv.text(this.mover ? 'Memory and easy entry only while the car stands still; any seat switch stops a move.' : 'Reading only: each seat motor\'s position from the seat modules.', 1556, 80, 16, t.dim, { align: 'right' });
         const m = this.modules;
         if (m && m.state === 'found') m.seats.slice(0, 2).forEach((seat, i) => this.drawSeat(cv, t, seat, 44 + i * 772, 132, 740));
         else if (this.state.available === true && this.state.axes.length) {
@@ -129,14 +134,15 @@ class Seats {
         // BMW's own seat interface on the head unit (SOME/IP): one line
         const s = this.state;
         const iface = s.available === true && s.axes.length ? 'BMW seat interface: ' + s.axes.length + ' motors' : s.available === false ? 'BMW seat interface: not available to apps' : 'BMW seat interface: ' + (s.why || 'asking');
-        cv.text(iface, 44, 492, 16, t.dim);
+        // (not with the seat modules found and memory under them: their notes take that line)
+        if (!(this.mover && m && m.state === 'found')) cv.text(iface, 44, 492, 16, t.dim);
     }
     /** One seat module: an axis a row, its counter on a bar (8192..57344), moving / switch pressed beside it. */
     drawSeat(cv, t, seat, x, y, w) {
         const ok = seat.init === 1, initTxt = seat.init === null ? '' : ok ? 'initialised' : seat.init === 0 ? 'not initialised' : 'initialisation not OK';
         cv.text('Seat module 0x' + seat.addr.toString(16).toUpperCase() + (seat.index ? '  ' + seat.index : ''), x, y + 14, 22, t.text, { font: 'bold' });
         if (initTxt) cv.text(initTxt, x + w, y + 14, 16, ok ? t.dim : t.warn, { align: 'right' });
-        const rows = MOD_AXES.map((a, i) => ({ a, i })).filter((r) => seat.pos[r.i] !== null || (seat.motor[r.i] !== undefined && seat.motor[r.i] !== 3 && seat.motor[r.i] !== null));
+        const rows = MOD_AXES.map((a, i) => ({ a, i })).filter((r) => (seat.pos[r.i] !== null && seat.pos[r.i] !== 32768) || (seat.motor[r.i] !== undefined && seat.motor[r.i] !== 3 && seat.motor[r.i] !== null)).slice(0, 6);
         const bx = x + 250, bw = w - 250 - 130;
         rows.forEach((r, k) => {
             const ry = y + 52 + k * 38, v = seat.pos[r.i], mv = seat.motor[r.i], sw = seat.sw[r.i];
@@ -148,6 +154,39 @@ class Seats {
             const mark = sw ? sw : mv === 1 ? '+' : mv === 2 ? '-' : '';
             if (mark) cv.text(mark, x + w, ry + 6, 20, t.warn, { align: 'right', font: 'bold' });
         });
+        if (this.mover) this.drawMemory(cv, t, seat, x, y + 280, w);
+    }
+
+    /** Memory 1-3, easy entry (back to the driving position once there), Save; while a seat moves: Stop. */
+    drawMemory(cv, t, seat, x, y, w) {
+        const mv = this.mover, a = seat.addr, slots = mv.slots(a), run = mv.run, H = 52;
+        const saving = this.saving && this.saving.addr === a && this.now() < this.saving.until;
+        if (run) {
+            if (run.addr === a) {
+                G.button(cv, t, x, y, w, H, 'Stop', () => { mv.stop('Stopped'); return null; }, { key: 'seat-stop-' + a, primary: true, color: t.crit });
+                cv.text(run.why, x, y + H + 28, 18, t.warn);
+            } else cv.text('The other seat is moving', x, y + 30, 18, t.dim);
+            return;
+        }
+        const no = mv.blocked(a);
+        const go = (slot) => () => {
+            if (this.saving && this.saving.addr === a && this.now() < this.saving.until) { this.saving = null; mv.save(a, slot).catch((e) => this.log.warn('seat save: ' + e)); return null; }
+            mv.recall(a, slot).catch((e) => this.log.warn('seat recall: ' + e));
+            return null;
+        };
+        // at the easy-entry position with a driving position kept: the button takes the seat back
+        const atEntry = slots.E && slots.R && seat.pos.slice(0, 5).every((v, i) => slots.E[i] === null || v === null || Math.abs(v - slots.E[i]) <= 12);
+        let bx = x;
+        ['1', '2', '3'].forEach((k) => {
+            bx += G.button(cv, t, bx, y, 96, H, k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 14;
+        });
+        const entry = saving ? 'Entry spot' : atEntry ? 'Back' : 'Easy entry';
+        bx += G.button(cv, t, bx, y, 210, H, entry, go(!saving && atEntry ? 'R' : 'E'), { key: 'seat-' + a + '-E', primary: saving, busy: !saving && (!(atEntry ? slots.R : slots.E) || !!no) }) + 14;
+        G.button(cv, t, bx, y, x + w - bx, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
+            { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined });
+        const last = mv.last && mv.last.addr === a ? mv.last : null;
+        const note = saving ? 'Press 1, 2, 3 or Entry spot to keep the seat\'s position there' : no ? no : last ? last.why : '';
+        if (note) cv.text(note, x, y + H + 28, 18, saving || (last && !last.ok && !no) ? t.warn : t.dim);
     }
 
 }

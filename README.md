@@ -58,11 +58,21 @@ The car's live values in four columns of the same size, in M Vitals' look:
 
 ### Seats
 
-<img src="docs/screens/combo_seats.png" alt="Seats: each motor's position from the driver's and passenger's seat modules" width="100%">
+<img src="docs/screens/combo_seats.png" alt="Seats: each motor's position from both front seat modules, with memory 1-3, easy entry and Save under each" width="100%">
 
-Reading only for now. Combo finds the front seat modules and shows each motor's position on its travel (forward /
-back, height, backrest, tilt, thigh support), whether it is moving, and the seat's own switches. On a G26 these are
-0x6D (driver) and 0x6E (passenger). Memory 1–3 and easy entry come once the motor command has been confirmed on a car.
+Combo finds the front seat modules and shows each motor's position on its travel (forward / back, height, backrest,
+tilt, headrest), whether it is moving, and the seat's own switches. On a G26 these are 0x6D (driver) and 0x6E
+(passenger).
+
+Each seat has **memory 1–3** and **easy entry** (2.6.0). Press **Save**, then a slot, to keep the seat's position
+there; press the slot to go back to it. **Easy entry** moves the seat to its saved entry spot and keeps the driving
+position, so the same button then says **Back**. A move:
+
+- runs only while the car stands still and isn't locked, on a seat module that reports itself initialised;
+- stops at once when any seat switch is pressed, the seat is moved by hand, the car rolls, or **Stop** is pressed;
+- keeps every target inside the end stops the seat module has learned, runs at most two motors at a time (in the
+  order the seat's own memory uses), and stops each motor itself: the module keeps a motor running until it is told
+  to stop.
 
 ### M View
 
@@ -159,14 +169,16 @@ builds it from this repository's `main` branch, so a merged change is its next v
   - UDS `22` (read by identifier);
   - OBD `01`, `06` and `09` (current data, on-board monitor results, vehicle information).
 
-  Anything else (sessions, writes, routines, clearing faults) is refused before it leaves the head unit. It is used
-  for the values the car doesn't send: front axle torque, battery details, gearbox oil, misfires, fuel trims, the seat
-  positions.
+  Anything else (sessions, writes, routines, clearing faults) is refused before it leaves the head unit, with one
+  exception: the seat motors (below). It is used for the values the car doesn't send: front axle torque, battery
+  details, gearbox oil, misfires, fuel trims, the seat positions.
 - **Reads only while the tab that needs them is on screen,** and none once the car is locked and left, so a parked car
   can sleep.
 - **The ambient light is the one thing written:** through the body module, as BMW's own menu does. *Original colour*
   gives the car its own colours back.
-- **The seats are read, never moved,** for now.
+- **The seat motors are the one diagnostic write:** `2E D7 08 <motor> <action> <power>` to 0x6D and 0x6E only (the
+  seat modules' `STEUERN ARG;MOTOR` job, as ISTA sends it: no session change, no security access), for the five motors
+  a G26's seats have. Every other write is refused before it leaves the head unit.
 
 ## Reporting a problem: the QR log
 
@@ -193,7 +205,7 @@ The code is in [`apps/combo/`](apps/combo). The ambient light's code is in
 | `main.js` | the tabs, the layouts, the side bars |
 | `draw.js` | the Driving tab |
 | `perf.js` | Performance |
-| `seats.js`, `seatmod.js` | Seats |
+| `seats.js`, `seatmod.js`, `seatmove.js` | Seats (`seatmove.js`: memory and easy entry) |
 | `mview.js` | M View |
 | `signals.js` | the car's signals |
 | `reads.js` | the diagnostic reads |

@@ -1,6 +1,7 @@
 'use strict';
 /**
- * readonly-diag.js - the head unit's diagnostic link (diag.js) restricted to READING.
+ * readonly-diag.js - the head unit's diagnostic link (diag.js) restricted to READING, with one narrow write
+ * (seat motors, below) handed out only on request.
  *
  * For apps that only look at the car (Live Data). The Diag underneath is private to this
  * module, and every request passes check() first, so nothing else can leave the head unit:
@@ -15,6 +16,13 @@
  * faults (14), security access (27), communication control (28), dynamic identifiers (2C),
  * writes (2E), I/O control (2F), routines (31), downloads (34-37), tester present (3E), DTC
  * settings (85), any functional request but 22 F1 50, and a physical request to 0xDF.
+ *
+ * One write, and only for whoever asks seatMotors(link) first (Combo's seat memory, apps/combo/seatmove.js):
+ *
+ *   0x2E D7 08 <motor> <action> <pwm>   a front seat motor run or stopped (FAS_G11 / BFS_G11 job STEUERN
+ *                   ARG;MOTOR), to 0x6D (driver) or 0x6E (passenger) only: motor 0-4 (SLV SHV LNV SNV KHV),
+ *                   action 0 stop / 1 plus / 2 minus, pwm 1-100 %. Nothing else in 2E passes, nor any other unit.
+ *   A stop is never dropped by cancel() and goes to a unit marked silent too.
  *
  * It also paces: one request at a time and at least gapMs between two (25 ms), a 1 s pause after a
  * unit answers busy (NRC 21), and a unit that didn't answer silentAfter requests in a row is skipped
@@ -38,6 +46,11 @@ const MAX_DIDS = 8;                   // identifiers in one 22 request
 const DISCOVER = Object.freeze([0xF1, 0x50]);
 const LINKS = new WeakMap();          // ReadOnlyDiag -> its Diag, out of reach of the app
 
+// the one write (see the top): seat motors, to the two front seat modules
+const SEAT_UNITS = Object.freeze([0x6D, 0x6E]);
+const SEAT_MOTORS = 5;                // SLV SHV LNV SNV KHV (STV LBV LKV: not fitted on the cars this is for)
+const GRANTED = new WeakSet();        // links whose seat writer was handed out (once each)
+
 const byte = (b) => Number.isInteger(b) && b >= 0 && b <= 0xFF;
 const show = (n) => (Number.isInteger(n) ? hex(n) : String(n));
 
@@ -52,6 +65,15 @@ function check(target, sid, data, functional) {
     if (functional && !(sid === 0x22 && data[0] === DISCOVER[0] && data[1] === DISCOVER[1])) {
         throw new Error('read-only: only 22 F1 50 may go to all units');
     }
+}
+
+/** Throws unless the bytes are exactly a seat motor command (see the top of this file). Exported for the tests. */
+function checkSeat(target, data) {
+    if (SEAT_UNITS.indexOf(target) < 0) throw new Error('seat motors: unit ' + show(target) + ' is not a front seat module');
+    if (!Array.isArray(data) || data.length !== 5 || data[0] !== 0xD7 || data[1] !== 0x08) throw new Error('seat motors: only 2E D7 08 <motor> <action> <pwm>');
+    if (!Number.isInteger(data[2]) || data[2] < 0 || data[2] >= SEAT_MOTORS) throw new Error('seat motors: bad motor ' + show(data[2]));
+    if (!Number.isInteger(data[3]) || data[3] < 0 || data[3] > 2) throw new Error('seat motors: bad action ' + show(data[3]));
+    if (!Number.isInteger(data[4]) || data[4] < 1 || data[4] > 100) throw new Error('seat motors: bad PWM ' + show(data[4]));
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -158,14 +180,14 @@ class ReadOnlyDiag {
         return Promise.reject(e);
     }
 
-    /** Run fn after the requests before it, at least gapMs after the last one ended. */
-    queue(fn) {
+    /** Run fn after the requests before it, at least gapMs after the last one ended (keep: not dropped by cancel()). */
+    queue(fn, keep) {
         const gen = this.gen;
         const run = async () => {
-            if (gen !== this.gen) return undefined;
+            if (!keep && gen !== this.gen) return undefined;
             const wait = Math.max(0, this.next - Date.now());
             if (wait) await sleep(wait);
-            if (gen !== this.gen) return undefined;
+            if (!keep && gen !== this.gen) return undefined;
             try { return await fn(); } finally { this.next = Math.max(this.next, Date.now() + this.gapMs); }
         };
         const p = this.chain.then(run, run);
@@ -174,4 +196,26 @@ class ReadOnlyDiag {
     }
 }
 
-module.exports = { ReadOnlyDiag, check, READ, NRC, MAX_DIDS };
+/**
+ * The seat writer, handed out once per link (a second ask throws): motor(target, motor, action, pwm) -> the unit's
+ * reply (6E D7 08 positive, 7F 2E nn refused) or null (none). Every command is checked by checkSeat() before it is queued.
+ */
+function seatMotors(link) {
+    if (!LINKS.has(link)) throw new Error('seat motors: not a diagnostic link');
+    if (GRANTED.has(link)) throw new Error('seat motors: already handed out');
+    GRANTED.add(link);
+    return (target, motor, action, pwm) => {
+        const d = [0xD7, 0x08, motor, action, pwm == null ? 100 : pwm];
+        try { checkSeat(target, d); } catch (e) { return link.blocked(e); }
+        const stop = action === 0;
+        return link.queue(async () => {
+            link.stats.sent++;
+            const uds = await LINKS.get(link).physical(target, 0x2E, d, 800,
+                (u) => (u[0] === 0x6E && u[1] === 0xD7 && u[2] === 0x08) || (u[0] === 0x7F && u[1] === 0x2E), { maxRetries: stop ? 6 : 2 });
+            if (uds) link.stats.replies++; else link.stats.missed++;
+            return uds || null;
+        }, stop);
+    };
+}
+
+module.exports = { ReadOnlyDiag, check, checkSeat, seatMotors, READ, NRC, MAX_DIDS, SEAT_UNITS };

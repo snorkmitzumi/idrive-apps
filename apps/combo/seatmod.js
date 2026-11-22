@@ -7,7 +7,7 @@
  *   22 D708  MOTOR         each motor's state, 8 x u8: 0 off, 1 plus, 2 minus, 3 not fitted / coded, 4 invalid
  *   22 D712  SCHALTER_SV   the seat's own switches, 16 x u8 (each axis plus, minus): 1 = pressed
  *   22 D704  INITIALISIERUNG_SITZ  first byte: 0 not initialised, 1 initialised, FF initialisation not OK
- * (2E D708 <motor> <STOP|PLUS|MINUS> <PWM %> drives a motor: not sent - this link only reads.)
+ * (2E D708 <motor> <STOP|PLUS|MINUS> <PWM %> drives a motor: sent only by seatmove.js, the seat memory.)
  *
  * Which units are seat modules: every unit is asked who it is (22 F1 50 to all), then 22 D702; the ones that answer
  * with the counters are seat modules (the address differs between cars). Each move is logged once it has settled ("seat 0x6D: SLV
@@ -44,7 +44,8 @@ class SeatModules {
 
     tick() {
         const now = this.now();
-        if (this.busy || !this.link || !this.link.available || this.values.live.left) return;
+        // (paused while seatmove.js drives a seat: it reads the positions itself, faster)
+        if (this.busy || this.paused || !this.link || !this.link.available || this.values.live.left) return;
         if (this.state === 'idle' || (this.state === 'none' && now - this.foundAt >= FIND_AGAIN_MS)) return this.run(() => this.find());
         if (this.state === 'found' && now - this.last >= POLL_MS) { this.last = now; return this.run(() => this.poll()); }
         return undefined;
