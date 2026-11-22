@@ -51,7 +51,7 @@ const { Owner } = require('./owner');
 
 const TABS = ['Colour', 'Animations', 'Driving modes', 'Favourites'];
 // the apps that host these tabs (owner.js names the one that has the lights)
-const PEER_NAMES = { ambient_config: 'The Ambient config app', cockpit_combo: 'The Cockpit app', combo: 'The Combo app (the old Cockpit)' };
+const PEER_NAMES = { ambient_config: 'The Ambient config app', cockpit_combo: 'The Cockpit app' };
 const { rows } = require('./modes_tab');
 const MODE_NAMES = { sport: 'Sport', sportPlus: 'Sport+', sportInd: 'Sport Individual', boost: 'XtraBoost', comfort: 'Comfort',
     comfortPlus: 'Comfort+', comfortInd: 'Comfort Individual', eco: 'Eco Pro', ecoPlus: 'Eco Pro+', ecoInd: 'Eco Pro Individual',

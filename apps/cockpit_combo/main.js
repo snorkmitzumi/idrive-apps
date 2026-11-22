@@ -38,7 +38,6 @@ const { Perf, PerfDemo } = require('./perf');
 const { Seats } = require('./seats');
 const { drawBar } = require('./rail');
 const { probe } = require('./seatprobe');
-const { oldCombo } = require('./oldcombo');
 const { MView } = require('./mview');
 const ambientPage = require('./ambient_page');
 
@@ -147,10 +146,7 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
-        // the old Combo (this app before 2.8.0, id "combo") still running: its easy entry and ours would answer one door
-        const old = oldCombo({ log });
-        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, enabled: () => enabled(SEATS),
-            blocked: () => (old.running() ? 'The old Combo app is running: easy entry is left to it. Uninstall Combo.' : null), yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held),
+        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, enabled: () => enabled(SEATS), yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held),
             // while a seat moves the ambient light writes nothing (its red door blink took the link from the seat)
             quietOthers: (on) => (ambLights && ambLights.hold ? ambLights.hold('seats', on) : null) });
         // easy entry: only a front door opening takes its seat to its easy entry position (seats.js doors()); back by hand
