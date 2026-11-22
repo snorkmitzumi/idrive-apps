@@ -1,0 +1,47 @@
+Combo - an app for the BMW MGU head unit (iDrive 7)
+Copyright (c) 2026 snorkmitzumi
+https://github.com/snorkmitzumi/idrive-apps
+
+Combo's own code is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE in this folder, or
+https://polyformproject.org/licenses/noncommercial/1.0.0). You may use, change and share it for any noncommercial
+purpose. Selling it, installing it for pay, or using it in a commercial product or service needs the author's
+written permission.
+
+Parts under other licences
+--------------------------
+Combo is built with the kit of cauliflowermossgrape/idrive7-apps and adapts code from that repository's apps. That
+code keeps its MIT licence, and anything taken from the upstream repository itself can be used under MIT:
+
+  - the kit runtime that ships with the app (kit/runtime);
+  - Ambient config's modules, included at build time from shared/ambient_config;
+  - the parts of draw.js, perf.js, mview.js, values.js, reads.js and demo.js adapted from M Vitals, Virtual Dyno and
+    Drag Timer (their look, sums, thresholds and demo laps).
+
+  MIT License
+
+  Copyright (c) 2026 cauliflowermossgrape
+  Copyright (c) 2026 小白151 (GitHub: JackieZ123430), Chinese translation
+  Copyright (c) 2026 snorkmitzumi, changes to the kit in this fork
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+  COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Not BMW
+-------
+BMW, iDrive, ISTA and the car's own software, fonts and texts belong to BMW AG. Combo is an unofficial project, not
+made, endorsed or supported by BMW. No BMW software, SDK, ISTA files or ISTA traces are part of it.
+
+No warranty
+-----------
+Combo moves the front seats with their own motors and writes to the ambient light. It is provided as is, without
+warranty of any kind. You use it on your own car at your own risk.

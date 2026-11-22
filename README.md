@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Driving data, performance timing, engine health, seats and the ambient light: one app for the BMW MGU head unit (iDrive 7).</b><br>
-  Drawn by its own GPU renderer at 60 fps; reads the car without changing anything in it.
+  Drawn by its own GPU renderer. It reads the car; the only things it changes are the seat positions and the ambient light.
 </p>
 
 <p align="center">
@@ -15,7 +15,12 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.5.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP).
+**Version 2.6.10.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
+
+> **Combo moves the front seats with their own motors.** It does this only while the car stands still, and stops at
+> once when a seat switch is pressed. It comes without warranty: you use it on your own car at your own risk. Not made
+> or supported by BMW.
 
 ---
 
@@ -28,6 +33,8 @@ app) is in [KIT.md](KIT.md).
 - [What Combo reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
 - [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
 - [Development](#development)
+- [How the seats were worked out](#how-the-seats-were-worked-out)
+- [Thanks](#thanks)
 - [Credits and licences](#credits-and-licences)
 
 ---
@@ -83,7 +90,7 @@ deletes the seat's saved positions. A move:
   at a time (it stops the last when the next starts) is found out on the first move and then gets one motor after the
   other, each straight to its target.
 
-2.6.3 also listens (reading only) to BMW's own seat interfaces on the head unit. On a G26 the car doesn't offer
+Combo also listens (reading only) to BMW's own seat interfaces on the head unit. On a G26 the car doesn't offer
 BMW's seat functions (`SeatFunction`: the memory buttons, the seat module's own recall) to apps, so Combo moves the
 motors itself. While a seat moves, the ambient light holds its writes: a door's red blink would otherwise crowd the seat
 off the diagnostic link.
@@ -146,17 +153,18 @@ Settings > Screen > **Screen layout** picks one of three:
 
 ## Settings
 
-<img src="docs/screens/combo_settings.png" alt="Settings in five groups" width="100%">
+<img src="docs/screens/combo_settings.png" alt="Settings in groups" width="100%">
 
-Five groups:
+Six groups:
 
 | Group | What it holds |
 |---|---|
 | **Gauges** | engine type, redline, rev scale, boost and torque scales, power and boost sources, peak markers and hold, xDrive card, 48 V battery |
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
+| **Seats** | easy entry when a front door opens (on by default) |
 | **Units** | speed, pressure, power, torque, temperature |
-| **Screen** | colour theme, layout, bottom bar (Standard), renderer, demo data |
+| **Screen** | colour theme, layout, bottom bar (Standard), gauges frame rate, renderer, demo data |
 
 **QR log** is at the bottom of Settings (see below).
 
@@ -228,7 +236,8 @@ The code is in [`apps/combo/`](apps/combo). The ambient light's code is in
 | `main.js` | the tabs, the layouts, the side bars |
 | `draw.js` | the Driving tab |
 | `perf.js` | Performance |
-| `seats.js`, `seatmod.js`, `seatmove.js` | Seats (`seatmove.js`: memory and easy entry) |
+| `seats.js`, `seatmod.js`, `seatmove.js`, `seatprobe.js` | Seats (`seatmove.js`: memory and easy entry; `seatprobe.js`: BMW's seat interfaces, read only) |
+| `rail.js` | the side bars in map style |
 | `mview.js` | M View |
 | `signals.js` | the car's signals |
 | `reads.js` | the diagnostic reads |
@@ -252,13 +261,44 @@ for t in kit/tools/test_*.js; do node "$t" | tail -1; done
 The head unit runs Node 8: no `?.`, `??`, object spread, `catch {` or `.finally` in the app's code. Building a package
 yourself needs BMW's app SDK from your own unit; see [KIT.md](KIT.md).
 
+## How the seats were worked out
+
+The seat modules' requests were found by watching BMW's workshop software drive the seat motors, then tested on the
+car: which reads give the positions and end stops, the one motor command, what the module does with it (one motor at
+a time, a motor runs until it is stopped), and which requests must never be sent. The write-up is
+[docs/seats-ista-findings.md](docs/seats-ista-findings.md). No BMW files or traces are in this repository.
+
+## Thanks
+
+Combo stands on other people's work. Thank you to everyone behind these projects:
+
+| Project | What Combo uses from it |
+|---|---|
+| [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps) | the upstream of this fork: the kit (runtime, renderer, build tools), Ambient config, and M Vitals, Virtual Dyno and Drag Timer, the source of the Driving, Performance and M View tabs. Thanks to cauliflowermossgrape and every contributor there |
+| [cauliflowermossgrape/idrive7-8-ssh-root](https://github.com/cauliflowermossgrape/idrive7-8-ssh-root) | root access and the SSH key the kit's deploy scripts use |
+| [cauliflowermossgrape/idrive7-privacy-audit](https://github.com/cauliflowermossgrape/idrive7-privacy-audit) | what the stock head unit sends and stores, the background for KIT.md |
+| [robertnisipeanu/mgu-store](https://github.com/robertnisipeanu/mgu-store) | the MGU Store that installs Combo, and mgu-render, the GPU renderer in `kit/renderd/` (Robert Nisipeanu and IterioDev) |
+| [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/) by emdzej | the seat modules' identifiers and their names (FAS_G11 / BFS_G11) |
+| [JackieZ123430/idrive7-apps-cn](https://github.com/JackieZ123430/idrive7-apps-cn) | the kit's Simplified Chinese translation (小白151) |
+| [Fieldistor/idrive7-apps](https://github.com/Fieldistor/idrive7-apps), [rubenrios/idrive7-apps](https://github.com/rubenrios/idrive7-apps) | the kit's Russian and Spanish translations |
+| [ozkl/doomgeneric](https://github.com/ozkl/doomgeneric), [freedoom/freedoom](https://github.com/freedoom/freedoom) | Doom, kept in `third_party/` from the upstream kit |
+| [Barlow](https://github.com/jpt/barlow), [Noto CJK](https://github.com/notofonts/noto-cjk) (via [google/fonts](https://github.com/google/fonts)), Ubuntu font | the kit's fonts |
+
 ## Credits and licences
 
+The licences differ by part; [NOTICE.md](NOTICE.md) has the full list.
+
+- **Combo** (`apps/combo/`): © 2026 snorkmitzumi, [PolyForm Noncommercial 1.0.0](apps/combo/LICENSE). Free for any
+  noncommercial use: your own car, study, a hobby. Selling it, charging to install it, or using it in a product needs
+  written permission; ask in the repository's issues.
+- **The seat findings** ([docs/seats-ista-findings.md](docs/seats-ista-findings.md)): © 2026 snorkmitzumi,
+  [CC BY-NC 4.0](LICENSES/CC-BY-NC-4.0.txt).
 - **Kit, renderer and source apps:** [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps),
   MIT licence (see [LICENSE](LICENSE)). Combo is built on its kit and takes Ambient config's code from it. M Vitals,
-  Virtual Dyno and Drag Timer are the source of its Driving and Performance tabs.
+  Virtual Dyno and Drag Timer are the source of its Driving and Performance tabs. That code stays MIT
+  ([apps/combo/NOTICE](apps/combo/NOTICE)). The GPU renderer in `kit/renderd/` is GPL-3.0-or-later, Doom GPL-2.0.
 - **Seat module identifiers:** from the public [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/)
   (FAS_G11 / BFS_G11).
 - **No code** from IterioDev's apps (PolyForm Strict) is used.
-- BMW, iDrive and the car's own software, fonts and texts belong to BMW. This is an unofficial project, not affiliated
-  with BMW. Use it at your own risk.
+- BMW, iDrive, ISTA and the car's own software, fonts and texts belong to BMW. This is an unofficial project, not
+  affiliated with BMW. Use it at your own risk.
