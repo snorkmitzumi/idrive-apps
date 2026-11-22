@@ -271,6 +271,9 @@ node kit/tools/test_runtime.js
 for t in kit/tools/test_*.js; do node "$t" | tail -1; done
 ```
 
+`main` changes only through pull requests, for everyone: both test jobs (on Node 8 and the synthetic checks) run on
+every pull request and must pass before it can be merged. Fork the repository and open a pull request to contribute.
+
 The head unit runs Node 8: no `?.`, `??`, object spread, `catch {` or `.finally` in the app's code. Building a package
 yourself needs BMW's app SDK from your own unit; see [KIT.md](KIT.md).
 
