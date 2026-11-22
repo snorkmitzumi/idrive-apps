@@ -1233,8 +1233,9 @@ checks.push(
         await l.init();
         const motor = R.seatMotors(l);
         assert.throws(() => R.seatMotors(l), /already handed out/, 'a second writer');
-        await assert.rejects(motor(0x6F, 0, 1, 100), /not a front seat module/);
-        await assert.rejects(motor(0x6D, 7, 1, 100), /bad motor/);
+        // (a function, not the promise: Node 8's assert.rejects takes only that - the car's Node, the CI's node8-runtime job)
+        await assert.rejects(() => motor(0x6F, 0, 1, 100), /not a front seat module/);
+        await assert.rejects(() => motor(0x6D, 7, 1, 100), /bad motor/);
         assert.strictEqual(sent.length, 0, 'nothing refused was sent');
         const go = motor(0x6D, 0, 1, 100), read = l.read(0x6D, 0xD702), stop = motor(0x6D, 0, 0, 100);
         l.cancel();
