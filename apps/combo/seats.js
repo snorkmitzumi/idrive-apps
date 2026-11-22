@@ -57,6 +57,7 @@ class Seats {
         // the seat modules themselves over the diagnostic link (seatmod.js), when Combo has one
         this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
         // memory 1-3 and easy entry: with the link's seat writer only (kit/readonly-diag.js seatMotors)
+        this.settings = o.settings || null; this.values = o.values || { live: {} };
         this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir }) : null;
         this.saving = null;          // { addr, until }: Save pressed, the next slot pressed takes the position
         this.holds = []; this.holding = null;
@@ -130,7 +131,8 @@ class Seats {
         cv.text(this.mover ? 'Only while the car stands still. The seat\'s own switches stop any move.' : 'Reading only: each seat motor\'s position from the seat modules.', 1556, 80, 16, t.dim, { align: 'right' });
         const m = this.modules;
         this.holds = [];                 // the arrows drawn this frame, for touch()
-        if (m && m.state === 'found') m.seats.slice(0, 2).forEach((seat, i) => this.drawSeat(cv, t, seat, 44 + i * 772, 118, 740));
+        // (a seat module easy entry took at its usual address shows too, before the search)
+        if (m && (m.state === 'found' || m.seats.length)) m.seats.slice(0, 2).forEach((seat, i) => this.drawSeat(cv, t, seat, 44 + i * 772, 118, 740));
         else if (this.state.available === true && this.state.axes.length) {
             // no seat module found, but BMW's interface answers: its positions
             this.state.axes.forEach((ax, i) => {
@@ -148,7 +150,7 @@ class Seats {
         const s = this.state;
         const iface = s.available === true && s.axes.length ? 'BMW seat interface: ' + s.axes.length + ' motors' : s.available === false ? 'BMW seat interface: not available to apps' : 'BMW seat interface: ' + (s.why || 'asking');
         // (not with the seat modules found and memory under them: their notes take that line)
-        if (!(this.mover && m && m.state === 'found')) cv.text(iface, 44, 492, 16, t.dim);
+        if (!(this.mover && m && (m.state === 'found' || m.seats.length))) cv.text(iface, 44, 492, 16, t.dim);
     }
     /**
      * One seat: a side view of it (front to the left) whose parts follow the seat's positions on their learned travel,
@@ -161,7 +163,8 @@ class Seats {
         const no = mv ? mv.blocked(a) : null, last = mv && mv.last && mv.last.addr === a ? mv.last : null;
         const saving = this.saving && this.saving.addr === a && this.now() < this.saving.until;
         const note = seat.init !== null && seat.init !== 1 ? 'The seat is not initialised' : run && run.addr === a ? (run.slot === 'hold' ? 'Moving while you hold' : run.why)
-            : run ? 'The other seat is moving' : saving ? 'Press 1, 2, 3 or Entry spot to keep the position there' : no || (last && last.why && last.why !== 'Let go' ? last.why : mv ? 'Hold an arrow to move the seat' : '');
+            : run ? 'The other seat is moving' : saving ? 'Press 1, 2 or 3 to keep the seat\'s position there' : no || (last && last.why && last.why !== 'Let go' ? last.why
+                : mv && this.easyEntry() && !mv.slots(a)['3'] ? 'Save Memory 3: the seat moves there when its door opens' : mv ? 'Hold an arrow to move the seat' : '');
         cv.text(note, x, y + 40, 16, (run && run.addr === a) || saving || (last && !last.ok && !no && !run) || (seat.init !== null && seat.init !== 1) ? t.warn : t.dim);
         const cx = x + 340, fy = y + 306;
         this.drawPicture(cv, t, seat, cx, fy);
@@ -259,7 +262,7 @@ class Seats {
         return true;
     }
 
-    /** Memory 1-3, easy entry (Back once there, to the driving position), Save; while this seat goes to a position: Stop. */
+    /** Memory 1-3 (3: the easy entry position, setting easyEntry), Back after easy entry, Save; while this seat goes to a position: Stop. */
     drawMemory(cv, t, seat, x, y, w) {
         const mv = this.mover, a = seat.addr, slots = mv.slots(a), run = mv.run, H = 46;
         const saving = this.saving && this.saving.addr === a && this.now() < this.saving.until;
@@ -273,16 +276,46 @@ class Seats {
             mv.recall(a, slot).catch((e) => this.log.warn('seat recall: ' + e));
             return null;
         };
-        // at the easy-entry position with a driving position kept: the button takes the seat back
-        const atEntry = slots.E && slots.R && seat.pos.slice(0, 5).every((v, i) => slots.E[i] === null || v === null || Math.abs(v - slots.E[i]) <= 12);
+        const entry = this.easyEntry();
         let bx = x;
         ['1', '2', '3'].forEach((k) => {
-            bx += G.button(cv, t, bx, y, 80, H, k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
+            const label = k === '3' && entry ? '3 Entry' : k;
+            bx += G.button(cv, t, bx, y, k === '3' && entry ? 150 : 80, H, label, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
         });
-        const entry = saving ? 'Entry spot' : atEntry ? 'Back' : 'Easy entry';
-        bx += G.button(cv, t, bx, y, 190, H, entry, go(!saving && atEntry ? 'R' : 'E'), { key: 'seat-' + a + '-E', primary: saving, busy: !saving && (!(atEntry ? slots.R : slots.E) || !!no) }) + 12;
+        // after easy entry: back to where the seat was (also by itself once the engine starts)
+        if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 130, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 12;
         G.button(cv, t, bx, y, 130, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
             { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run });
+    }
+
+    /** Setting easyEntry (on unless switched off): a front door opened moves its seat to Memory 3. */
+    easyEntry() { return !this.settings || this.settings.get('easyEntry') !== false; }
+
+    /**
+     * The doors open now (DoorsWindowsRoofMirrors, as the ambient light reads them): a front door that just opened takes
+     * its seat to the entry position (Memory 3) while the engine is off; the seat modules found first.
+     */
+    doors(open) {
+        // (the first report, as Combo starts: a door open already then did not just open)
+        const first = this.open === undefined, was = this.open || [];
+        this.open = open || [];
+        if (first) return;
+        if (!this.mover || !this.easyEntry() || this.engineOn()) return;
+        [['driver front', 0x6D], ['passenger front', 0x6E]].forEach(([d, a]) => {
+            if (this.open.indexOf(d) < 0 || was.indexOf(d) >= 0) return;
+            this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.entry(a)).catch((e) => this.log.warn('easy entry: ' + e));
+        });
+    }
+    engineOn() { const L = this.values && this.values.live || {}; return typeof L.rpm === 'number' && L.rpm > 300 && this.now() - (L.rpmT || 0) < 3000; }
+    /** Each half second (main.js): the engine started after easy entry - the seats back to where they were. */
+    watchEngine() {
+        const on = this.engineOn(), was = this.wasOn;
+        this.wasOn = on;
+        if (!this.mover || !on || was) return;
+        [0x6D, 0x6E].forEach((a) => {
+            if (!this.mover.entered(a)) return;
+            this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.back(a)).catch((e) => this.log.warn('easy entry back: ' + e));
+        });
     }
 
 }
