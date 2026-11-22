@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.6.6",
+  "version": "2.6.7",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -678,7 +678,7 @@
     {
       "key": "easyEntry",
       "group": "Seats",
-      "label": "Easy entry: a front door opened moves its seat to its easy entry position (Back on the Seats tab returns it)",
+      "label": "Easy entry: a front door opened moves its seat to its easy entry position, closed again moves it back",
       "type": "bool",
       "default": true
     },
