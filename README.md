@@ -58,7 +58,7 @@ The car's live values in four columns of the same size, in M Vitals' look:
 
 ### Seats
 
-<img src="docs/screens/combo_seats.png" alt="Seats: both front seats drawn from the side, arrows by each part, memory 1-3, easy entry and Save under each" width="100%">
+<img src="docs/screens/combo_seats.png" alt="Seats: both front seats drawn from the side, arrows by each part, memory 1 and 2, Easy entry, Back and Save under each" width="100%">
 
 Combo finds the front seat modules (0x6D driver, 0x6E passenger on a G26) and draws each seat from the side: its
 parts sit where the seat really is on its travel (forward / back, height, backrest, tilt, headrest), and a part that
@@ -67,18 +67,17 @@ moves lights up, also when the seat's own switches move it.
 **Hold an arrow** by a part and that motor moves while you hold it; it stops the moment you let go or slide off, at the
 end of its travel, or after 10 s. A press with the controller moves it for a moment.
 
-Each seat has **memory 1–3**. Press **Save**, then a slot, to keep the seat's position there; press the slot to go
-back to it.
+Each seat has **memory 1 and 2**. Press **Save**, then a slot, to keep the seat's position there; press the slot to
+go back to it.
 
-**Easy entry** (2.6.1, Settings > Seats, on by default): Memory 3 is the entry position. When a front door opens with
-the engine off, its seat moves to Memory 3, after keeping where it was. When the engine starts, the seat goes back
-there. **Back** does the same by hand. Nothing moves until Memory 3 has been saved for that seat. A move:
+**Easy entry** (Settings > Seats, on by default): press **Save**, then **Easy entry**, to keep the position for getting in
+and out. When a front door opens, its seat moves there, after keeping where it was. Only a door opening moves it: nothing
+happens when the engine starts or stops (start-stop at a light). **Back** takes it back to where it was. A move:
 
-- runs only while the car stands still and isn't locked, on a seat module that reports itself initialised;
+- runs only while the car stands still, on a seat module that reports itself initialised;
 - stops at once when any seat switch is pressed, the seat is moved by hand, the car rolls, or **Stop** is pressed;
-- keeps every target inside the end stops the seat module has learned, runs at most two motors at a time (in the
-  order the seat's own memory uses), and stops each motor itself: the module keeps a motor running until it is told
-  to stop.
+- keeps every target inside the end stops the seat module has learned, runs every motor that has to move at once (fewer
+  if the module turns one away), and stops each motor itself: the module keeps a motor running until it is told to stop.
 
 ### M View
 

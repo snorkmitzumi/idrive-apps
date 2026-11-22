@@ -18,18 +18,18 @@
  * every round, the motors every other one, the switches every fourth.
  *
  * The rules:
- *   - only standing (speed known and at most MAX_KMH), the car not locked and left, the seat initialised, its end
+ *   - only standing (speed known and at most MAX_KMH), the seat initialised, its end
  *     stops known, no motor running when it starts
  *   - each target kept MARGIN counts inside the learned end stops
- *   - at most two motors at once, in the module's own recall order (fore / aft with the backrest, then tilt, height,
- *     headrest); a motor is stopped its speed times the time a round takes before the target, corrected PASSES times
+ *   - every motor that has to move at once, straight to the target (fewer if the module turns one away); the last stretch
+ *     timed from the motor's speed, short moves as one timed pulse that learns from how far it went; PASSES corrections
  *   - a seat switch or a motor this run didn't start (the driver's own) ends the run at once: their switches win
  *
- * Easy entry (setting easyEntry): Memory 3 is the entry position. entry(addr) - the seat's door opened - keeps where the
- * seat is as 'R' and takes it to Memory 3; back(addr) - the engine started, or Back pressed - takes it back to 'R'.
+ * Easy entry (setting easyEntry): its own saved position ('E'). entry(addr) - the seat's door opened - keeps where the
+ * seat is as 'R' and takes it to the easy entry position; back(addr) - Back pressed, nothing else - takes it back to 'R'.
  *
  *   const m = new SeatMover({ motor, modules, values, log, now, sleep, dataDir })
- *   m.recall(addr, slot)     slot '1' '2' '3' or 'R' (the position before easy entry)
+ *   m.recall(addr, slot)     slot '1' '2', 'E' (easy entry) or 'R' (the position before easy entry)
  *   m.entry(addr) / m.back(addr) / m.entered(addr)
  *   m.save(addr, slot)       the seat's position now into a slot
  *   m.hold(addr, axis, dir)  one motor while a control is held (dir PLUS / MINUS): it runs until release(), at most
@@ -49,11 +49,12 @@ const POS = 0xD702, MOTOR = 0xD708, SWITCH = 0xD712, INIT = 0xD704;
 const STOP = 0, PLUS = 1, MINUS = 2, PWM = 100;
 const FITTED = 5;                    // SLV SHV LNV SNV KHV: the motors a G26's seats have (STV LBV LKV: 03, not fitted)
 const ORDER = [0, 2, 3, 1, 4];       // SLV, LNV, SNV, SHV, KHV: the module's own recall order (two at once)
-const AT_ONCE = 2;
+const AT_ONCE = 5;                   // every motor that has to move, at once (2.6.1's two at a time looked like a replay of
+                                     // the driver's own steps); fewer when the module turns one away (atOnce, learned)
 const TOL = 4;                       // counts: at the target
 const MARGIN = 3;                    // counts kept from a learned end stop (a G26 memory position was 6 from one)
 const LEAD_S = 0.12;                 // at least this many seconds of a motor's speed: where it is stopped before the target
-const PASSES = 3;                    // corrections of an axis that stopped short or went past
+const PASSES = 4;                    // corrections of an axis that stopped short or went past
 const START_MS = 1500;               // a motor that hasn't moved MOVED counts by then: something holds it
 const MOVED = 3;
 const SPEEDS = [38, 62, 59, 40, 80]; // counts / s, each motor as measured on a G26 (until this seat's own are measured)
@@ -71,8 +72,8 @@ const SETTLE_MS = 300;
 const RECENT_MS = 700;               // a motor stopped this long ago may still read as running
 const FRESH_MS = 1500;               // the seat modules' last reads this recent: a hold starts from them, at once
 const TRIES = 4;                     // a motor command turned away: sent again this often
-const SLOTS = ['1', '2', '3', 'R'];
-const ENTRY = '3';                   // easy entry: the position of Memory 3
+const SLOTS = ['1', '2', 'E', 'R'];
+const ENTRY = 'E';                   // easy entry: its own saved position (2.6.1 used Memory 3: taken over)
 const HOLD_MS = 10000;               // a control held longer: stopped (a lost "finger up" can't run a motor for long)
 
 const A = (a) => '0x' + hex(a);
@@ -87,10 +88,19 @@ class SeatMover {
         this.file = o.dataDir ? path.join(o.dataDir, 'seatmem.json') : null;
         this.mem = {};
         try { this.mem = JSON.parse(fs.readFileSync(this.file, 'utf8')) || {}; } catch (e) { /* none saved yet */ }
-        // (2.6.0 kept an entry position of its own, 'E': Memory 3 is that now)
-        Object.keys(this.mem).forEach((k) => { if (this.mem[k] && this.mem[k].E) delete this.mem[k].E; });
+        // (2.6.1: Memory 3 was the entry position - it is Easy entry's own now, and there is no Memory 3)
+        Object.keys(this.mem).forEach((k) => { const m = this.mem[k]; if (m && m['3']) { if (!m.E) m.E = m['3']; delete m['3']; } });
         this.run = null; this.last = null;
         this.speeds = {};            // address -> each motor's speed as measured in this seat's moves (counts / s)
+        this.gains = {};             // address -> each motor's pulse time per count, as the pulses moved it (1: as its speed says)
+        this.atOnce = {};            // address -> motors the module took at once (when it turned one more away)
+    }
+    /** A motor's pulse time per count against its speed (1 at first). */
+    gain(addr, i) { const g = this.gains[hex(addr)]; return g && g[i] ? g[i] : 1; }
+    taught(addr, i, want, moved) {
+        const k = hex(addr), g = this.gains[k] || (this.gains[k] = []);
+        const was = g[i] || 1, f = moved >= 1 ? Math.max(0.6, Math.min(2, want / moved)) : 2;
+        g[i] = Math.max(0.5, Math.min(4, was * f));
     }
     /** A motor's speed (counts / s): as measured on this seat, else as on a G26. */
     speed(addr, i) { const s = this.speeds[hex(addr)]; return s && s[i] ? s[i] : SPEEDS[i]; }
@@ -109,7 +119,6 @@ class SeatMover {
     blocked(addr) {
         const L = this.values.live;
         if (!this.motor) return 'No diagnostic link';
-        if (L.left) return 'The car is locked';
         if (typeof L.speed !== 'number') return 'No speed from the car yet';
         if (L.speed > MAX_KMH) return 'Only while the car stands still';
         const s = this.seat(addr);
@@ -141,7 +150,7 @@ class SeatMover {
     /** The run ends: its motors stopped (the loop does it at its next round, and its way out once more). */
     stop(why) { if (this.run && !this.run.end) this.run.end = why || 'Stopped'; }
 
-    /** Easy entry: where the seat is kept as 'R', the seat to Memory 3 (nothing when it is there already or 3 isn't saved). */
+    /** Easy entry: where the seat is kept as 'R', the seat to its easy entry position (nothing when it is there already, or none is saved). */
     async entry(addr) {
         const to = this.slots(addr)[ENTRY];
         if (!to || this.run) return null;
@@ -176,7 +185,8 @@ class SeatMover {
         try { result = await this.go(run, target, name); } catch (e) { result = { ok: false, why: 'Stopped: ' + (e && e.message || e) }; }
         await this.end(run);
         this.last = Object.assign({ addr, slot }, result);
-        this.log.info('seat ' + A(addr) + ': ' + name + ' ' + (result.ok ? 'reached' : 'ended: ' + result.why) + ' in ' + ((this.now() - run.t0) / 1000).toFixed(1) + ' s');
+        this.log.info('seat ' + A(addr) + ': ' + name + ' ' + (result.ok ? 'reached' : 'ended: ' + result.why) + ' in ' + ((this.now() - run.t0) / 1000).toFixed(1) + ' s'
+            + (result.sum ? ' (' + result.sum + ')' : ''));
         return this.last;
     }
     begin(addr, slot, why) {
@@ -196,7 +206,8 @@ class SeatMover {
     /** One read; a refused or missing one is only a miss, until the module hasn't answered for MISS_MS. */
     async get(run, did) {
         let d = null;
-        try { d = data(await this.modules.link.read(run.addr, did, 600), did); } catch (e) { d = null; }
+        // (no retries in the transport: a read it turns away would hold the queue; the next round asks again instead)
+        try { d = data(await this.modules.link.read(run.addr, did, 600, { maxRetries: 0 }), did); } catch (e) { d = null; }
         if (d) { run.goodAt = this.now(); return d; }
         if (this.now() - run.goodAt > MISS_MS) throw new Error('the seat module stopped answering');
         await this.sleep(MISS_WAIT_MS);
@@ -211,7 +222,7 @@ class SeatMover {
             if (u && u[0] === 0x7F && u[2] !== 0x21 && u[2] !== 0x78) break;        // refused for good (not busy)
         }
         const ok = !!(u && u[0] === 0x6E);
-        if (action !== STOP && !ok) throw new Error(AXES[i] + ' not started (' + (u ? 'refused ' + hex(u[2] || 0) : 'no answer') + ')');
+        if (action !== STOP && !ok) { const e = new Error(AXES[i] + ' not started (' + (u ? 'refused ' + hex(u[2] || 0) : 'no answer') + ')'); e.refused = !!u; throw e; }
         if (action !== STOP && run.started.indexOf(i) < 0) run.started.push(i);
         return ok;
     }
@@ -228,7 +239,6 @@ class SeatMover {
     reason(run) {
         if (run.end) return run.end;
         const L = this.values.live;
-        if (L.left) return 'Stopped: the car was locked';
         if (typeof L.speed !== 'number' || L.speed > MAX_KMH) return 'Stopped: the car is moving';
         if (this.now() - run.t0 > MAX_RUN_MS) return 'Stopped: took too long';
         return null;
@@ -265,29 +275,46 @@ class SeatMover {
             if (m0[i] === 3 || v === null || v === undefined || p === null || !lim || p < lim.minus - 40 || p > lim.plus + 40) { target.push(null); continue; }
             target.push(Math.max(lim.minus + MARGIN, Math.min(lim.plus - MARGIN, v)));
         }
-        const passes = {}, stopped = {}, stoppedDir = {};
+        const passes = {}, stopped = {}, stoppedDir = {}, pulses = [], stats = {}, from = pos.slice();
+        const stat = (i) => stats[i] || (stats[i] = { starts: 0, ms: 0 });
+        // each motor that moved, for the log: where from and to (and the target when not on it), starts, time it ran
+        const summary = () => ORDER.filter((i) => stats[i]).map((i) => AXES[i] + ' ' + from[i] + '>' + pos[i] + (Math.abs(pos[i] - target[i]) > TOL ? ' (want ' + target[i] + ')' : '')
+            + ' ' + stats[i].starts + 'x ' + (stats[i].ms / 1000).toFixed(1) + ' s').join(', ');
         let todo = ORDER.filter((i) => target[i] !== null && Math.abs(target[i] - pos[i]) > TOL);
         const running = new Map();
         let round = 0, settleUntil = 0, lastRead = this.now(), roundS = LEAD_S;
         this.log.info('seat ' + A(addr) + ': ' + name + ': ' + (todo.length ? todo.map((i) => AXES[i] + ' ' + pos[i] + '>' + target[i]).join(' ') : 'already there'));
         for (;;) {
             const why = this.reason(run);
-            if (why) return { ok: false, why };
-            // the next motors (at most AT_ONCE)
-            while (running.size < AT_ONCE && todo.length && this.now() >= settleUntil) {
+            if (why) return { ok: false, why, sum: summary() };
+            // the next motors (every one that has to move, as many as the module takes at once)
+            const most = this.atOnce[hex(addr)] || AT_ONCE;
+            while (running.size < most && todo.length && this.now() >= settleUntil) {
                 const i = todo.shift(), dir = target[i] > pos[i] ? PLUS : MINUS;
-                const d = Math.abs(target[i] - pos[i]), v = this.speed(addr, i);
-                if (d / v <= PULSE_S) {
-                    // a short move (a correction, or a small one): run for the time its speed takes, then STOP - no read can
-                    // be late for it
+                const d = Math.abs(target[i] - pos[i]), v = this.speed(addr, i), g = this.gain(addr, i);
+                if (!running.size && d / v * g <= PULSE_S) {
+                    // a short move (a correction, or a small one), alone: run for the time it takes, then STOP - no read can
+                    // be late for it; how far it went teaches the next pulse (a motor's start eats some of a short one)
                     await this.cmd(run, i, dir);
-                    await this.sleep(Math.max(0, d / v * 1000 - STOP_LAT_MS));
+                    const ms = Math.max(30, d / v * g * 1000 - STOP_LAT_MS);
+                    await this.sleep(ms);
                     await this.cmd(run, i, STOP);
                     stopped[i] = this.now(); stoppedDir[i] = dir;
+                    pulses.push({ i, from: pos[i], d });
+                    stat(i).starts++; stat(i).ms += ms;
                     settleUntil = this.now() + 150;
                     continue;
                 }
-                await this.cmd(run, i, dir);
+                if (d / v * g <= PULSE_S) { todo.push(i); if (todo.every((k) => Math.abs(target[k] - pos[k]) / this.speed(addr, k) * this.gain(addr, k) <= PULSE_S)) break; continue; }
+                try { await this.cmd(run, i, dir); } catch (e) {
+                    // turned away with others running: the module takes no more at once - this one after them
+                    if (!e.refused || !running.size) throw e;
+                    this.atOnce[hex(addr)] = running.size;
+                    this.log.info('seat ' + A(addr) + ': ' + AXES[i] + ' turned away with ' + running.size + ' running: ' + running.size + ' at once from now');
+                    todo.unshift(i);
+                    break;
+                }
+                stat(i).starts++;
                 running.set(i, { dir, from: pos[i], t0: this.now(), at: this.now(), was: pos[i], v, allow: Math.min(MAX_RUN_MS, 2000 + d / SLOWEST * 1000) });
             }
             if (!running.size && !todo.length) {
@@ -298,10 +325,14 @@ class SeatMover {
                 const now = posOf(d);
                 for (let i = 0; i < FITTED; i++) pos[i] = now[i];
                 this.show(addr, pos);
+                // the pulses since the last look: how far each went against how far it was meant to
+                pulses.splice(0).forEach((q) => this.taught(addr, q.i, q.d, Math.abs(pos[q.i] - q.from)));
                 const off = ORDER.filter((i) => target[i] !== null && Math.abs(target[i] - pos[i]) > TOL && (passes[i] = (passes[i] || 0) + 1) <= PASSES);
                 if (!off.length) {
                     const miss = ORDER.filter((i) => target[i] !== null && Math.abs(target[i] - pos[i]) > TOL);
-                    return miss.length ? { ok: false, why: 'Not quite there: ' + miss.map((i) => AXES[i] + ' ' + (pos[i] - target[i])).join(' ') } : { ok: true, why: name + ' reached' };
+                    const sum = summary();
+                    return miss.length ? { ok: false, why: 'Not quite there: ' + miss.map((i) => AXES[i] + ' ' + (pos[i] - target[i])).join(' '), sum }
+                        : { ok: true, why: name + ' reached', sum };
                 }
                 todo = off;
                 continue;
@@ -341,6 +372,7 @@ class SeatMover {
                 if (left <= 1 || stoppedBySeat || eta <= roundS + 0.05) {
                     if (!stoppedBySeat && left > 1) await this.sleep(Math.max(0, eta * 1000 - STOP_LAT_MS));
                     this.learn(addr, i, r.v, (now - r.t0) / 1000);
+                    stat(i).ms += this.now() - r.t0;
                     await this.cmd(run, i, STOP);
                     stopped[i] = this.now(); stoppedDir[i] = r.dir;
                     running.delete(i);
