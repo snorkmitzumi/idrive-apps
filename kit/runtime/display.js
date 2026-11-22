@@ -897,15 +897,20 @@ class Display {
         // compact header in the HMI strip's own black, only as wide as its name, tabs and badges:
         // right of it the HMI's strip shows through (radio station, phone signal, status icons)
         const hx = HMI.left - pl.x;
-        // map style: the header names the page shown (its tab's name), no tabs
-        const ti = this.tabInfo, page = this.mapStyle() && ti && ti.tabs && ti.tabs[ti.sel];
-        const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
-            this.sheet && this.mapStyle() ? (this.sheet.title || 'Settings') : page || this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
-        // the HMI's own title is in the strip under the header: a narrower header (a sheet: no tabs) stays
-        // as wide as the app's widest, so none of that title shows beside it
-        if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);
-        const sx = this.headEnd = Math.min(HMI.status.x - pl.x, Math.ceil(Math.max(end, this.headMax || 0)));
-        if (sx > end) { c.fillRect(end, 0, sx - end, FULL.headH - 2, HMI.headBg); c.fillRect(end, FULL.headH - 2, sx - end, 2, G.withAlpha('#ffffff', 0.22)); }
+        // map style (2.6.4 on a G26: the page's name over the HMI's own top bar): no header of the kit's at all - the
+        // HMI's top bar shows, as over BMW's map; the app's pages are in its side bars there
+        const map = this.mapStyle();
+        let sx = hx;
+        if (!map) {
+            const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
+                this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
+            // the HMI's own title is in the strip under the header: a narrower header (a sheet: no tabs) stays
+            // as wide as the app's widest, so none of that title shows beside it
+            if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);
+            sx = Math.min(HMI.status.x - pl.x, Math.ceil(Math.max(end, this.headMax || 0)));
+            if (sx > end) { c.fillRect(end, 0, sx - end, FULL.headH - 2, HMI.headBg); c.fillRect(end, FULL.headH - 2, sx - end, 2, G.withAlpha('#ffffff', 0.22)); }
+        } else c.tabRects = [];
+        this.headEnd = sx;
         // the tab the controller is on (the kit holds it: Display._ccu)
         const ft = this.focusTab != null && (!this.sheet || this.sheetHead) && (c.tabRects || []).find((q) => q.i === this.focusTab);
         if (ft) c.strokeRoundRect(ft.x + 4, ft.y + 10, ft.w - 8, ft.h - 20, 10, 2, t.sel || t.accent);
@@ -919,9 +924,11 @@ class Display {
         if (sb === true) c.strokeRoundRect(hx + 6, FULL.headH + 6, W - hx - 12, H - this.barH() - FULL.headH - 12, 14, 3, G.withAlpha(t.sel || t.accent, 0.8));
         else if (sb && sb.bar) c.roundRect((sb.bar.x - 2) * k + pl.ox, sb.bar.y * k + pl.oy, (sb.bar.w + 4) * k, sb.bar.h * k, (sb.bar.w / 2 + 2) * k, t.sel || t.accent);
         if (pt) c.strokeRoundRect(pt.x * k + pl.ox - 5, pt.y * k + pl.oy - 5, pt.w * k + 10, pt.h * k + 10, (pt.r != null ? pt.r : pt.h / 2) * k + 5, 3, t.sel || t.accent);
-        // the strip's bottom edge continues under the see-through part
-        c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
-        c.fillRect(sx, FULL.headH - 2, W - sx, 2, G.withAlpha('#ffffff', 0.22));
+        // the strip's bottom edge continues under the see-through part (map style: all of the strip is the HMI's)
+        if (!map) {
+            c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
+            c.fillRect(sx, FULL.headH - 2, W - sx, 2, G.withAlpha('#ffffff', 0.22));
+        }
         // slim bar: each label over its HMI button
         const by = H - this.barH();
         const btns = this.buttons().map((b) => ({ id: b.id, label: b.label, x: b.x - this.barOff - pl.x, w: b.w }));
@@ -931,7 +938,7 @@ class Display {
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
-        c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();
+        c.clip(sx, 0, W - sx, map ? FULL.headH : HMI.status.h).clear(0).noclip();
         if (hx > 0) c.clip(0, 0, hx, (pl.left === 0 ? FULL.headH : HMI.colEnd) - pl.y).clear(0).noclip();
         drawCredit(c, W - 18, FULL.headH + 17);
         r.xf(1, 0, 0).append(c).xf();
