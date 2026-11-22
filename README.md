@@ -34,6 +34,7 @@ with the MGU should work for the values they send. The seats are tested on a G26
 - [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
 - [Development](#development)
 - [How the seats were worked out](#how-the-seats-were-worked-out)
+- [Thanks](#thanks)
 - [Credits and licences](#credits-and-licences)
 
 ---
@@ -266,6 +267,22 @@ The seat modules' requests were found by watching BMW's workshop software drive 
 car: which reads give the positions and end stops, the one motor command, what the module does with it (one motor at
 a time, a motor runs until it is stopped), and which requests must never be sent. The write-up is
 [docs/seats-ista-findings.md](docs/seats-ista-findings.md). No BMW files or traces are in this repository.
+
+## Thanks
+
+Combo stands on other people's work. Thank you to everyone behind these projects:
+
+| Project | What Combo uses from it |
+|---|---|
+| [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps) | the upstream of this fork: the kit (runtime, renderer, build tools), Ambient config, and M Vitals, Virtual Dyno and Drag Timer, the source of the Driving, Performance and M View tabs. Thanks to cauliflowermossgrape and every contributor there |
+| [cauliflowermossgrape/idrive7-8-ssh-root](https://github.com/cauliflowermossgrape/idrive7-8-ssh-root) | root access and the SSH key the kit's deploy scripts use |
+| [cauliflowermossgrape/idrive7-privacy-audit](https://github.com/cauliflowermossgrape/idrive7-privacy-audit) | what the stock head unit sends and stores, the background for KIT.md |
+| [robertnisipeanu/mgu-store](https://github.com/robertnisipeanu/mgu-store) | the MGU Store that installs Combo, and mgu-render, the GPU renderer in `kit/renderd/` (Robert Nisipeanu and IterioDev) |
+| [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/) by emdzej | the seat modules' identifiers and their names (FAS_G11 / BFS_G11) |
+| [JackieZ123430/idrive7-apps-cn](https://github.com/JackieZ123430/idrive7-apps-cn) | the kit's Simplified Chinese translation (小白151) |
+| [Fieldistor/idrive7-apps](https://github.com/Fieldistor/idrive7-apps), [rubenrios/idrive7-apps](https://github.com/rubenrios/idrive7-apps) | the kit's Russian and Spanish translations |
+| [ozkl/doomgeneric](https://github.com/ozkl/doomgeneric), [freedoom/freedoom](https://github.com/freedoom/freedoom) | Doom, kept in `third_party/` from the upstream kit |
+| [Barlow](https://github.com/jpt/barlow), [Noto CJK](https://github.com/notofonts/noto-cjk) (via [google/fonts](https://github.com/google/fonts)), Ubuntu font | the kit's fonts |
 
 ## Credits and licences
 

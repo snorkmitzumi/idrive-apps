@@ -32,6 +32,8 @@ app.
 The facts about how the seat modules answer (identifiers, byte layouts, the motor command) are not anyone's
 property. The licences cover this repository's code and write-up, not those facts.
 
+The projects this repository builds on are thanked by name in the README's [Thanks](README.md#thanks) section.
+
 ## Not BMW
 
 BMW, iDrive, ISTA, ICOM and the car's own software, fonts and texts belong to BMW AG. This is an unofficial project,
