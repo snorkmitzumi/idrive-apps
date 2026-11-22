@@ -75,8 +75,13 @@ class SeatModules {
             .then(() => { this.busy = false; });
     }
 
-    /** One read, tried again when the transport refuses it now and then ("temporarily not accepted"): the reply or null. */
+    /**
+     * One read, tried again when the transport refuses it now and then ("temporarily not accepted"): the reply or null.
+     * A seat module the link marked silent (5 reads in a row without an answer: the car asleep, or a busy stretch) is
+     * woken first - nothing else wakes it (2.6.6 on a G26: "No unit answered with seat positions" from then on).
+     */
     async read(a, did) {
+        if (this.link.silent && this.link.wake && this.link.silent(a)) this.link.wake(a);
         for (let i = 0; i < TRIES; i++) {
             try { return (await this.link.read(a, did, 800)) || null; } catch (e) { if (i === TRIES - 1) throw e; }
             await new Promise((r) => setTimeout(r, RETRY_MS));
@@ -108,6 +113,9 @@ class SeatModules {
         this.log.info('seat modules: ' + (seats.length ? seats.map((s) => A(s.addr) + (s.index ? ' (' + s.index + ')' : '') + ' ' + this.show(s.pos)).join('; ') : 'none answered 22 D702 (asked again in a minute)'));
         if (!seats.length) this.why = 'No unit answered with seat positions (22 D702)';
     }
+
+    /** Search again from the start (the tab's Read again): the seat modules asked again, woken first. */
+    again() { if (this.busy) return; this.state = 'idle'; this.why = null; }
 
     /** The next seat's counters, and in turn its motors, switches and initialisation. */
     async poll() {

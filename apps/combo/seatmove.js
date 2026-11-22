@@ -235,6 +235,9 @@ class SeatMover {
     async get(run, did) {
         let d = null;
         // (no retries in the transport: a read it turns away would hold the queue; the next round asks again instead)
+        // (a seat module the link marked silent is woken: this run needs it)
+        const link = this.modules.link;
+        if (link.silent && link.wake && link.silent(run.addr)) link.wake(run.addr);
         try { d = data(await this.modules.link.read(run.addr, did, 600, { maxRetries: 0 }), did); } catch (e) { d = null; }
         if (d) { run.goodAt = this.now(); return d; }
         if (this.now() - run.goodAt > MISS_MS) throw new Error('the seat module stopped answering');

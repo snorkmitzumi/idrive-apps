@@ -1623,3 +1623,41 @@ checks.push(
         assert(stuck.at >= 3000, 'no motor while the light\'s write is under way: ' + stuck.at + ' ms');
     }],
 );
+
+checks.push(
+    ['2.6.7 seat modules the link marked silent (no answer 5 times: the car asleep) are woken by the search; Read again searches anew', async () => {
+        const { SeatModules } = appModule('seatmod');
+        const be = (n) => [n >> 8, n & 255];
+        let awake = false, sent = 0;
+        // as kit/runtime/readonly-diag.js: 5 without an answer in a row, then skipped (null, nothing sent) until wake()
+        const misses = {};
+        const link = { available: true,
+            silent: (a) => (misses[a] || 0) >= 5, wake: (a) => { delete misses[a]; },
+            async discover() { return new Map([[0x6D, '0F21F0'], [0x6E, '0F21F0']]); },
+            async read(a, did) {
+                if (link.silent(a)) return null;
+                sent++;
+                if (!awake) { misses[a] = (misses[a] || 0) + 1; return null; }
+                misses[a] = 0;
+                if (did === 0xD702) return [0x62, 0xD7, 0x02].concat(be(33113), be(32410), be(32390), be(32861), be(32758), be(32768), be(32768), be(32768));
+                return [0x7F, 0x22, 0x31];
+            } };
+        let clock = 1e6;
+        const m = new SeatModules({ link, log: quiet, now: () => clock, values: { live: {} } });
+        const settle = async () => { for (let k = 0; k < 50 && m.busy; k++) await new Promise((r) => setTimeout(r, 1)); };
+        m.tick(); await settle();
+        assert.strictEqual(m.state, 'none', 'asleep: none found');
+        // (the polls and a seat run before took it to 5 misses: the link skips it now)
+        misses[0x6D] = misses[0x6E] = 5;
+        assert(link.silent(0x6D) && link.silent(0x6E), 'the link has marked them silent');
+        // the car wakes; the next search (a minute later) wakes the units it asks
+        awake = true; clock += 61000;
+        m.tick(); await settle();
+        assert.strictEqual(m.state, 'found', 'found again: ' + m.state + ' ' + m.why);
+        assert.deepStrictEqual(m.seats.map((x) => x.addr), [0x6D, 0x6E]);
+        // Read again: a search at once
+        m.again(); assert.strictEqual(m.state, 'idle');
+        m.tick(); await settle();
+        assert.strictEqual(m.state, 'found');
+    }],
+);

@@ -102,7 +102,7 @@ class Seats {
     }
 
     /** Read again (the tab's button): from the start, also after the car said no (its steps to the log again). */
-    again() { if (this.busy) return; this.state = Object.assign({}, this.state, { available: null }); this.p = null; this.offered = undefined; this.last = 0; this.steps = {}; this._lastWhy = null; }
+    again() { if (this.modules && this.modules.state !== 'found') this.modules.again(); if (this.busy) return; this.state = Object.assign({}, this.state, { available: null }); this.p = null; this.offered = undefined; this.last = 0; this.steps = {}; this._lastWhy = null; }
 
     /** Where it stands, for the log line of the tab opening. */
     summary() {
