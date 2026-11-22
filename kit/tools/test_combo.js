@@ -1188,6 +1188,7 @@ function seatRig(o) {
         step(20 + (o.jitter ? rnd() * o.jitter : 0));
         st.sent.push('2E ' + a.toString(16).toUpperCase() + ' ' + m + ' ' + act + ' ' + pwm);
         if (o.refuse) return [0x7F, 0x2E, 0x22];
+        if (o.maxMotors && act !== 0 && !st.run[m] && st.run.filter((x) => x).length >= o.maxMotors) return [0x7F, 0x2E, 0x22];
         if (o.busy && ++st.n % o.busy === 0) { st.refused = (st.refused || 0) + 1; throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED'); }
         st.run[m] = act;
         st.maxAtOnce = Math.max(st.maxAtOnce, st.run.filter((x) => x).length);
@@ -1234,7 +1235,7 @@ checks.push(
         assert.deepStrictEqual(await stop, [0x6E, 0xD7, 0x08], 'the stop still went');
         assert(sent.some((x) => x.join(',') === [0x6D, 0x2E, 0xD7, 0x08, 0, 0, 100].join(',')), JSON.stringify(sent));
     }],
-    ['2.6.0 seat memory: a saved position recalled - at most two motors at once, each stopped at its target, nothing else written', async () => {
+    ['2.6.0 seat memory: a saved position recalled - every motor at once, straight there, each stopped at its target, nothing else written', async () => {
         const r = seatRig(), { st, mover, C } = r;
         assert(await mover.save(0x6D, '1'));
         const saved = st.pos.slice();
@@ -1245,10 +1246,10 @@ checks.push(
         assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
         st.pos.forEach((v, i) => assert(Math.abs(v - saved[i]) <= 4, 'axis ' + i + ': ' + (v - saved[i])));
         assert(st.run.every((x) => x === 0), 'every motor stopped');
-        assert(st.maxAtOnce <= 2, 'at most two at once: ' + st.maxAtOnce);
+        assert(st.maxAtOnce >= 4, 'the motors together, not one after another: ' + st.maxAtOnce);
         const w = writes(st);
         assert(w.length && w.every((x) => /^2E 6D [0-4] [012] 100$/.test(x)), w.join(' | '));
-        assert.deepStrictEqual(w.filter((x) => / [12] 100$/.test(x)).slice(0, 2).map((x) => x.split(' ')[2]), ['0', '2'], 'fore / aft and backrest first, as the module itself');
+        assert(r.logs.some((x) => /Memory 1 reached in \d+\.\d s \(SLV \d+>\d+ \dx \d+\.\d s/.test(x)), 'each motor in the end line: ' + r.logs.join(' | '));
         // each motor started was stopped afterwards, once more on the way out
         [0, 1, 2, 3, 4].forEach((i) => { const mine = w.filter((x) => x.split(' ')[2] === String(i)); if (mine.length) assert(/ 0 100$/.test(mine[mine.length - 1]), 'axis ' + i + ' ends with STOP: ' + mine.join(',')); });
         assert(r.logs.some((x) => /seat 0x6D: Memory 1 reached in \d+\.\d s/.test(x)), r.logs.join(' | '));
@@ -1279,8 +1280,10 @@ checks.push(
         assert(/stands still/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'driving');
         r.values.live.speed = undefined;
         assert(/No speed/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'no speed known');
+        // the car "locked and left" (as it reports itself right after switching off, while the door opens): no block
         r.values.live.speed = 0; r.values.live.left = true;
-        assert(/locked/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'locked');
+        assert((await r.mover.recall(0x6D, '1')).ok, 'locked and left is no reason');
+        r.values.live.left = false;
         r = seatRig(); r.st.init = 0; r.mover.mem['6D'] = { '1': [32768 + 400, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
         assert(/not initialised/.test((await r.mover.recall(0x6D, '1')).why) && !writes(r.st).length, 'not initialised');
         assert(/not saved/.test((await r.mover.recall(0x6D, '3')).why), 'an empty slot');
@@ -1296,10 +1299,10 @@ checks.push(
         const st = await r.mover.recall(0x6D, '1');
         assert(/LNV does not move/.test(st.why) && r.st.run.every((x) => !x), st.why);
     }],
-    ['2.6.1 easy entry: a front door opened takes its seat to Memory 3, the engine started takes it back; the tab\'s buttons', async () => {
+    ['2.6.1 easy entry: a front door opened takes its seat to its easy entry position, the engine started takes it back; the tab\'s buttons', async () => {
         const r = seatRig(), { st, mover, C } = r;
         const drive = st.pos.slice();
-        mover.mem['6D'] = { '3': [C + 30, null, C - 900, null, null] };
+        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
         const { Seats } = appModule('seats');
         const S2 = settingsOf();
         const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: S2 });
@@ -1308,7 +1311,7 @@ checks.push(
         // the first report (Combo starting) with the door open: nothing moves
         s.doors(['driver front']); await settle();
         assert.strictEqual(writes(st).length, 0, 'a door open at start did not just open');
-        // the driver's door opens with the engine off: to Memory 3, only the axes saved there; the seat module not searched
+        // the driver's door opens with the engine off: to the easy entry position, only the axes saved there; the seat module not searched
         // for yet (the Seats tab never open): asked at its usual address
         s.modules.seats = []; s.modules.state = 'idle'; s.modules.link = Object.assign({}, r.link, { available: true });
         s.doors([]); s.doors(['driver front']); await settle();
@@ -1320,10 +1323,10 @@ checks.push(
         s.doors([]); const n = writes(st).length; s.doors(['driver front']); await settle();
         assert.strictEqual(writes(st).length, n, 'already at the entry position: not moved');
         assert.deepStrictEqual(s.mover.slots(0x6D).R, drive);
-        // the tab: 1, 2, 3 Entry, Back, Save
+        // the tab: 1, 2, Easy entry, Back, Save
         const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
         let { cv, out } = draw();
-        ['1', '2', '3 ENTRY', 'BACK', 'SAVE'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
+        ['1', '2', 'EASY ENTRY', 'BACK', 'SAVE'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
         // the engine starts: back to the driving position
         r.values.live.rpm = 700; r.values.live.rpmT = st.clock;
         s.watchEngine(); await settle();
@@ -1336,13 +1339,13 @@ checks.push(
         r.values.live.rpm = 0; S2.set('easyEntry', false); s.doors([]); s.doors(['driver front']); await settle();
         assert.strictEqual(writes(st).length, m2, 'switched off: no easy entry');
         ({ cv, out } = draw());
-        assert(out.includes('3') && !out.includes('3 ENTRY') && !out.includes('BACK'), out.join(' | '));
+        assert(out.includes('EASY ENTRY') && !out.includes('3') && !out.includes('BACK'), out.join(' | '));
         // Save then 2 keeps the position in 2
         const press = (c, key) => { const b = c.targets.find((x) => x.key === key); assert(b, key + ' not pressable: ' + c.targets.map((x) => x.key).join(',')); return b.run(); };
         assert(!cv.targets.some((x) => x.key === 'seat-109-2'), 'an empty slot is not pressable');
         press(cv, 'seat-109-save');
         ({ cv, out } = draw());
-        assert(out.some((x) => /^Press 1, 2 or 3/.test(x)), out.join(' | '));
+        assert(out.some((x) => /^Press 1, 2 or Easy entry/.test(x)), out.join(' | '));
         press(cv, 'seat-109-2');
         for (let k = 0; k < 20 && !s.mover.slots(0x6D)['2']; k++) await new Promise((res) => setImmediate(res));
         assert.deepStrictEqual(s.mover.slots(0x6D)['2'], st.pos, 'saved in 2');
@@ -1358,6 +1361,20 @@ checks.push(
             st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'run ' + k + ' axis ' + i + ': ' + (v - want[i])));
             assert(st.run.every((x) => !x), 'run ' + k + ': a motor left running');
         }
+    }],
+    ['2.6.2 a module that takes two motors at once: the third turned away waits, the move still gets there; 2.6.1\'s Memory 3 is Easy entry', async () => {
+        const r = seatRig({ maxMotors: 2 }), { st, mover, C } = r;
+        const want = [C + 150, C - 200, C - 900, C + 20, C + 100];
+        mover.mem['6D'] = { '1': want };
+        const res = await mover.recall(0x6D, '1');
+        assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
+        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'axis ' + i + ': ' + (v - want[i])));
+        assert(r.logs.some((x) => /turned away with 2 running: 2 at once from now/.test(x)), r.logs.join(' | '));
+        const { SeatMover } = appModule('seatmove');
+        fs.writeFileSync(path.join(r.dir, 'seatmem.json'), JSON.stringify({ '6D': { '1': want, '3': [1, 2, 3, 4, 5] } }));
+        const m2 = new SeatMover({ motor: r.motor, modules: r.modules, values: r.values, log: quiet, dataDir: r.dir });
+        assert.deepStrictEqual(m2.slots(0x6D).E, [1, 2, 3, 4, 5]);
+        assert(!m2.slots(0x6D)['3'], 'no Memory 3 any more');
     }],
     ['2.6.1 a busy transport (every third request turned away) doesn\'t end a move; the modules don\'t log the move again', async () => {
         const r = seatRig({ busy: 3 }), { st, mover, C } = r;
@@ -1430,7 +1447,7 @@ checks.push(
         s.mover.sleep = async (ms) => { st.clock += ms; await new Promise((res) => setImmediate(res)); };
         const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
         const { cv, out } = draw();
-        ['Driver seat', 'Headrest', 'Backrest', 'Height', 'Tilt', 'Fore / aft', 'Save Memory 3: the seat moves there when its door opens'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
+        ['Driver seat', 'Headrest', 'Backrest', 'Height', 'Tilt', 'Fore / aft', 'Save, then Easy entry: the seat moves there when its door opens'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
         assert.strictEqual(s.holds.length, 10, 'five pairs');
         assert(['SLV+', 'SLV-', 'KHV+', 'KHV-'].every((k) => cv.targets.some((x) => x.key === 'seat-109-' + k)), 'the controller can press them');
         const up = s.holds.find((h) => h.axis === 4 && h.dir === 1);

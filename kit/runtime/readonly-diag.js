@@ -22,7 +22,9 @@
  *   0x2E D7 08 <motor> <action> <pwm>   a front seat motor run or stopped (FAS_G11 / BFS_G11 job STEUERN
  *                   ARG;MOTOR), to 0x6D (driver) or 0x6E (passenger) only: motor 0-4 (SLV SHV LNV SNV KHV),
  *                   action 0 stop / 1 plus / 2 minus, pwm 1-100 %. Nothing else in 2E passes, nor any other unit.
- *   A stop is never dropped by cancel() and goes to a unit marked silent too.
+ *   Not queued behind the reads (a read the transport keeps turning away held a STOP up to a second: 2.6.1 on a G26, the
+ *   motors went past their targets): each goes to the transport at once, so a STOP is never late, never dropped by
+ *   cancel(), and goes to a unit marked silent too. Its reply is told apart from a read's by its own 6E D7 08.
  *
  * It also paces: one request at a time and at least gapMs between two (25 ms), a 1 s pause after a
  * unit answers busy (NRC 21), and a unit that didn't answer silentAfter requests in a row is skipped
@@ -120,7 +122,7 @@ class ReadOnlyDiag {
         try { check(target, sid, d, false); } catch (e) { return this.blocked(e); }
         if (this.silent(target)) return Promise.resolve(null);
         let waits;
-        if (opts) ['retryBaseMs', 'pendingTimeoutMs', 'callTimeoutMs'].forEach((k) => { if (opts[k] != null) (waits = waits || {})[k] = opts[k]; });
+        if (opts) ['retryBaseMs', 'pendingTimeoutMs', 'callTimeoutMs', 'maxRetries'].forEach((k) => { if (opts[k] != null) (waits = waits || {})[k] = opts[k]; });
         return this.queue(async () => {
             this.stats.sent++;
             const t0 = Date.now();
@@ -139,20 +141,20 @@ class ReadOnlyDiag {
         });
     }
 
-    /** One identifier from one unit: its reply (positive 62 or refusal 7F 22), or null. */
-    read(target, did, timeoutMs) {
-        return this.readMany(target, [did], timeoutMs);
+    /** One identifier from one unit: its reply (positive 62 or refusal 7F 22), or null. opts as physical()'s. */
+    read(target, did, timeoutMs, opts) {
+        return this.readMany(target, [did], timeoutMs, opts);
     }
 
     /**
      * Several identifiers in one request (at most MAX_DIDS): the reply has each answered one with its
      * data, in turn (62 <DID> <data> <DID> <data> ...; kit/sgbd.js split() takes it apart), or a refusal.
      */
-    readMany(target, dids, timeoutMs) {
+    readMany(target, dids, timeoutMs, opts) {
         const data = [];
         dids.forEach((did) => data.push((did >> 8) & 0xFF, did & 0xFF));
         return this.physical(target, 0x22, data, timeoutMs,
-            (u) => (u[0] === 0x62 && dids.indexOf((u[1] << 8) | u[2]) >= 0) || (u[0] === 0x7F && u[1] === 0x22));
+            (u) => (u[0] === 0x62 && dids.indexOf((u[1] << 8) | u[2]) >= 0) || (u[0] === 0x7F && u[1] === 0x22), opts);
     }
 
     /**
@@ -208,13 +210,10 @@ function seatMotors(link) {
         const d = [0xD7, 0x08, motor, action, pwm == null ? 100 : pwm];
         try { checkSeat(target, d); } catch (e) { return link.blocked(e); }
         const stop = action === 0;
-        return link.queue(async () => {
-            link.stats.sent++;
-            const uds = await LINKS.get(link).physical(target, 0x2E, d, 800,
-                (u) => (u[0] === 0x6E && u[1] === 0xD7 && u[2] === 0x08) || (u[0] === 0x7F && u[1] === 0x2E), { maxRetries: stop ? 6 : 2 });
-            if (uds) link.stats.replies++; else link.stats.missed++;
-            return uds || null;
-        }, stop);
+        link.stats.sent++;
+        return LINKS.get(link).physical(target, 0x2E, d, 800,
+            (u) => (u[0] === 0x6E && u[1] === 0xD7 && u[2] === 0x08) || (u[0] === 0x7F && u[1] === 0x2E), { maxRetries: stop ? 6 : 2, retryBaseMs: 40 })
+            .then((uds) => { if (uds) link.stats.replies++; else link.stats.missed++; return uds || null; });
     };
 }
 

@@ -163,8 +163,8 @@ class Seats {
         const no = mv ? mv.blocked(a) : null, last = mv && mv.last && mv.last.addr === a ? mv.last : null;
         const saving = this.saving && this.saving.addr === a && this.now() < this.saving.until;
         const note = seat.init !== null && seat.init !== 1 ? 'The seat is not initialised' : run && run.addr === a ? (run.slot === 'hold' ? 'Moving while you hold' : run.why)
-            : run ? 'The other seat is moving' : saving ? 'Press 1, 2 or 3 to keep the seat\'s position there' : no || (last && last.why && last.why !== 'Let go' ? last.why
-                : mv && this.easyEntry() && !mv.slots(a)['3'] ? 'Save Memory 3: the seat moves there when its door opens' : mv ? 'Hold an arrow to move the seat' : '');
+            : run ? 'The other seat is moving' : saving ? 'Press 1, 2 or Easy entry to keep the seat\'s position there' : no || (last && last.why && last.why !== 'Let go' ? last.why
+                : mv && this.easyEntry() && !mv.slots(a).E ? 'Save, then Easy entry: the seat moves there when its door opens' : mv ? 'Hold an arrow to move the seat' : '');
         cv.text(note, x, y + 40, 16, (run && run.addr === a) || saving || (last && !last.ok && !no && !run) || (seat.init !== null && seat.init !== 1) ? t.warn : t.dim);
         const cx = x + 340, fy = y + 306;
         this.drawPicture(cv, t, seat, cx, fy);
@@ -262,7 +262,7 @@ class Seats {
         return true;
     }
 
-    /** Memory 1-3 (3: the easy entry position, setting easyEntry), Back after easy entry, Save; while this seat goes to a position: Stop. */
+    /** Memory 1 and 2, Easy entry (its position: Save, then Easy entry), Back after it, Save; while this seat goes to a position: Stop. */
     drawMemory(cv, t, seat, x, y, w) {
         const mv = this.mover, a = seat.addr, slots = mv.slots(a), run = mv.run, H = 46;
         const saving = this.saving && this.saving.addr === a && this.now() < this.saving.until;
@@ -276,11 +276,10 @@ class Seats {
             mv.recall(a, slot).catch((e) => this.log.warn('seat recall: ' + e));
             return null;
         };
-        const entry = this.easyEntry();
         let bx = x;
-        ['1', '2', '3'].forEach((k) => {
-            const label = k === '3' && entry ? '3 Entry' : k;
-            bx += G.button(cv, t, bx, y, k === '3' && entry ? 150 : 80, H, label, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
+        ['1', '2', 'E'].forEach((k) => {
+            const e = k === 'E';
+            bx += G.button(cv, t, bx, y, e ? 190 : 80, H, e ? 'Easy entry' : k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
         });
         // after easy entry: back to where the seat was (also by itself once the engine starts)
         if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 130, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 12;
@@ -288,12 +287,12 @@ class Seats {
             { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run });
     }
 
-    /** Setting easyEntry (on unless switched off): a front door opened moves its seat to Memory 3. */
+    /** Setting easyEntry (on unless switched off): a front door opened moves its seat to its easy entry position. */
     easyEntry() { return !this.settings || this.settings.get('easyEntry') !== false; }
 
     /**
      * The doors open now (DoorsWindowsRoofMirrors, as the ambient light reads them): a front door that just opened takes
-     * its seat to the entry position (Memory 3) while the engine is off; the seat modules found first.
+     * its seat to its easy entry position while the engine is off.
      */
     doors(open) {
         // (the first report, as Combo starts: a door open already then did not just open)

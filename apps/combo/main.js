@@ -108,7 +108,7 @@ mgu.run({
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
         const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
-        // easy entry: a front door opened takes its seat to Memory 3, the engine started takes it back (seats.js doors())
+        // easy entry: a front door opened takes its seat to its easy entry position, the engine started takes it back (seats.js doors())
         const DOOR_FIELDS = { statusDoorSwitchDRD: 'driver front', statusDoorSwitchPSD: 'passenger front' };
         ctx.signals.watch('de.bmw.body.DoorsWindowsRoofMirrors', '1', { CentralLockingSystemAndPanelStatus: (v) => seats.doors(Object.keys(DOOR_FIELDS)
             .filter((k) => v && (v[k] === 1 || /_OFFEN$/.test(String(v[k])))).map((k) => DOOR_FIELDS[k])) }, log)
