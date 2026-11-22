@@ -577,9 +577,13 @@ def build_start_widget(spec, app_id, icon_src, out, pkg_out=None):
     return {'component': comp, 'layout': ui['containers']['500']['components'][str(WIDGET_COMPONENT_ID)]['cells']['Widget']['value']}
 
 
-def build(app_id, language='en', preview_only=False):
+def build(app_id, language='en', preview_only=False, no_sdk=False):
+    """no_sdk: the installable archives without BMW's oap-sdk in them (node_modules/oap-sdk left out), for a package
+    that may be published (a GitHub release): the head unit makes that module itself when an app requires 'oap-sdk'
+    and ships none (the MGU Store's docs/PUBLISHING.md, "Releases" layout). Without it the extracted SDK goes in, as
+    a package built for your own unit."""
     language = normalize_language(language)
-    if not preview_only and not all(os.path.isfile(os.path.join(SDK, name)) for name in ('index.js', 'package.json')):
+    if not preview_only and not no_sdk and not all(os.path.isfile(os.path.join(SDK, name)) for name in ('index.js', 'package.json')):
         raise SystemExit('BMW oap-sdk is missing. Extract it from your own head unit with kit/tools/extract_sdk.js, '
                          'or use --preview-only for an offline preview (no installable package).')
     adir = os.path.join(APPS, app_id)
@@ -594,7 +598,8 @@ def build(app_id, language='en', preview_only=False):
     src = os.path.join(stage, 'source')
     os.makedirs(os.path.join(src, 'javascript', 'kit'))
     os.makedirs(os.path.join(src, 'config'))
-    os.makedirs(os.path.join(src, 'node_modules', 'oap-sdk'))
+    if not no_sdk:
+        os.makedirs(os.path.join(src, 'node_modules', 'oap-sdk'))
 
     manifest = manifest_for(json.loads(json.dumps(spec)))
     missing = fit_to_unit(manifest, spec)
@@ -628,6 +633,12 @@ def build(app_id, language='en', preview_only=False):
     # impl.background runs then, without screens
     if spec.get('autostart'):
         pkg['mguAppStartType'] = 'autostart'
+    # the head units it is for, read from the package itself by the MGU Store's Releases and Catalog layouts
+    if spec.get('mguHmi'):
+        pkg['mguHmi'] = spec['mguHmi']
+    # an app with its own licence (apps/<id>/LICENSE, packed with it below): npm's way of naming it
+    if os.path.isfile(os.path.join(adir, 'LICENSE')):
+        pkg['license'] = 'SEE LICENSE IN javascript/LICENSE'
     json.dump(pkg, open(os.path.join(src, 'package.json'), 'w', encoding='utf-8', newline='\n'), indent=2)
     json.dump(manifest, open(os.path.join(src, 'manifest.json'), 'w', encoding='utf-8', newline='\n'), indent=2)
     shutil.copy(os.path.join(KIT, 'platform', 'permissions.json'), os.path.join(src, 'permissions.json'))
@@ -741,8 +752,12 @@ def build(app_id, language='en', preview_only=False):
     if preview_only:
         print('%s %s: offline preview in %s (NO SDK, NOT INSTALLABLE)' % (app_id, ver, stage))
         return
-    shutil.copy(os.path.join(SDK, 'index.js'), os.path.join(src, 'node_modules', 'oap-sdk', 'index.js'))
-    shutil.copy(os.path.join(SDK, 'package.json'), os.path.join(src, 'node_modules', 'oap-sdk', 'package.json'))
+    if no_sdk:
+        # nothing of the SDK, not even an empty folder (the head unit makes the module only when there is none)
+        shutil.rmtree(os.path.join(src, 'node_modules'), ignore_errors=True)
+    else:
+        shutil.copy(os.path.join(SDK, 'index.js'), os.path.join(src, 'node_modules', 'oap-sdk', 'index.js'))
+        shutil.copy(os.path.join(SDK, 'package.json'), os.path.join(src, 'node_modules', 'oap-sdk', 'package.json'))
 
     # --- rhmiData: package format (inside source/) and installed format ---
     icon = spec['id'] + '_icon.png'
@@ -837,11 +852,13 @@ def main():
     parser.add_argument('--language', type=normalize_language, choices=languages(), default='en',
                         help='UI language; Korean also accepts ko-KR, ko-kr and ko_KR, Spanish es-ES and es_ES')
     parser.add_argument('--preview-only', action='store_true', help='stage an offline preview without BMW SDK or installable archives')
+    parser.add_argument('--no-sdk', action='store_true',
+                        help='installable archives without BMW oap-sdk in them, to publish (the head unit makes the module itself)')
     parser.add_argument('apps', nargs='*')
     args = parser.parse_args()
     ids = args.apps or sorted(d for d in os.listdir(APPS) if os.path.exists(os.path.join(APPS, d, 'app.json')))
     for i in ids:
-        build(i, args.language, preview_only=args.preview_only)
+        build(i, args.language, preview_only=args.preview_only, no_sdk=args.no_sdk)
 
 
 if __name__ == '__main__':

@@ -190,9 +190,17 @@ You need:
 - **From the Store:** the GPU renderer (`idrive7-renderd`, 2.1.18 or newer) and the controller gate
   (`mgu-inputgate`, 1.1.0 or newer). Both come from the source repo.
 
-Then add this repository to the MGU Store (it reads [`mgu-repo.json`](mgu-repo.json)) and install **Combo**. The Store
-builds it from this repository's `main` branch, so a merged change is its next version. Combo starts with the car
-(the ambient light needs it running) and shows up in *All apps*.
+Then add this repository to the MGU Store and install **Combo**. When you add the repository, the Store asks what to
+follow:
+
+- **Releases:** the ready package from the newest [release](https://github.com/snorkmitzumi/idrive-apps/releases)
+  (`combo@<version>.tgz`). It holds no BMW software; the head unit links it to the BMW SDK already on it. Choose this
+  to get only released versions.
+- **Tags:** the head unit builds the newest release tag (`v2.7.0` ...) from source, with the SDK on the unit.
+- **The `main` branch:** the head unit builds `main` from source (it reads [`mgu-repo.json`](mgu-repo.json)), so every
+  merged change is its next version, before a release.
+
+Combo starts with the car (the ambient light needs it running) and shows up in *All apps*.
 
 **Demo data** (Settings > Screen) is on while the car sends nothing, so the screens can be tried parked.
 
@@ -275,7 +283,12 @@ for t in kit/tools/test_*.js; do node "$t" | tail -1; done
 every pull request and must pass before it can be merged. Fork the repository and open a pull request to contribute.
 
 The head unit runs Node 8: no `?.`, `??`, object spread, `catch {` or `.finally` in the app's code. Building a package
-yourself needs BMW's app SDK from your own unit; see [KIT.md](KIT.md).
+for your own unit needs BMW's app SDK from it; see [KIT.md](KIT.md).
+
+**Releasing:** raise `version` in `apps/combo/app.json` in a pull request, merge it, then publish a GitHub release
+tagged `v<version>` on `main`. The *Release package* workflow builds `combo@<version>.tgz` with
+`kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release. For an
+earlier release, run that workflow by hand with its tag.
 
 ## How the seats were worked out
 
