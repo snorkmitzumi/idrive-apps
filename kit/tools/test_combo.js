@@ -11,7 +11,7 @@ const path = require('path');
 const EventEmitter = require('events');
 const Module = require('module');
 
-const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'apps', 'combo');
+const ROOT = path.join(__dirname, '..', '..'), KIT = path.join(ROOT, 'kit', 'runtime'), APP = path.join(ROOT, 'apps', 'cockpit_combo');
 const MAIN = path.join(APP, 'main.js');
 const SPEC = JSON.parse(fs.readFileSync(path.join(APP, 'app.json'), 'utf8'));
 const { Recorder: Canvas } = require(path.join(KIT, 'record'));
@@ -57,6 +57,8 @@ Module._load = function (req, parent, isMain) {
     // the read-only link's private Diag (check '4. timing options reach the link')
     if (req === './diag' && stubDiag && parent && /readonly-diag\.js$/.test(parent.filename)) return Object.assign({}, load.call(this, req, parent, isMain), { Diag: stubDiag });
     if (req.startsWith('./kit/')) return load.call(this, path.join(KIT, req.slice(6)), parent, isMain);
+    // Ambient config's modules the app takes at build time (app.json "include"), from shared/ambient_config
+    if (req === './owner' && parent && parent.filename.indexOf(APP) === 0) return load.call(this, path.join(ROOT, 'shared', 'ambient_config', 'owner.js'), parent, isMain);
     return load.call(this, req, parent, isMain);
 };
 // every text drawn (the page's and the cached layers' - panel titles, bar labels) goes to `sink` while it is set;
@@ -133,7 +135,9 @@ const checks = [
     }],
     ['1. app.json: its own loggingId, every setting of the design', async () => {
         assert.strictEqual(SPEC.loggingId, 'OAA3');
-        const others = fs.readdirSync(path.join(ROOT, 'apps')).filter((d) => d !== 'combo' && fs.existsSync(path.join(ROOT, 'apps', d, 'app.json')))
+        // 2.8.0: a prefixed id, as the MGU Store asks (it was "combo"); the name in the app list short
+        assert.strictEqual(SPEC.id, 'cockpit_combo'); assert.strictEqual(SPEC.title, 'Cockpit');
+        const others = fs.readdirSync(path.join(ROOT, 'apps')).filter((d) => d !== 'cockpit_combo' && fs.existsSync(path.join(ROOT, 'apps', d, 'app.json')))
             .map((d) => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', d, 'app.json'), 'utf8')).loggingId);
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
@@ -1383,6 +1387,32 @@ checks.push(
         s.off(); ended = s.mover.run.end;
         assert(/Seats tab was switched off/.test(ended), 'a move under way stopped: ' + ended);
     }],
+    ['2.8.0 the old Combo (id "combo") still running: Cockpit\'s easy entry leaves the seats to it, and the Seats tab says so', async () => {
+        const { oldCombo, FILE } = appModule('oldcombo');
+        const dir = tmp('oldcombo'); let clock = 1e6;
+        const o = oldCombo({ dir, now: () => clock });
+        assert.strictEqual(o.running(), false, 'no claim: not running');
+        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: process.ppid, since: 1 }));
+        assert.strictEqual(o.running(), false, 'looked at again only after CHECK_MS');
+        clock += 10000;
+        assert.strictEqual(o.running(), true, 'a claim whose process is alive: running');
+        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: 2147483646, since: 1 })); clock += 10000;
+        assert.strictEqual(o.running(), false, 'its process gone: not running');
+        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: process.pid, since: 1 })); clock += 10000;
+        assert.strictEqual(o.running(), false, 'this process itself is not the old app');
+        // the Seats tab: no door moves a seat, the reason shown
+        const r = seatRig(), { st, mover, C } = r;
+        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
+        const { Seats } = appModule('seats');
+        const why = 'The old Combo app is running: easy entry is left to it. Uninstall Combo.';
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: settingsOf(), blocked: () => why });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found'; s.mover.mem = mover.mem; s.mover.sleep = mover.sleep;
+        s.doors([]); s.doors(['driver front']);
+        for (let k = 0; k < 50; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(writes(st).length, 0, 'a door moved the seat with the old Combo running');
+        const t = await textsOf(() => s.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
+        assert(t.includes(why), 'the reason on the Seats tab: ' + t.join(' | '));
+    }],
     ['2.6.2 easy entry: only a front door opening moves a seat (to its easy entry position); the engine never does; Back by hand', async () => {
         const r = seatRig(), { st, mover, C } = r;
         const drive = st.pos.slice();
@@ -1814,7 +1844,7 @@ checks.push(
             const env = Object.assign({}, process.env, { MGU_LOG_RAM: ram });
             // eslint-disable-next-line no-new-func
             return new Function('fs', 'path', 'SPEC', 'DATA_DIR', 'process', 'setInterval', part + '\nreturn { LOG_FILE, LOG_DISK, fileLog, copyLog };')(
-                fs, path, { id: 'combo' }, data, { env, getuid: process.getuid }, () => ({ unref() {} }));
+                fs, path, { id: 'cockpit_combo' }, data, { env, getuid: process.getuid }, () => ({ unref() {} }));
         };
         const ram = tmp('ram'), data = tmp('data');
         const L = load(ram, data);

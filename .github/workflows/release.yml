@@ -1,7 +1,7 @@
 name: Release package
 
-# A published release (tag vX.Y.Z, the version in apps/combo/app.json) gets Combo's package attached:
-# combo@X.Y.Z.tgz, built with kit/tools/build.py --no-sdk. BMW's oap-sdk is never in it; the head unit makes that
+# A published release (tag vX.Y.Z, the version in apps/cockpit_combo/app.json) gets Cockpit's package attached:
+# cockpit_combo@X.Y.Z.tgz, built with kit/tools/build.py --no-sdk. BMW's oap-sdk is never in it; the head unit makes that
 # module itself (the MGU Store's docs/PUBLISHING.md, "Releases" layout). Run by hand, it builds with the branch's
 # tools for an earlier release, if the app's code is still the tag's (v2.7.0 came before build.py's --no-sdk).
 on:
@@ -35,21 +35,21 @@ jobs:
           node-version: '22'
       - name: The tag is the app's version
         run: |
-          ver=$(python3 -c "import json; print(json.load(open('apps/combo/app.json'))['version'])")
+          ver=$(python3 -c "import json; print(json.load(open('apps/cockpit_combo/app.json'))['version'])")
           echo "VER=$ver" >> "$GITHUB_ENV"
-          if [ "${TAG#v}" != "$ver" ]; then echo "tag $TAG but apps/combo/app.json is $ver"; exit 1; fi
+          if [ "${TAG#v}" != "$ver" ]; then echo "tag $TAG but apps/cockpit_combo/app.json is $ver"; exit 1; fi
       - name: By hand, the app's code is the tag's
         if: github.event_name == 'workflow_dispatch'
-        run: git diff --stat --exit-code "$TAG" HEAD -- apps/combo shared kit/runtime kit/platform kit/localization
+        run: git diff --stat --exit-code "$TAG" HEAD -- apps/cockpit_combo shared kit/runtime kit/platform kit/localization
       - name: Build without the SDK
         run: |
           test ! -e oap-sdk
-          python3 kit/tools/build.py --no-sdk combo
+          python3 kit/tools/build.py --no-sdk cockpit_combo
       - name: No SDK in the package
         run: |
-          pkg="dist/combo@$VER.tgz"
+          pkg="dist/cockpit_combo@$VER.tgz"
           if tar -tzf "$pkg" | grep -i -E 'oap-sdk|node_modules'; then echo "the package holds SDK files"; exit 1; fi
-          tar -xzOf "$pkg" package/package.json | python3 -c "import json,sys; p=json.load(sys.stdin); assert p['name']=='combo' and p['version']=='$VER' and p.get('mguHmi'), p"
+          tar -xzOf "$pkg" package/package.json | python3 -c "import json,sys; p=json.load(sys.stdin); assert p['name']=='cockpit_combo' and p['version']=='$VER' and p.get('mguHmi'), p"
           ls -l "$pkg"
       - name: Attach to the release
-        run: gh release upload "$TAG" "dist/combo@$VER.tgz" --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "dist/cockpit_combo@$VER.tgz" --clobber --repo "$GITHUB_REPOSITORY"

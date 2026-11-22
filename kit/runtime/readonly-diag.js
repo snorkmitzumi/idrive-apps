@@ -17,7 +17,7 @@
  * writes (2E), I/O control (2F), routines (31), downloads (34-37), tester present (3E), DTC
  * settings (85), any functional request but 22 F1 50, and a physical request to 0xDF.
  *
- * One write, and only for whoever asks seatMotors(link) first (Combo's seat memory, apps/combo/seatmove.js):
+ * One write, and only for whoever asks seatMotors(link) first (Cockpit's seat memory, apps/cockpit_combo/seatmove.js):
  *
  *   0x2E D7 08 <motor> <action> <pwm>   a front seat motor run or stopped (FAS_G11 / BFS_G11 job STEUERN
  *                   ARG;MOTOR), to 0x6D (driver) or 0x6E (passenger) only: motor 0-4 (SLV SHV LNV SNV KHV),

@@ -1,8 +1,8 @@
 {
-  "id": "combo",
-  "title": "Combo",
+  "id": "cockpit_combo",
+  "title": "Cockpit",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -129,7 +129,7 @@
     {
       "name": "MAIN",
       "kind": "canvas",
-      "title": "Combo",
+      "title": "Cockpit",
       "buttons": [
         [
           "BTN_RESET",
@@ -153,7 +153,7 @@
     {
       "key": "tabSeats",
       "group": "Tabs",
-      "label": "Seats: off, Combo reads nothing from the seats and no door moves one (no easy entry)",
+      "label": "Seats: off, Cockpit reads nothing from the seats and no door moves one (no easy entry)",
       "type": "bool",
       "default": true
     },
@@ -167,7 +167,7 @@
     {
       "key": "tabAmbient",
       "group": "Tabs",
-      "label": "Ambient: off, Combo gives the ambient light back and leaves it to the car or another ambient app",
+      "label": "Ambient: off, Cockpit gives the ambient light back and leaves it to the car or another ambient app",
       "type": "bool",
       "default": true
     },

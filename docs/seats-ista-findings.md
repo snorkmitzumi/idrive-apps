@@ -2,10 +2,10 @@
 
 **Author:** snorkmitzumi, 2026. **Car:** G26 M440i xDrive, seat modules FAS_G11 (driver) and BFS_G11 (passenger).
 **Licence:** [CC BY-NC 4.0](../LICENSES/CC-BY-NC-4.0.txt). You may share and adapt this write-up for noncommercial
-purposes if you credit it and link to this repository. Combo's code that puts it to use is under the PolyForm
+purposes if you credit it and link to this repository. Cockpit's code that puts it to use is under the PolyForm
 Noncommercial licence (see [NOTICE.md](../NOTICE.md)).
 
-This is how Combo moves the front seats: what was learned by watching BMW's workshop software (ISTA) drive the seat
+This is how Cockpit moves the front seats: what was learned by watching BMW's workshop software (ISTA) drive the seat
 motors over ICOM, and then by testing on the car. Nothing here comes from BMW's software or documents: no ISTA files,
 traces, SGBDs or BMW code are included or quoted. The identifier names come from the public
 [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/).
@@ -64,10 +64,10 @@ What ISTA does, and what turned out to be enough:
   `00` when the second starts) and then run the motors one after another.
 - **The head unit's transport is busy now and then** and turns requests away (`TEMPORARILY_NOT_ACCEPTED`). Treat that
   as a missed read and send again. Don't end a move on one refusal: the motor is still running.
-- **Other traffic on the link gets in the way.** Writes to the body module (Combo's ambient light, a door's red
+- **Other traffic on the link gets in the way.** Writes to the body module (Cockpit's ambient light, a door's red
   blink) crowded the seat reads off the link. Hold them while a seat moves.
 
-## How Combo reaches a position
+## How Cockpit reaches a position
 
 1. Only when standing still, with the module initialised (`D704` byte 0 = 1), its end stops known and no motor
    running.
@@ -82,12 +82,12 @@ What ISTA does, and what turned out to be enough:
 
 The head unit has BMW's own seat interface (`de.bmw.infotainment.misc.SeatFunction`, with the memory buttons and the
 module's own recall), but on the test car it is **not offered to apps**. The seat-command proxy
-(`SeatCommandProxyCtrl`) is offered, and Combo only reads its status. There is no diagnostic request that starts the
-module's own memory recall, so Combo drives the motors itself as described above.
+(`SeatCommandProxyCtrl`) is offered, and Cockpit only reads its status. There is no diagnostic request that starts the
+module's own memory recall, so Cockpit drives the motors itself as described above.
 
 ## Never send
 
-These are in the same modules and can lose the seat's learned positions or its setup. Combo refuses them:
+These are in the same modules and can lose the seat's learned positions or its setup. Cockpit refuses them:
 
 | Identifier | What it is |
 |---|---|
@@ -95,6 +95,6 @@ These are in the same modules and can lose the seat's learned positions or its s
 | `DAFC` | factory defaults |
 | routine (`31`) `A703` | initialisation run |
 | `D72C` | motor mapping |
-| routine (`31`) `4006` | not used by Combo; left alone |
+| routine (`31`) `4006` | not used by Cockpit; left alone |
 
-Combo's diagnostic link lets out only reads, plus `2E D7 08` to `0x6D` and `0x6E`.
+Cockpit's diagnostic link lets out only reads, plus `2E D7 08` to `0x6D` and `0x6E`.
