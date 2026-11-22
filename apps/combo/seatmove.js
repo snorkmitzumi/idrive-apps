@@ -51,10 +51,10 @@ const FITTED = 5;                    // SLV SHV LNV SNV KHV: the motors a G26's 
 const ORDER = [0, 2, 3, 1, 4];       // SLV, LNV, SNV, SHV, KHV: the module's own recall order (two at once)
 const AT_ONCE = 5;                   // every motor that has to move, at once (2.6.1's two at a time looked like a replay of
                                      // the driver's own steps); fewer when the module turns one away (atOnce, learned)
-const TOL = 4;                       // counts: at the target
+const TOL = 8;                       // counts: at the target (~4 mm; 2.6.6's 4 took up to 6 starts a motor on a G26)
 const MARGIN = 3;                    // counts kept from a learned end stop (a G26 memory position was 6 from one)
 const LEAD_S = 0.12;                 // at least this many seconds of a motor's speed: where it is stopped before the target
-const PASSES = 5;                    // corrections of an axis that stopped short or went past
+const PASSES = 3;                    // corrections of an axis that stopped short or went past
 const PULSE_PART = 0.75;             // a correction pulse goes this part of the way: from one side, closer each time, rather
                                      // than past and back (a stop's delay on the link varies by a tenth of a second and more)
 const START_MS = 1500;               // a motor that hasn't moved MOVED counts by then: something holds it
@@ -107,11 +107,25 @@ class SeatMover {
     clear(addr) {
         if (this.run) return false;
         const k = hex(addr), m = this.mem[k] || {};
-        this.mem[k] = m.atOnce ? { atOnce: m.atOnce } : {};
+        // (what the seat module is like stays: one motor at a time, each motor's coast)
+        this.mem[k] = {};
+        if (m.atOnce) this.mem[k].atOnce = m.atOnce;
+        if (m.coast) this.mem[k].coast = m.coast;
         this.write();
         this.log.info('seat ' + A(addr) + ': saved positions cleared');
         this.last = { addr, slot: 'clear', ok: true, why: 'Saved positions cleared' };
         return true;
+    }
+    /**
+     * A motor's coast: counts it goes on after the STOP of its timed approach (as this seat's moves measured it; under
+     * the driver's weight, with the link's delay), so it is stopped that much earlier. Kept in seatmem.json.
+     */
+    coast(addr, i) { const m = this.mem[hex(addr)]; return m && m.coast && typeof m.coast[i] === 'number' ? m.coast[i] : 0; }
+    learnCoast(addr, i, over) {
+        const k = hex(addr), m = this.mem[k] = this.mem[k] || {}, c = (m.coast || [0, 0, 0, 0, 0]).slice();
+        c[i] = Math.round(Math.max(-40, Math.min(80, (c[i] || 0) + over * 0.6)));
+        m.coast = c;
+        this.write();
     }
     /** A motor's pulse time per count against its speed (1 at first). */
     gain(addr, i) { const g = this.gains[hex(addr)]; return g && g[i] ? g[i] : 1; }
@@ -307,7 +321,7 @@ class SeatMover {
             if (m0[i] === 3 || v === null || v === undefined || p === null || !lim || p < lim.minus - 40 || p > lim.plus + 40) { target.push(null); continue; }
             target.push(Math.max(lim.minus + MARGIN, Math.min(lim.plus - MARGIN, v)));
         }
-        const passes = {}, stopped = {}, stoppedDir = {}, pulses = [], stats = {}, from = pos.slice();
+        const passes = {}, stopped = {}, stoppedDir = {}, pulses = [], approached = [], stats = {}, from = pos.slice();
         const stat = (i) => stats[i] || (stats[i] = { starts: 0, ms: 0 });
         // each motor that moved, for the log: where from and to (and the target when not on it), starts, time it ran
         const summary = () => ORDER.filter((i) => stats[i]).map((i) => AXES[i] + ' ' + from[i] + '>' + pos[i] + (Math.abs(pos[i] - target[i]) > TOL ? ' (want ' + target[i] + ')' : '')
@@ -358,8 +372,10 @@ class SeatMover {
                 const now = posOf(d);
                 for (let i = 0; i < FITTED; i++) pos[i] = now[i];
                 this.show(addr, pos);
-                // the pulses since the last look: how far each went against how far it was meant to
+                // the pulses since the last look: how far each went against how far it was meant to; the timed approaches:
+                // how far past (or short of) the target each came to rest - its coast for next time
                 pulses.splice(0).forEach((q) => this.taught(addr, q.i, q.d, Math.abs(pos[q.i] - q.from)));
+                approached.splice(0).forEach((q) => { if (target[q.i] !== null && pos[q.i] !== null) this.learnCoast(addr, q.i, (pos[q.i] - target[q.i]) * (q.dir === PLUS ? 1 : -1)); });
                 const off = ORDER.filter((i) => target[i] !== null && Math.abs(target[i] - pos[i]) > TOL && (passes[i] = (passes[i] || 0) + 1) <= PASSES);
                 if (!off.length) {
                     const miss = ORDER.filter((i) => target[i] !== null && Math.abs(target[i] - pos[i]) > TOL);
@@ -418,9 +434,11 @@ class SeatMover {
                 const stoppedBySeat = m && m[i] === STOP && now - r.t0 > 500;
                 // at the target before the next look: the rest of the way timed from its speed, then STOP (a read that comes
                 // late on a busy link then can't carry it past)
-                const eta = left / Math.max(5, r.v);
-                if (left <= 1 || stoppedBySeat || eta <= roundS + 0.05) {
-                    if (!stoppedBySeat && left > 1) await this.sleep(Math.max(0, eta * 1000 - STOP_LAT_MS));
+                // (its coast as learned: stopped that many counts sooner)
+                const lead = left - this.coast(addr, i), eta = lead / Math.max(5, r.v);
+                if (lead <= 1 || stoppedBySeat || eta <= roundS + 0.05) {
+                    if (!stoppedBySeat && lead > 1) await this.sleep(Math.max(0, eta * 1000 - STOP_LAT_MS));
+                    if (!stoppedBySeat) approached.push({ i, dir: r.dir });
                     this.learn(addr, i, r.v, (now - r.t0) / 1000);
                     stat(i).ms += this.now() - r.t0;
                     await this.cmd(run, i, STOP);

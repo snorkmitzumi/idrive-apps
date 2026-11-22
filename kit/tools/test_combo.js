@@ -1190,6 +1190,7 @@ function seatRig(o) {
         if (o.refuse) return [0x7F, 0x2E, 0x22];
         if (o.maxMotors && act !== 0 && !st.run[m] && st.run.filter((x) => x).length >= o.maxMotors) return [0x7F, 0x2E, 0x22];
         if (o.single && act !== 0) st.run = st.run.map((x, j) => (j === m ? x : 0));      // one motor at a time: the next one stops the last
+        if (o.coast && act === 0 && st.run[m]) st.pos[m] += (st.run[m] === 1 ? 1 : -1) * o.coast;   // goes on after its STOP (load, the link's delay)
         if (o.busy && ++st.n % o.busy === 0) { st.refused = (st.refused || 0) + 1; throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED'); }
         st.run[m] = act;
         st.maxAtOnce = Math.max(st.maxAtOnce, st.run.filter((x) => x).length);
@@ -1245,7 +1246,7 @@ checks.push(
         st.pos = [C + 150, C - 200, C - 900, C + 20, C + 100];
         const res = await mover.recall(0x6D, '1');
         assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
-        st.pos.forEach((v, i) => assert(Math.abs(v - saved[i]) <= 4, 'axis ' + i + ': ' + (v - saved[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - saved[i]) <= 8, 'axis ' + i + ': ' + (v - saved[i])));
         assert(st.run.every((x) => x === 0), 'every motor stopped');
         assert(st.maxAtOnce >= 4, 'the motors together, not one after another: ' + st.maxAtOnce);
         const w = writes(st);
@@ -1294,7 +1295,7 @@ checks.push(
         // beyond the learned end stop (SLV +526): kept MARGIN inside it
         r = seatRig(); r.mover.mem['6D'] = { '1': [32768 + 900, 32768 - 355, 32768 - 380, 32768 + 93, 32768 - 9] };
         await r.mover.recall(0x6D, '1');
-        assert(Math.abs(r.st.pos[0] - (32768 + 526 - 3)) <= 4, 'clamped: ' + (r.st.pos[0] - 32768));
+        assert(Math.abs(r.st.pos[0] - (32768 + 526 - 3)) <= 8, 'clamped: ' + (r.st.pos[0] - 32768));
         // a motor that doesn't move: stopped
         r = seatRig(); r.st.stuck = 2; r.mover.mem['6D'] = { '1': [32768 + 345, 32768 - 355, 32768 - 900, 32768 + 93, 32768 - 9] };
         const st = await r.mover.recall(0x6D, '1');
@@ -1317,7 +1318,7 @@ checks.push(
         s.modules.seats = []; s.modules.state = 'idle'; s.modules.link = Object.assign({}, r.link, { available: true });
         s.doors([]); s.doors(['driver front']); await settle();
         assert(s.modules.seats.some((x) => x.addr === 0x6D), 'the seat module taken at 0x6D');
-        assert(Math.abs(st.pos[0] - (C + 30)) <= 4 && Math.abs(st.pos[2] - (C - 900)) <= 4 && st.pos[1] === drive[1], 'to the entry position: ' + st.pos.map((v) => v - C));
+        assert(Math.abs(st.pos[0] - (C + 30)) <= 8 && Math.abs(st.pos[2] - (C - 900)) <= 8 && st.pos[1] === drive[1], 'to the entry position: ' + st.pos.map((v) => v - C));
         assert.deepStrictEqual(s.mover.slots(0x6D).R, drive, 'the driving position kept');
         assert(s.mover.entered(0x6D));
         // closed and opened again (getting in): already there, nothing moves, the driving position still the one kept
@@ -1337,12 +1338,12 @@ checks.push(
         // Back (by hand): to the driving position
         ({ cv, out } = draw());
         press(cv, 'seat-109-back'); await settle();
-        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back: axis ' + i + ' ' + (v - drive[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 8, 'back: axis ' + i + ' ' + (v - drive[i])));
         assert(!s.mover.entered(0x6D), 'entry over');
         // with the engine running a door opened still takes the seat there (only the door counts)
         r.values.live.rpm = 700; r.values.live.rpmT = st.clock;
         s.doors([]); s.doors(['driver front']); await settle();
-        assert(Math.abs(st.pos[0] - (C + 30)) <= 4, 'engine on, door opened: easy entry');
+        assert(Math.abs(st.pos[0] - (C + 30)) <= 8, 'engine on, door opened: easy entry');
         // the setting off: nothing
         assert((await s.mover.back(0x6D)).ok);
         const m2 = writes(st).length;
@@ -1359,7 +1360,7 @@ checks.push(
         for (let k = 0; k < 20 && !s.mover.slots(0x6D)['2']; k++) await new Promise((res) => setImmediate(res));
         assert.deepStrictEqual(s.mover.slots(0x6D)['2'], st.pos, 'saved in 2');
     }],
-    ['2.6.5 an uneven link (each request 25-80 ms as ISTA saw the seat module, every fourth turned away): ten recalls, each motor within 4 counts', async () => {
+    ['2.6.5 an uneven link (each request 25-80 ms as ISTA saw the seat module, every fourth turned away): ten recalls, each motor within 8 counts (the tolerance)', async () => {
         for (const seed of [7, 11, 23]) {
             const r = seatRig({ jitter: 55, busy: 4, seed }), { st, mover, C } = r;
             const places = [[C + 150, C - 200, C - 900, C + 20, C + 100], [C + 500, C + 100, C - 100, C - 90, C - 100], [C + 10, C - 340, C - 1400, C + 80, C + 120]];
@@ -1368,7 +1369,7 @@ checks.push(
                 mover.mem['6D'] = { '1': want };
                 const res = await mover.recall(0x6D, '1');
                 assert(res.ok, 'seed ' + seed + ' run ' + k + ': ' + res.why);
-                st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'seed ' + seed + ' run ' + k + ' axis ' + i + ': ' + (v - want[i])));
+                st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 8, 'seed ' + seed + ' run ' + k + ' axis ' + i + ': ' + (v - want[i])));
                 assert(st.run.every((x) => !x), 'run ' + k + ': a motor left running');
             }
         }
@@ -1392,7 +1393,7 @@ checks.push(
         mover.mem['6D'] = { '1': want };
         const res = await mover.recall(0x6D, '1');
         assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
-        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'axis ' + i + ': ' + (v - want[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 8, 'axis ' + i + ': ' + (v - want[i])));
         assert(r.logs.some((x) => /turned away with 2 running: 2 at once from now/.test(x)), r.logs.join(' | '));
         const { SeatMover } = appModule('seatmove');
         fs.writeFileSync(path.join(r.dir, 'seatmem.json'), JSON.stringify({ '6D': { '1': want, '3': [1, 2, 3, 4, 5] } }));
@@ -1406,7 +1407,7 @@ checks.push(
         mover.mem['6D'] = { '1': target };
         const res = await mover.recall(0x6D, '1');
         assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
-        st.pos.forEach((v, i) => assert(Math.abs(v - target[i]) <= 4, 'axis ' + i + ': ' + (v - target[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - target[i]) <= 8, 'axis ' + i + ': ' + (v - target[i])));
         assert(st.refused > 5, 'requests were turned away: ' + st.refused);
         // the seat modules' reads go on: nothing logged about this move
         const before = r.logs.length;
@@ -1562,7 +1563,7 @@ checks.push(
         mover.mem['6D'] = { E: want };
         const res = await mover.recall(0x6D, 'E', 'Easy entry');
         assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
-        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'axis ' + i + ': ' + (v - want[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 8, 'axis ' + i + ': ' + (v - want[i])));
         assert(r.logs.some((x) => /stopped when another started: one motor at a time from now on/.test(x)), r.logs.join(' | '));
         assert.strictEqual(mover.slots(0x6D).atOnce, 1, 'kept for the next start of the app');
         // the next run: one motor at a time from the start, each started once (no stop-and-go)
@@ -1571,7 +1572,7 @@ checks.push(
         const n = writes(st).length;
         const res2 = await mover.recall(0x6D, 'E', 'Easy entry');
         assert(res2.ok, res2.why);
-        st.pos.forEach((v, i) => assert(Math.abs(v - again[i]) <= 4, 'again axis ' + i + ': ' + (v - again[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - again[i]) <= 8, 'again axis ' + i + ': ' + (v - again[i])));
         const starts = writes(st).slice(n).filter((x) => / [12] 100$/.test(x));
         const per = {}; starts.forEach((x) => { const k = x.split(' ')[2]; per[k] = (per[k] || 0) + 1; });
         assert(Object.keys(per).every((k) => per[k] <= 2), 'each motor started once or twice (a correction): ' + JSON.stringify(per));
@@ -1674,14 +1675,14 @@ checks.push(
         const wait = (ms) => new Promise((res) => setTimeout(res, ms));
         s.doors([]);                                            // (the first report)
         s.doors(['driver front']); await settle();
-        assert(Math.abs(st.pos[2] - (C - 900)) <= 4 && s.mover.entered(0x6D), 'at the entry position');
+        assert(Math.abs(st.pos[2] - (C - 900)) <= 8 && s.mover.entered(0x6D), 'at the entry position');
         // closed, opened again within 1.5 s (still getting in): nothing moves
         const n = writes(st).length;
         s.doors([]); await wait(300); s.doors(['driver front']); await wait(1600); await settle();
         assert.strictEqual(writes(st).length, n, 'opened again before 1.5 s: not moved');
         // closed for good: back to the driving position
         s.doors([]); await wait(1700); await settle();
-        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back: axis ' + i + ' ' + (v - drive[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 8, 'back: axis ' + i + ' ' + (v - drive[i])));
         assert(!s.mover.entered(0x6D));
         // closed while the entry move still goes: it stops, then back
         st.pos[2] = drive[2];
@@ -1693,7 +1694,30 @@ checks.push(
         s.doors([]); await wait(1800);
         s.mover.sleep = fast;
         for (let k = 0; k < 100 && (s.mover.run || s.mover.entered(0x6D)); k++) { await settle(); await wait(20); }
-        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back after a stopped entry: axis ' + i + ' ' + (v - drive[i])));
+        st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 8, 'back after a stopped entry: axis ' + i + ' ' + (v - drive[i])));
         assert(st.run.every((x) => !x), 'every motor stopped');
+    }],
+);
+
+checks.push(
+    ['2.6.7 a seat that goes on after its STOP (load, the link\'s delay): the coast learned, from the second move each motor started once', async () => {
+        const r = seatRig({ single: true, coast: 15 }), { st, mover, C } = r;
+        const a = [C + 345, C - 355, C - 380, C + 93, C - 9], b = [C + 256, C - 165, C - 380, C - 24, C - 9];
+        const starts = [];
+        for (let k = 0; k < 5; k++) {
+            const want = k % 2 ? a : b;
+            mover.mem['6D'] = Object.assign(mover.mem['6D'] || {}, { E: want });
+            const n = writes(st).length;
+            const res = await mover.recall(0x6D, 'E', 'Easy entry');
+            assert(res.ok, 'move ' + k + ': ' + res.why);
+            st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 8, 'move ' + k + ' axis ' + i + ': ' + (v - want[i])));
+            const per = {};
+            writes(st).slice(n).filter((x) => / [12] 100$/.test(x)).forEach((x) => { const i = x.split(' ')[2]; per[i] = (per[i] || 0) + 1; });
+            starts.push(per);
+        }
+        const most = (per) => Math.max.apply(null, Object.keys(per).map((k) => per[k]));
+        // (without the coast every motor needs a correction: twice each)
+        starts.slice(1).forEach((per, k) => assert(most(per) === 1, 'move ' + (k + 1) + ': ' + JSON.stringify(per) + ' (all: ' + JSON.stringify(starts) + ')'));
+        assert(mover.slots(0x6D).coast.some((c) => c >= 8), 'a coast learned: ' + mover.slots(0x6D).coast);
     }],
 );
