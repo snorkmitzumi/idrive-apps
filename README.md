@@ -194,7 +194,7 @@ Then add this repository to the MGU Store and install **Cockpit**. When you add 
 follow:
 
 - **Releases:** the ready package from the newest [release](https://github.com/snorkmitzumi/idrive-apps/releases)
-  (`cockpit_cockpit_combo@<version>.tgz`). It holds no BMW software; the head unit links it to the BMW SDK already on it. Choose this
+  (`cockpit_combo@<version>.tgz`). It holds no BMW software; the head unit links it to the BMW SDK already on it. Choose this
   to get only released versions.
 - **Tags:** the head unit builds the newest release tag (`v2.7.0` ...) from source, with the SDK on the unit.
 - **The `main` branch:** the head unit builds `main` from source (it reads [`mgu-repo.json`](mgu-repo.json)), so every
@@ -286,8 +286,9 @@ The head unit runs Node 8: no `?.`, `??`, object spread, `catch {` or `.finally`
 for your own unit needs BMW's app SDK from it; see [KIT.md](KIT.md).
 
 **Releasing:** raise `version` in `apps/cockpit_combo/app.json` in a pull request, merge it, then publish a GitHub release
-tagged `v<version>` on `main`. The *Release package* workflow builds `cockpit_cockpit_combo@<version>.tgz` with
-`kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release. For an
+tagged `v<version>` on `main`. The *Release package* workflow builds `cockpit_combo@<version>.tgz` with
+`kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release, with `mgu-store.json` and the icon
+(the title, description and icon the MGU Store shows for a release's app; without them it shows the bare id). For an
 earlier release, run that workflow by hand with its tag.
 
 ## How the seats were worked out

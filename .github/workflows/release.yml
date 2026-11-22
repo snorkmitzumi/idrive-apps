@@ -51,5 +51,23 @@ jobs:
           if tar -tzf "$pkg" | grep -i -E 'oap-sdk|node_modules'; then echo "the package holds SDK files"; exit 1; fi
           tar -xzOf "$pkg" package/package.json | python3 -c "import json,sys; p=json.load(sys.stdin); assert p['name']=='cockpit_combo' and p['version']=='$VER' and p.get('mguHmi'), p"
           ls -l "$pkg"
+      - name: The Store's title, description and icon for it (mgu-store.json)
+        # without it the MGU Store lists a release's app by its bare id, with no icon (its docs/PUBLISHING.md)
+        run: |
+          cp apps/cockpit_combo/icon.png dist/cockpit_combo-icon.png
+          python3 - <<'PY'
+          import hashlib, json
+          app = json.load(open('apps/cockpit_combo/app.json'))
+          icon = open('dist/cockpit_combo-icon.png', 'rb').read()
+          assert len(icon) <= 128 * 1024, 'icon over 128 KiB'
+          json.dump({'apps': {app['id']: {
+              'title': app['title'],
+              'description': 'Driving data, performance timing, engine health, seat memory and easy entry, and the ambient light: tabs of one app',
+              'author': 'snorkmitzumi',
+              'icon': 'cockpit_combo-icon.png',
+              'iconSha256': hashlib.sha256(icon).hexdigest(),
+          }}}, open('dist/mgu-store.json', 'w'), indent=2)
+          PY
+          cat dist/mgu-store.json
       - name: Attach to the release
-        run: gh release upload "$TAG" "dist/cockpit_combo@$VER.tgz" --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" "dist/cockpit_combo@$VER.tgz" dist/mgu-store.json dist/cockpit_combo-icon.png --clobber --repo "$GITHUB_REPOSITORY"
