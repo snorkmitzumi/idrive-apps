@@ -1598,3 +1598,28 @@ checks.push(
         assert(!cv.targets.some((x) => x.key === 'seat-109-clear'), 'nothing left to clear: not pressable');
     }],
 );
+
+checks.push(
+    ['2.6.6 a seat move holds the ambient light\'s writes (its door blink crowded the seat out) until it ends; waits for its write under way', async () => {
+        const firstWrite = async (light) => {
+            const r = seatRig(), { st, mover, C } = r, calls = [];
+            const t0 = st.clock;
+            let at = null;
+            const motor = mover.motor;
+            mover.motor = (...a) => { if (at === null) at = st.clock - t0; return motor(...a); };
+            mover.quietOthers = (on) => { calls.push(on); return on ? light() : null; };
+            mover.mem['6D'] = { E: [C + 150, C - 200, C - 380, C + 93, C - 9] };
+            const res = await mover.recall(0x6D, 'E', 'Easy entry');
+            return { res, at, calls };
+        };
+        // the light quiet at once: the motors start straight away; held first, let go last
+        const quick = await firstWrite(() => Promise.resolve());
+        assert(quick.res.ok, quick.res.why);
+        assert(quick.at < 500, 'first motor after ' + quick.at + ' ms (the seat read first, no wait for the light)');
+        assert.deepStrictEqual([quick.calls[0], quick.calls[quick.calls.length - 1]], [true, false], 'held, then let go: ' + quick.calls);
+        // a write of the light's that never ends: the motors wait for it 3 s, then go anyway
+        const stuck = await firstWrite(() => new Promise(() => {}));
+        assert(stuck.res.ok, 'not stuck on the light: ' + stuck.res.why);
+        assert(stuck.at >= 3000, 'no motor while the light\'s write is under way: ' + stuck.at + ' ms');
+    }],
+);

@@ -82,9 +82,10 @@ deletes the seat's saved positions. A move:
   at a time (it stops the last when the next starts) is found out on the first move and then gets one motor after the
   other, each straight to its target.
 
-2.6.3 also listens (reading only) to BMW's own seat interfaces on the head unit: the memory buttons, the seat's memory
-status and the car's own easy entry setting. The log shows whether the car lets an app hear them; if it does, a later
-version can use the seat's own memory recall.
+2.6.3 also listens (reading only) to BMW's own seat interfaces on the head unit. On a G26 the car doesn't offer
+BMW's seat functions (`SeatFunction`: the memory buttons, the seat module's own recall) to apps, so Combo moves the
+motors itself. While a seat moves, the ambient light holds its writes: a door's red blink would otherwise crowd the seat
+off the diagnostic link.
 
 ### M View
 

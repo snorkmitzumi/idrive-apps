@@ -58,7 +58,7 @@ class Seats {
         this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
         // memory 1-3 and easy entry: with the link's seat writer only (kit/readonly-diag.js seatMotors)
         this.settings = o.settings || null; this.values = o.values || { live: {} };
-        this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir }) : null;
+        this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir, quietOthers: o.quietOthers }) : null;
         this.saving = null;          // { addr, until }: Save pressed, the next slot pressed takes the position
         this.holds = []; this.holding = null;
     }

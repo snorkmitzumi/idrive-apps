@@ -94,6 +94,9 @@ class SeatMover {
         // (2.6.1: Memory 3 was the entry position - it is Easy entry's own now, and there is no Memory 3)
         Object.keys(this.mem).forEach((k) => { const m = this.mem[k]; if (m && m['3']) { if (!m.E) m.E = m['3']; delete m['3']; } });
         this.run = null; this.last = null;
+        // the other writers on the diagnostic link held while a seat moves (main.js: the ambient light - a door opened
+        // starts its red door blink, whose writes crowded the seat out: 2.6.5 on a G26, every easy entry "stopped answering")
+        this.quietOthers = o.quietOthers || null;
         this.speeds = {};            // address -> each motor's speed as measured in this seat's moves (counts / s)
         this.gains = {};             // address -> each motor's pulse time per count, as the pulses moved it (1: as its speed says)
         this.atOnce = {};            // address -> motors the module took at once (when it turned one more away)
@@ -207,10 +210,20 @@ class SeatMover {
     begin(addr, slot, why) {
         const run = this.run = { addr, slot, why, started: [], t0: this.now(), goodAt: this.now(), end: null };
         if (this.modules) this.modules.paused = true;
+        run.quiet = this.quietOthers ? Promise.resolve().then(() => this.quietOthers(true)).catch(() => {}) : Promise.resolve();
         return run;
+    }
+    /** Until the other writers are quiet (the write they had under way done), at most ms. */
+    async waitQuiet(run, ms) {
+        if (!this.quietOthers) return;
+        let done = false;
+        run.quiet.then(() => { done = true; });
+        for (let t = 0; !done && t < ms; t += 50) await this.sleep(50);
+        run.goodAt = this.now();
     }
     async end(run) {
         await this.stopAll(run);
+        if (this.quietOthers) Promise.resolve().then(() => this.quietOthers(false)).catch(() => {});
         // the seat modules' reads go on from where the seat is now: the moves of this run not logged again by them
         const s = this.seat(run.addr);
         if (s) { s.quiet = true; s.at = 0; }           // (its motor states as this run last read them: not current any more)
@@ -277,6 +290,7 @@ class SeatMover {
 
     async go(run, want, name) {
         const addr = run.addr;
+        await this.waitQuiet(run, 3000);
         const init = await this.limits(run);
         if (init.init !== 1) return { ok: false, why: 'The seat is not initialised' };
         const st = await this.state(run);
@@ -456,6 +470,7 @@ class SeatMover {
         return this.last;
     }
     async held(run, i, dir, lim, from, moved) {
+        await this.waitQuiet(run, 300);
         if (run.end === 'Let go') return { ok: true, why: 'Let go' };
         await this.cmd(run, i, dir);
         // let go while the start was on its way: release()'s STOP follows it, and end() sends one more
