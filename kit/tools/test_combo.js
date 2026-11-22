@@ -57,8 +57,6 @@ Module._load = function (req, parent, isMain) {
     // the read-only link's private Diag (check '4. timing options reach the link')
     if (req === './diag' && stubDiag && parent && /readonly-diag\.js$/.test(parent.filename)) return Object.assign({}, load.call(this, req, parent, isMain), { Diag: stubDiag });
     if (req.startsWith('./kit/')) return load.call(this, path.join(KIT, req.slice(6)), parent, isMain);
-    // Ambient config's modules the app takes at build time (app.json "include"), from shared/ambient_config
-    if (req === './owner' && parent && parent.filename.indexOf(APP) === 0) return load.call(this, path.join(ROOT, 'shared', 'ambient_config', 'owner.js'), parent, isMain);
     return load.call(this, req, parent, isMain);
 };
 // every text drawn (the page's and the cached layers' - panel titles, bar labels) goes to `sink` while it is set;
@@ -1386,69 +1384,6 @@ checks.push(
         s.mover.run = { addr: 0x6D, slot: 'E' };
         s.off(); ended = s.mover.run.end;
         assert(/Seats tab was switched off/.test(ended), 'a move under way stopped: ' + ended);
-    }],
-    ['2.8.0 the old Combo (id "combo") still running: Cockpit\'s easy entry leaves the seats to it, and the Seats tab says so', async () => {
-        const { oldCombo, FILE } = appModule('oldcombo');
-        const dir = tmp('oldcombo'); let clock = 1e6;
-        const o = oldCombo({ dir, now: () => clock });
-        assert.strictEqual(o.running(), false, 'no claim: not running');
-        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: process.ppid, since: 1 }));
-        assert.strictEqual(o.running(), false, 'looked at again only after CHECK_MS');
-        clock += 10000;
-        assert.strictEqual(o.running(), true, 'a claim whose process is alive: running');
-        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: 2147483646, since: 1 })); clock += 10000;
-        assert.strictEqual(o.running(), false, 'its process gone: not running');
-        fs.writeFileSync(path.join(dir, FILE), JSON.stringify({ pid: process.pid, since: 1 })); clock += 10000;
-        assert.strictEqual(o.running(), false, 'this process itself is not the old app');
-        // the Seats tab: no door moves a seat, the reason shown
-        const r = seatRig(), { st, mover, C } = r;
-        mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
-        const { Seats } = appModule('seats');
-        const why = 'The old Combo app is running: easy entry is left to it. Uninstall Combo.';
-        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: settingsOf(), blocked: () => why });
-        s.modules.seats = r.modules.seats; s.modules.state = 'found'; s.mover.mem = mover.mem; s.mover.sleep = mover.sleep;
-        s.doors([]); s.doors(['driver front']);
-        for (let k = 0; k < 50; k++) await new Promise((res) => setImmediate(res));
-        assert.strictEqual(writes(st).length, 0, 'a door moved the seat with the old Combo running');
-        const t = await textsOf(() => s.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
-        assert(t.includes(why), 'the reason on the Seats tab: ' + t.join(' | '));
-    }],
-    ['2.8.0 migrate: Cockpit takes the old Combo\'s settings and seat positions once, never over its own', async () => {
-        const { migrate } = require(path.join(KIT, 'migrate.js'));
-        const apps = tmp('apps'), mk = (d, name) => { ['', 'source', 'data'].forEach((x) => fs.mkdirSync(path.join(apps, d, x))); if (name) fs.writeFileSync(path.join(apps, d, 'source', 'package.json'), JSON.stringify({ name })); return path.join(apps, d); };
-        const other = mk('oap_1002', 'redline'), old = mk('oap_1003', 'combo'), self = mk('oap_1009', 'cockpit_combo');
-        fs.writeFileSync(path.join(other, 'data', 'settings.json'), '{"x":1}');
-        fs.writeFileSync(path.join(old, 'data', 'settings.json'), JSON.stringify({ tabSeats: false, theme: 'dark' }));
-        fs.writeFileSync(path.join(old, 'data', 'seatmem.json'), JSON.stringify({ '6D': { '1': [1, 2, 3, 4, 5] } }));
-        const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
-        const files = SPEC.migrateFrom.files, data = path.join(self, 'data');
-        assert.strictEqual(SPEC.migrateFrom.id, 'combo');
-        ['settings.json', 'seatmem.json', 'perf.json'].forEach((f) => assert(files.indexOf(f) >= 0, f + ' not migrated'));
-        const r = migrate({ from: 'combo', files, appRoot: self, dataDir: data, log });
-        assert(r.done && r.from === old, JSON.stringify(r));
-        assert.deepStrictEqual(r.copied, ['settings.json', 'seatmem.json'], 'the files the old app has, the others skipped');
-        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')), { tabSeats: false, theme: 'dark' });
-        assert(fs.existsSync(path.join(old, 'data', 'settings.json')), 'the old app\'s files left as they were');
-        assert(lines.some((m) => /from combo .*settings\.json, seatmem\.json/.test(m)), lines.join(' | '));
-        // set up already (its own settings): nothing taken, its own kept
-        fs.writeFileSync(path.join(data, 'settings.json'), '{"theme":"light"}');
-        fs.writeFileSync(path.join(old, 'data', 'perf.json'), '{}');
-        const r2 = migrate({ from: 'combo', files, appRoot: self, dataDir: data, log });
-        assert(!r2.done && r2.why === 'already set up' && !fs.existsSync(path.join(data, 'perf.json')), JSON.stringify(r2));
-        assert.strictEqual(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'), '{"theme":"light"}');
-        // the old app not installed: nothing, said so
-        const lone = tmp('lone'); fs.mkdirSync(path.join(lone, 'oap_1')); fs.mkdirSync(path.join(lone, 'oap_1', 'data'));
-        const r3 = migrate({ from: 'combo', files, appRoot: path.join(lone, 'oap_1'), dataDir: path.join(lone, 'oap_1', 'data'), log });
-        assert(!r3.done && r3.why === 'not installed', JSON.stringify(r3));
-        // the old app's data folder not readable (another app's, as the head unit may keep it): nothing copied, logged
-        if (process.getuid && process.getuid() !== 0) {
-            const self2 = mk('oap_1010', 'cockpit_combo2');
-            fs.chmodSync(path.join(old, 'data', 'seatmem.json'), 0);
-            const r4 = migrate({ from: 'combo', files: ['seatmem.json'], appRoot: self2, dataDir: path.join(self2, 'data'), log });
-            fs.chmodSync(path.join(old, 'data', 'seatmem.json'), 0o644);
-            assert(!r4.done && r4.why === 'not readable' && lines.some((m) => /^WARN migrate: .*not readable: seatmem\.json \(EACCES\)/.test(m)), JSON.stringify(r4) + ' ' + lines.join(' | '));
-            assert(!fs.readdirSync(path.join(self2, 'data')).length, 'nothing half-written: ' + fs.readdirSync(path.join(self2, 'data')));
-        }
     }],
     ['2.6.2 easy entry: only a front door opening moves a seat (to its easy entry position); the engine never does; Back by hand', async () => {
         const r = seatRig(), { st, mover, C } = r;

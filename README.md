@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.8.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.8.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -29,7 +29,7 @@ with the MGU should work for the values they send. The seats are tested on a G26
 - [The tabs](#the-tabs)
 - [Screen layouts and controls](#screen-layouts-and-controls)
 - [Settings](#settings) (and [only the tabs you need](#only-the-tabs-you-need))
-- [Install](#install) (and [updating from Combo](#updating-from-combo-270-or-before))
+- [Install](#install)
 - [What Cockpit reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
 - [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
 - [Development](#development)
@@ -202,33 +202,6 @@ follow:
 
 Cockpit starts with the car (the ambient light needs it running) and shows up in *All apps*.
 
-### Updating from Combo (2.7.0 or before)
-
-Until 2.7.0 this app was **Combo**, with the id `combo`. Since 2.8.0 it is **Cockpit**, with the id `cockpit_combo`, as
-the MGU Store asks for an id of its own. For the head unit that is a different app: the Store installs Cockpit next to
-Combo instead of updating it, and each keeps its own saved data.
-
-1. **Install Cockpit** and open it once. On its first start it copies what Combo saved: every setting (the ambient
-   light's colours and looks among them), memory 1 and 2 and the easy entry position, and the dyno baseline and best
-   drag times. Nothing of Combo's is changed.
-2. **Check** your seat positions and colours in Cockpit. The QR log says what was copied (`migrate:` lines).
-3. **Uninstall Combo** in the MGU Store.
-
-The copy happens only while Cockpit has saved no settings of its own, and only if the head unit lets one app read
-another's folder. If it doesn't, the log says so (`migrate: ... not readable`) and Cockpit starts fresh: set Settings up
-again and save the seat positions again. Or, with root over SSH, copy them yourself with the two folders that log line
-names (`<combo>` and `<cockpit>` below): the files must then belong to Cockpit's user, or it can't save them.
-
-```bash
-cd <combo>/data && cp -n settings.json seatmem.json perf.json <cockpit>/ && chown --reference=<cockpit> <cockpit>/*.json
-```
-
-Then restart Cockpit (or the head unit).
-
-Both installed would both start with the car. While the old Combo still runs, Cockpit leaves easy entry to it and its
-Seats tab says so, so one door never moves a seat from two apps at once. (Cockpit sees the old Combo through its ambient
-light; a Combo with its Ambient tab switched off isn't seen, which is one more reason to uninstall it.)
-
 **Demo data** (Settings > Screen) is on while the car sends nothing, so the screens can be tried parked.
 
 ## What Cockpit reads, and what it doesn't do
@@ -284,7 +257,6 @@ The code is in [`apps/cockpit_combo/`](apps/cockpit_combo). The ambient light's 
 | `main.js` | the tabs, the layouts, the side bars |
 | `draw.js` | the Driving tab |
 | `perf.js` | Performance |
-| `oldcombo.js` | the old Combo app still running beside Cockpit: easy entry left to it |
 | `seats.js`, `seatmod.js`, `seatmove.js`, `seatprobe.js` | Seats (`seatmove.js`: memory and easy entry; `seatprobe.js`: BMW's seat interfaces, read only) |
 | `rail.js` | the side bars in map style |
 | `mview.js` | M View |
