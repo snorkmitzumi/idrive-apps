@@ -215,15 +215,26 @@ Combo instead of updating it, and each keeps its own saved data.
 3. **Uninstall Combo** in the MGU Store.
 
 The copy happens only while Cockpit has saved no settings of its own, and only if the head unit lets one app read
-another's folder. If it doesn't, the log says so (`migrate: ... not readable`) and Cockpit starts fresh: set Settings up
-again and save the seat positions again. Or, with root over SSH, copy them yourself with the two folders that log line
-names (`<combo>` and `<cockpit>` below): the files must then belong to Cockpit's user, or it can't save them.
+another's folder. **A G26's head unit doesn't** (each app runs as a user of its own): the log says
+`migrate: combo not found (... app folders not readable)` and Cockpit starts with its defaults. Then copy the files by
+hand, as root over SSH, **before** uninstalling Combo (uninstalling may delete its data). Cockpit's folder is the one
+that log line names (`/var/opt/public/oap/oap_<number>`).
 
-```bash
-cd <combo>/data && cp -n settings.json seatmem.json perf.json <cockpit>/ && chown --reference=<cockpit> <cockpit>/*.json
-```
+1. Find Combo's folder (it prints one path):
 
-Then restart Cockpit (or the head unit).
+   ```bash
+   OLD=$(dirname "$(dirname "$(grep -l '"name": "combo"' /var/opt/public/oap/oap_*/source/package.json)")"); echo "$OLD"
+   ```
+
+2. Copy its settings, seat positions and runs over Cockpit's, and give them to Cockpit's user (put Cockpit's folder in
+   `NEW`):
+
+   ```bash
+   NEW=/var/opt/public/oap/oap_<number>; for f in settings seatmem perf; do [ -f "$OLD/data/$f.json" ] && cp "$OLD/data/$f.json" "$NEW/data/"; done; chown "$(stat -c %u:%g "$NEW/data")" "$NEW/data/"*.json
+   ```
+
+3. Uninstall Combo, then restart the head unit. Change no setting in Cockpit before that, or it saves its own over the
+   copied ones.
 
 Both installed would both start with the car. While the old Combo still runs, Cockpit leaves easy entry to it and its
 Seats tab says so, so one door never moves a seat from two apps at once. (Cockpit sees the old Combo through its ambient
