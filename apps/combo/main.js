@@ -287,7 +287,8 @@ mgu.run({
                 // map style (2.5.2): nothing drawn, as BMW's map - the controller pushed left / right, or a touch on the edge
                 const x = side === 'L' ? EDGE : W - EDGE - 10;
                 if (!mapped()) cv.roundRect(x, 210, 10, 120, 5, withAlpha('#ffffff', 0.42));
-                cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
+                // (map style: the controller on it shows a slim chevron at the edge, not a ring round it - the kit's 'hint')
+                cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r', mapped() ? 'hint' : undefined);
             };
             if (!railOpen) { handle('L'); if (mapped()) handle('R'); return; }
             const side = railOpen, rows = railRows(side), bot = 516 + (cv.extra || 0);         // (down into the room below the page, as the cards)
