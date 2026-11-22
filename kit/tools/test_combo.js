@@ -1299,7 +1299,7 @@ checks.push(
         const st = await r.mover.recall(0x6D, '1');
         assert(/LNV does not move/.test(st.why) && r.st.run.every((x) => !x), st.why);
     }],
-    ['2.6.1 easy entry: a front door opened takes its seat to its easy entry position, the engine started takes it back; the tab\'s buttons', async () => {
+    ['2.6.2 easy entry: only a front door opening moves a seat (to its easy entry position); the engine never does; Back by hand', async () => {
         const r = seatRig(), { st, mover, C } = r;
         const drive = st.pos.slice();
         mover.mem['6D'] = { E: [C + 30, null, C - 900, null, null] };
@@ -1325,23 +1325,31 @@ checks.push(
         assert.deepStrictEqual(s.mover.slots(0x6D).R, drive);
         // the tab: 1, 2, Easy entry, Back, Save
         const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
+        const press = (c, key) => { const b = c.targets.find((x) => x.key === key); assert(b, key + ' not pressable: ' + c.targets.map((x) => x.key).join(',')); return b.run(); };
         let { cv, out } = draw();
         ['1', '2', 'EASY ENTRY', 'BACK', 'SAVE'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
-        // the engine starts: back to the driving position
-        r.values.live.rpm = 700; r.values.live.rpmT = st.clock;
-        s.watchEngine(); await settle();
+        // the engine started and stopped again and again (start-stop at a light, the engine switched off): nothing moves
+        assert(typeof s.watchEngine !== 'function', 'no engine watch');
+        const n2 = writes(st).length;
+        for (const rpm of [700, 0, 750, 0, 800]) { r.values.live.rpm = rpm; r.values.live.rpmT = st.clock; st.clock += 3000; await settle(); }
+        assert.strictEqual(writes(st).length, n2, 'the engine moved a seat');
+        // Back (by hand): to the driving position
+        ({ cv, out } = draw());
+        press(cv, 'seat-109-back'); await settle();
         st.pos.forEach((v, i) => assert(Math.abs(v - drive[i]) <= 4, 'back: axis ' + i + ' ' + (v - drive[i])));
         assert(!s.mover.entered(0x6D), 'entry over');
-        // with the engine running a door opened moves nothing; the setting off neither
-        r.values.live.rpmT = st.clock;
-        s.doors([]); const m2 = writes(st).length; s.doors(['driver front']); await settle();
-        assert.strictEqual(writes(st).length, m2, 'engine on: no easy entry');
-        r.values.live.rpm = 0; S2.set('easyEntry', false); s.doors([]); s.doors(['driver front']); await settle();
+        // with the engine running a door opened still takes the seat there (only the door counts)
+        r.values.live.rpm = 700; r.values.live.rpmT = st.clock;
+        s.doors([]); s.doors(['driver front']); await settle();
+        assert(Math.abs(st.pos[0] - (C + 30)) <= 4, 'engine on, door opened: easy entry');
+        // the setting off: nothing
+        assert((await s.mover.back(0x6D)).ok);
+        const m2 = writes(st).length;
+        S2.set('easyEntry', false); s.doors([]); s.doors(['driver front']); await settle();
         assert.strictEqual(writes(st).length, m2, 'switched off: no easy entry');
         ({ cv, out } = draw());
         assert(out.includes('EASY ENTRY') && !out.includes('3') && !out.includes('BACK'), out.join(' | '));
         // Save then 2 keeps the position in 2
-        const press = (c, key) => { const b = c.targets.find((x) => x.key === key); assert(b, key + ' not pressable: ' + c.targets.map((x) => x.key).join(',')); return b.run(); };
         assert(!cv.targets.some((x) => x.key === 'seat-109-2'), 'an empty slot is not pressable');
         press(cv, 'seat-109-save');
         ({ cv, out } = draw());

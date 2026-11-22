@@ -281,7 +281,7 @@ class Seats {
             const e = k === 'E';
             bx += G.button(cv, t, bx, y, e ? 190 : 80, H, e ? 'Easy entry' : k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
         });
-        // after easy entry: back to where the seat was (also by itself once the engine starts)
+        // after easy entry: back to where the seat was (only by this button)
         if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 130, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 12;
         G.button(cv, t, bx, y, 130, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
             { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run });
@@ -292,28 +292,18 @@ class Seats {
 
     /**
      * The doors open now (DoorsWindowsRoofMirrors, as the ambient light reads them): a front door that just opened takes
-     * its seat to its easy entry position while the engine is off.
+     * its seat to its easy entry position. Only a door does: not the engine starting or stopping (2.6.1 took the seats
+     * back when the engine started - start-stop restarts it at every light, so they moved while driving). Back: by hand.
      */
     doors(open) {
         // (the first report, as Combo starts: a door open already then did not just open)
         const first = this.open === undefined, was = this.open || [];
         this.open = open || [];
         if (first) return;
-        if (!this.mover || !this.easyEntry() || this.engineOn()) return;
+        if (!this.mover || !this.easyEntry()) return;
         [['driver front', 0x6D], ['passenger front', 0x6E]].forEach(([d, a]) => {
             if (this.open.indexOf(d) < 0 || was.indexOf(d) >= 0) return;
             this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.entry(a)).catch((e) => this.log.warn('easy entry: ' + e));
-        });
-    }
-    engineOn() { const L = this.values && this.values.live || {}; return typeof L.rpm === 'number' && L.rpm > 300 && this.now() - (L.rpmT || 0) < 3000; }
-    /** Each half second (main.js): the engine started after easy entry - the seats back to where they were. */
-    watchEngine() {
-        const on = this.engineOn(), was = this.wasOn;
-        this.wasOn = on;
-        if (!this.mover || !on || was) return;
-        [0x6D, 0x6E].forEach((a) => {
-            if (!this.mover.entered(a)) return;
-            this.entryQueue = (this.entryQueue || Promise.resolve()).then(() => this.mover.back(a)).catch((e) => this.log.warn('easy entry back: ' + e));
         });
     }
 

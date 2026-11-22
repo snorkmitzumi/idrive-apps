@@ -663,7 +663,7 @@
     {
       "key": "easyEntry",
       "group": "Seats",
-      "label": "Easy entry: a front door opened moves its seat to its easy entry position, the engine started moves it back",
+      "label": "Easy entry: a front door opened moves its seat to its easy entry position (Back on the Seats tab returns it)",
       "type": "bool",
       "default": true
     },

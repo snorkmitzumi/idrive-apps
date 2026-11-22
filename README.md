@@ -71,8 +71,8 @@ Each seat has **memory 1 and 2**. Press **Save**, then a slot, to keep the seat'
 go back to it.
 
 **Easy entry** (Settings > Seats, on by default): press **Save**, then **Easy entry**, to keep the position for getting in
-and out. When a front door opens with the engine off, its seat moves there, after keeping where it was; when the engine
-starts, it goes back. **Back** does the same by hand. A move:
+and out. When a front door opens, its seat moves there, after keeping where it was. Only a door opening moves it: nothing
+happens when the engine starts or stops (start-stop at a light). **Back** takes it back to where it was. A move:
 
 - runs only while the car stands still, on a seat module that reports itself initialised;
 - stops at once when any seat switch is pressed, the seat is moved by hand, the car rolls, or **Stop** is pressed;

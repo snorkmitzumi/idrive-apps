@@ -26,7 +26,7 @@
  *   - a seat switch or a motor this run didn't start (the driver's own) ends the run at once: their switches win
  *
  * Easy entry (setting easyEntry): its own saved position ('E'). entry(addr) - the seat's door opened - keeps where the
- * seat is as 'R' and takes it to the easy entry position; back(addr) - the engine started, or Back pressed - takes it back to 'R'.
+ * seat is as 'R' and takes it to the easy entry position; back(addr) - Back pressed, nothing else - takes it back to 'R'.
  *
  *   const m = new SeatMover({ motor, modules, values, log, now, sleep, dataDir })
  *   m.recall(addr, slot)     slot '1' '2', 'E' (easy entry) or 'R' (the position before easy entry)
