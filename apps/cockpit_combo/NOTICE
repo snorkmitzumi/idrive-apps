@@ -1,15 +1,15 @@
-Combo - an app for the BMW MGU head unit (iDrive 7)
+Cockpit - an app for the BMW MGU head unit (iDrive 7)
 Copyright (c) 2026 snorkmitzumi
 https://github.com/snorkmitzumi/idrive-apps
 
-Combo's own code is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE in this folder, or
+Cockpit's own code is licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE in this folder, or
 https://polyformproject.org/licenses/noncommercial/1.0.0). You may use, change and share it for any noncommercial
 purpose. Selling it, installing it for pay, or using it in a commercial product or service needs the author's
 written permission.
 
 Parts under other licences
 --------------------------
-Combo is built with the kit of cauliflowermossgrape/idrive7-apps and adapts code from that repository's apps. That
+Cockpit is built with the kit of cauliflowermossgrape/idrive7-apps and adapts code from that repository's apps. That
 code keeps its MIT licence, and anything taken from the upstream repository itself can be used under MIT:
 
   - the kit runtime that ships with the app (kit/runtime);
@@ -38,10 +38,10 @@ code keeps its MIT licence, and anything taken from the upstream repository itse
 
 Not BMW
 -------
-BMW, iDrive, ISTA and the car's own software, fonts and texts belong to BMW AG. Combo is an unofficial project, not
+BMW, iDrive, ISTA and the car's own software, fonts and texts belong to BMW AG. Cockpit is an unofficial project, not
 made, endorsed or supported by BMW. No BMW software, SDK, ISTA files or ISTA traces are part of it.
 
 No warranty
 -----------
-Combo moves the front seats with their own motors and writes to the ambient light. It is provided as is, without
+Cockpit moves the front seats with their own motors and writes to the ambient light. It is provided as is, without
 warranty of any kind. You use it on your own car at your own risk.

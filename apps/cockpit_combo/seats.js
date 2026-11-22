@@ -57,6 +57,8 @@ class Seats {
         this.p = null; this.busy = false; this.last = 0; this.shapes = {};
         // the Seats tab switched on (Settings > Tabs): off, no door moves a seat (main.js)
         this.enabled = o.enabled || (() => true);
+        // why no door may move a seat now, or null: the old Combo app still running beside this one (oldcombo.js)
+        this.blocked = o.blocked || (() => null);
         // the seat modules themselves over the diagnostic link (seatmod.js), when Combo has one
         this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
         // memory 1-3 and easy entry: with the link's seat writer only (kit/readonly-diag.js seatMotors)
@@ -131,7 +133,9 @@ class Seats {
 
     draw(cv, t) {
         G.panel(cv, t, 24, 44, 1552, 468, 'Seats');
-        cv.text(this.mover ? 'Only while the car stands still. The seat\'s own switches stop any move.' : 'Reading only: each seat motor\'s position from the seat modules.', 1556, 80, 16, t.dim, { align: 'right' });
+        const why = this.mover ? this.blocked() : null;
+        if (why) cv.text(why, 1556, 80, 16, t.warn, { align: 'right', font: 'bold' });
+        else cv.text(this.mover ? 'Only while the car stands still. The seat\'s own switches stop any move.' : 'Reading only: each seat motor\'s position from the seat modules.', 1556, 80, 16, t.dim, { align: 'right' });
         const m = this.modules;
         this.holds = [];                 // the arrows drawn this frame, for touch()
         // (a seat module easy entry took at its usual address shows too, before the search)
@@ -307,7 +311,7 @@ class Seats {
         const first = this.open === undefined, was = this.open || [];
         this.open = open || [];
         if (first) return;
-        if (!this.mover || !this.easyEntry() || !this.enabled()) return;
+        if (!this.mover || !this.easyEntry() || !this.enabled() || this.blocked()) return;
         this.closing = this.closing || {};
         [['driver front', 0x6D], ['passenger front', 0x6E]].forEach(([d, a]) => {
             const now = this.open.indexOf(d) >= 0, before = was.indexOf(d) >= 0;

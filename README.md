@@ -1,4 +1,4 @@
-<h1 align="center">Combo</h1>
+<h1 align="center">Cockpit</h1>
 
 <p align="center">
   <b>Driving data, performance timing, engine health, seats and the ambient light: one app for the BMW MGU head unit (iDrive 7).</b><br>
@@ -6,19 +6,19 @@
 </p>
 
 <p align="center">
-  <img src="docs/screens/combo_driving.png" alt="Combo's Driving tab: engine speed, boost, speed and gear, power and torque, xDrive split with the tyres, the 48 V and 12 V batteries" width="100%">
+  <img src="docs/screens/combo_driving.png" alt="Cockpit's Driving tab: engine speed, boost, speed and gear, power and torque, xDrive split with the tyres, the 48 V and 12 V batteries" width="100%">
 </p>
 
-Combo puts the apps used most into tabs of one app, so the head unit runs one process and one diagnostic link instead
+Cockpit (called **Combo** until 2.7.0) puts the apps used most into tabs of one app, so the head unit runs one process and one diagnostic link instead
 of several. It is this repository's only app: a fork of
 [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps), whose kit (renderer,
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.7.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.8.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
-> **Combo moves the front seats with their own motors.** It does this only while the car stands still, and stops at
+> **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
 > once when a seat switch is pressed. It comes without warranty: you use it on your own car at your own risk. Not made
 > or supported by BMW.
 
@@ -29,8 +29,8 @@ with the MGU should work for the values they send. The seats are tested on a G26
 - [The tabs](#the-tabs)
 - [Screen layouts and controls](#screen-layouts-and-controls)
 - [Settings](#settings) (and [only the tabs you need](#only-the-tabs-you-need))
-- [Install](#install)
-- [What Combo reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
+- [Install](#install) (and [updating from Combo](#updating-from-combo-270-or-before))
+- [What Cockpit reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
 - [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
 - [Development](#development)
 - [How the seats were worked out](#how-the-seats-were-worked-out)
@@ -67,7 +67,7 @@ The car's live values in four columns of the same size, in M Vitals' look:
 
 <img src="docs/screens/combo_seats.png" alt="Seats: both front seats drawn from the side, arrows by each part, memory 1 and 2, Easy entry, Back, Save and Clear under each" width="100%">
 
-Combo finds the front seat modules (0x6D driver, 0x6E passenger on a G26) and draws each seat from the side: its
+Cockpit finds the front seat modules (0x6D driver, 0x6E passenger on a G26) and draws each seat from the side: its
 parts sit where the seat really is on its travel (forward / back, height, backrest, tilt, headrest), and a part that
 moves lights up, also when the seat's own switches move it.
 
@@ -90,8 +90,8 @@ deletes the seat's saved positions. A move:
   at a time (it stops the last when the next starts) is found out on the first move and then gets one motor after the
   other, each straight to its target.
 
-Combo also listens (reading only) to BMW's own seat interfaces on the head unit. On a G26 the car doesn't offer
-BMW's seat functions (`SeatFunction`: the memory buttons, the seat module's own recall) to apps, so Combo moves the
+Cockpit also listens (reading only) to BMW's own seat interfaces on the head unit. On a G26 the car doesn't offer
+BMW's seat functions (`SeatFunction`: the memory buttons, the seat module's own recall) to apps, so Cockpit moves the
 motors itself. While a seat moves, the ambient light holds its writes: a door's red blink would otherwise crowd the seat
 off the diagnostic link.
 
@@ -121,7 +121,7 @@ taken from the source repo at build time.
 - **Signals:** the turn signals blink the door lines at an even pace of their own, and an open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
-first drives the lights and the other leaves them alone. To leave the lights to another app for good, switch Combo's
+first drives the lights and the other leaves them alone. To leave the lights to another app for good, switch Cockpit's
 Ambient tab off (Settings > Tabs, [below](#only-the-tabs-you-need)).
 
 ## Screen layouts and controls
@@ -130,7 +130,7 @@ Settings > Screen > **Screen layout** picks one of three:
 
 | Layout | Looks like | Tabs | Reset, Settings |
 |---|---|---|---|
-| **Full screen** (default) | Combo draws the whole screen | in the header; Ambient's three pages in a side rail | a side rail on the left; Settings is the header's last tab |
+| **Full screen** (default) | Cockpit draws the whole screen | in the header; Ambient's three pages in a side rail | a side rail on the left; Settings is the header's last tab |
 | **Map style** | BMW's map: full screen, only the head unit's home button and status box over the page | a left menu as BMW's map's | a narrow right column as BMW's map's |
 | **Standard** | BMW's own title and bottom bar | in the page | BMW's bottom bar, hidden 5 s after the last touch |
 
@@ -160,7 +160,7 @@ Seven groups:
 
 | Group | What it holds |
 |---|---|
-| **Tabs** | which tabs Combo has: Performance, Seats, M View and Ambient each switch off (Driving is always there) |
+| **Tabs** | which tabs Cockpit has: Performance, Seats, M View and Ambient each switch off (Driving is always there) |
 | **Gauges** | engine type, redline, rev scale, boost and torque scales, power and boost sources, peak markers and hold, xDrive card, 48 V battery |
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
@@ -172,11 +172,11 @@ Seven groups:
 
 ### Only the tabs you need
 
-Settings > **Tabs** switches Performance, Seats, M View and Ambient off and on again, while Combo runs. A tab switched
+Settings > **Tabs** switches Performance, Seats, M View and Ambient off and on again, while Cockpit runs. A tab switched
 off is gone from the tab bar and the side bars, its settings are hidden, and it costs nothing:
 
 - **Seats off:** no seat is read and none moves. Easy entry is off too, so another seat app can have the seats.
-- **Ambient off:** Combo gives every light back to the car and then writes nothing to them. Another ambient app
+- **Ambient off:** Cockpit gives every light back to the car and then writes nothing to them. Another ambient app
   (Ambient config, or IterioDev's) has them to itself. Switched off, the ambient light isn't started with the car either.
 - **Performance off:** the dyno and the drag timer stop sampling.
 - **M View off:** its reads are never made (they run only while the tab shows anyway).
@@ -190,25 +190,52 @@ You need:
 - **From the Store:** the GPU renderer (`idrive7-renderd`, 2.1.18 or newer) and the controller gate
   (`mgu-inputgate`, 1.1.0 or newer). Both come from the source repo.
 
-Then add this repository to the MGU Store and install **Combo**. When you add the repository, the Store asks what to
+Then add this repository to the MGU Store and install **Cockpit**. When you add the repository, the Store asks what to
 follow:
 
 - **Releases:** the ready package from the newest [release](https://github.com/snorkmitzumi/idrive-apps/releases)
-  (`combo@<version>.tgz`). It holds no BMW software; the head unit links it to the BMW SDK already on it. Choose this
+  (`cockpit_cockpit_combo@<version>.tgz`). It holds no BMW software; the head unit links it to the BMW SDK already on it. Choose this
   to get only released versions.
 - **Tags:** the head unit builds the newest release tag (`v2.7.0` ...) from source, with the SDK on the unit.
 - **The `main` branch:** the head unit builds `main` from source (it reads [`mgu-repo.json`](mgu-repo.json)), so every
   merged change is its next version, before a release.
 
-Combo starts with the car (the ambient light needs it running) and shows up in *All apps*.
+Cockpit starts with the car (the ambient light needs it running) and shows up in *All apps*.
+
+### Updating from Combo (2.7.0 or before)
+
+Until 2.7.0 this app was **Combo**, with the id `combo`. Since 2.8.0 it is **Cockpit**, with the id `cockpit_combo`, as
+the MGU Store asks for an id of its own. For the head unit that is a different app: the Store installs Cockpit next to
+Combo instead of updating it, and each keeps its own saved data.
+
+1. **Install Cockpit** and open it once. On its first start it copies what Combo saved: every setting (the ambient
+   light's colours and looks among them), memory 1 and 2 and the easy entry position, and the dyno baseline and best
+   drag times. Nothing of Combo's is changed.
+2. **Check** your seat positions and colours in Cockpit. The QR log says what was copied (`migrate:` lines).
+3. **Uninstall Combo** in the MGU Store.
+
+The copy happens only while Cockpit has saved no settings of its own, and only if the head unit lets one app read
+another's folder. If it doesn't, the log says so (`migrate: ... not readable`) and Cockpit starts fresh: set Settings up
+again and save the seat positions again. Or, with root over SSH, copy them yourself with the two folders that log line
+names (`<combo>` and `<cockpit>` below): the files must then belong to Cockpit's user, or it can't save them.
+
+```bash
+cd <combo>/data && cp -n settings.json seatmem.json perf.json <cockpit>/ && chown --reference=<cockpit> <cockpit>/*.json
+```
+
+Then restart Cockpit (or the head unit).
+
+Both installed would both start with the car. While the old Combo still runs, Cockpit leaves easy entry to it and its
+Seats tab says so, so one door never moves a seat from two apps at once. (Cockpit sees the old Combo through its ambient
+light; a Combo with its Ambient tab switched off isn't seen, which is one more reason to uninstall it.)
 
 **Demo data** (Settings > Screen) is on while the car sends nothing, so the screens can be tried parked.
 
-## What Combo reads, and what it doesn't do
+## What Cockpit reads, and what it doesn't do
 
 - **Car signals** over SOME/IP: speed, rpm, gear, torque, temperatures, tyres, driving mode, doors, turn signals, and
   so on.
-- **The diagnostic link, read-only:** Combo's link only lets reads out:
+- **The diagnostic link, read-only:** Cockpit's link only lets reads out:
   - UDS `22` (read by identifier);
   - OBD `01`, `06` and `09` (current data, on-board monitor results, vehicle information).
 
@@ -249,7 +276,7 @@ The log names what the car answered, which reads it refused, and the app's versi
 
 ## Development
 
-The code is in [`apps/combo/`](apps/combo). The ambient light's code is in
+The code is in [`apps/cockpit_combo/`](apps/cockpit_combo). The ambient light's code is in
 [`shared/ambient_config/`](shared/ambient_config), and the kit is in [`kit/`](kit).
 
 | File | What it does |
@@ -257,6 +284,7 @@ The code is in [`apps/combo/`](apps/combo). The ambient light's code is in
 | `main.js` | the tabs, the layouts, the side bars |
 | `draw.js` | the Driving tab |
 | `perf.js` | Performance |
+| `oldcombo.js` | the old Combo app still running beside Cockpit: easy entry left to it |
 | `seats.js`, `seatmod.js`, `seatmove.js`, `seatprobe.js` | Seats (`seatmove.js`: memory and easy entry; `seatprobe.js`: BMW's seat interfaces, read only) |
 | `rail.js` | the side bars in map style |
 | `mview.js` | M View |
@@ -285,8 +313,8 @@ every pull request and must pass before it can be merged. Fork the repository an
 The head unit runs Node 8: no `?.`, `??`, object spread, `catch {` or `.finally` in the app's code. Building a package
 for your own unit needs BMW's app SDK from it; see [KIT.md](KIT.md).
 
-**Releasing:** raise `version` in `apps/combo/app.json` in a pull request, merge it, then publish a GitHub release
-tagged `v<version>` on `main`. The *Release package* workflow builds `combo@<version>.tgz` with
+**Releasing:** raise `version` in `apps/cockpit_combo/app.json` in a pull request, merge it, then publish a GitHub release
+tagged `v<version>` on `main`. The *Release package* workflow builds `cockpit_cockpit_combo@<version>.tgz` with
 `kit/tools/build.py --no-sdk`, checks that nothing of BMW's SDK is in it, and attaches it to the release. For an
 earlier release, run that workflow by hand with its tag.
 
@@ -299,14 +327,14 @@ a time, a motor runs until it is stopped), and which requests must never be sent
 
 ## Thanks
 
-Combo stands on other people's work. Thank you to everyone behind these projects:
+Cockpit stands on other people's work. Thank you to everyone behind these projects:
 
-| Project | What Combo uses from it |
+| Project | What Cockpit uses from it |
 |---|---|
 | [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps) | the upstream of this fork: the kit (runtime, renderer, build tools), Ambient config, and M Vitals, Virtual Dyno and Drag Timer, the source of the Driving, Performance and M View tabs. Thanks to cauliflowermossgrape and every contributor there |
 | [cauliflowermossgrape/idrive7-8-ssh-root](https://github.com/cauliflowermossgrape/idrive7-8-ssh-root) | root access and the SSH key the kit's deploy scripts use |
 | [cauliflowermossgrape/idrive7-privacy-audit](https://github.com/cauliflowermossgrape/idrive7-privacy-audit) | what the stock head unit sends and stores, the background for KIT.md |
-| [robertnisipeanu/mgu-store](https://github.com/robertnisipeanu/mgu-store) | the MGU Store that installs Combo, and mgu-render, the GPU renderer in `kit/renderd/` (Robert Nisipeanu and IterioDev) |
+| [robertnisipeanu/mgu-store](https://github.com/robertnisipeanu/mgu-store) | the MGU Store that installs Cockpit, and mgu-render, the GPU renderer in `kit/renderd/` (Robert Nisipeanu and IterioDev) |
 | [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/) by emdzej | the seat modules' identifiers and their names (FAS_G11 / BFS_G11) |
 | [JackieZ123430/idrive7-apps-cn](https://github.com/JackieZ123430/idrive7-apps-cn) | the kit's Simplified Chinese translation (小白151) |
 | [Fieldistor/idrive7-apps](https://github.com/Fieldistor/idrive7-apps), [rubenrios/idrive7-apps](https://github.com/rubenrios/idrive7-apps) | the kit's Russian and Spanish translations |
@@ -317,15 +345,15 @@ Combo stands on other people's work. Thank you to everyone behind these projects
 
 The licences differ by part; [NOTICE.md](NOTICE.md) has the full list.
 
-- **Combo** (`apps/combo/`): © 2026 snorkmitzumi, [PolyForm Noncommercial 1.0.0](apps/combo/LICENSE). Free for any
+- **Cockpit** (`apps/cockpit_combo/`): © 2026 snorkmitzumi, [PolyForm Noncommercial 1.0.0](apps/cockpit_combo/LICENSE). Free for any
   noncommercial use: your own car, study, a hobby. Selling it, charging to install it, or using it in a product needs
   written permission; ask in the repository's issues.
 - **The seat findings** ([docs/seats-ista-findings.md](docs/seats-ista-findings.md)): © 2026 snorkmitzumi,
   [CC BY-NC 4.0](LICENSES/CC-BY-NC-4.0.txt).
 - **Kit, renderer and source apps:** [cauliflowermossgrape/idrive7-apps](https://github.com/cauliflowermossgrape/idrive7-apps),
-  MIT licence (see [LICENSE](LICENSE)). Combo is built on its kit and takes Ambient config's code from it. M Vitals,
+  MIT licence (see [LICENSE](LICENSE)). Cockpit is built on its kit and takes Ambient config's code from it. M Vitals,
   Virtual Dyno and Drag Timer are the source of its Driving and Performance tabs. That code stays MIT
-  ([apps/combo/NOTICE](apps/combo/NOTICE)). The GPU renderer in `kit/renderd/` is GPL-3.0-or-later, Doom GPL-2.0.
+  ([apps/cockpit_combo/NOTICE](apps/cockpit_combo/NOTICE)). The GPU renderer in `kit/renderd/` is GPL-3.0-or-later, Doom GPL-2.0.
 - **Seat module identifiers:** from the public [EdiabasX SGBD reference](https://emdzej.github.io/ediabasx-docs-sgbd/)
   (FAS_G11 / BFS_G11).
 - **No code** from IterioDev's apps (PolyForm Strict) is used.
