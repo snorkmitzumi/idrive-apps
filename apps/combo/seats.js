@@ -58,7 +58,7 @@ class Seats {
         this.modules = o.link ? new SeatModules({ link: o.link, log: o.log, now: this.now, values: o.values, yieldTo: o.yieldTo }) : null;
         // memory 1-3 and easy entry: with the link's seat writer only (kit/readonly-diag.js seatMotors)
         this.settings = o.settings || null; this.values = o.values || { live: {} };
-        this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir }) : null;
+        this.mover = this.modules && o.motor ? new SeatMover({ motor: o.motor, modules: this.modules, values: o.values, log: o.log, now: this.now, dataDir: o.dataDir, quietOthers: o.quietOthers }) : null;
         this.saving = null;          // { addr, until }: Save pressed, the next slot pressed takes the position
         this.holds = []; this.holding = null;
     }
@@ -183,7 +183,7 @@ class Seats {
             pair(1, 'Height', [cx + 222, fy - 84, 'up'], [cx + 222, fy - 34, 'down'], cx + 254, fy - 53);
             pair(3, 'Tilt', [cx - 170, fy - 130, 'up'], [cx - 170, fy - 80, 'down'], cx - 202, fy - 99, 'right');
             pair(0, 'Fore / aft', [cx - 200, fy - 18, 'left'], [cx - 144, fy - 18, 'right'], cx - 232, fy - 12, 'right');
-            this.drawMemory(cv, t, seat, x + 70, y + 326, w - 70);
+            this.drawMemory(cv, t, seat, x + 30, y + 326, w - 30);
         }
     }
 
@@ -279,12 +279,15 @@ class Seats {
         let bx = x;
         ['1', '2', 'E'].forEach((k) => {
             const e = k === 'E';
-            bx += G.button(cv, t, bx, y, e ? 190 : 80, H, e ? 'Easy entry' : k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 12;
+            bx += G.button(cv, t, bx, y, e ? 170 : 70, H, e ? 'Easy entry' : k, go(k), { key: 'seat-' + a + '-' + k, primary: saving, busy: !saving && (!slots[k] || !!no) }) + 10;
         });
         // after easy entry: back to where the seat was (only by this button)
-        if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 130, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 12;
-        G.button(cv, t, bx, y, 130, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
-            { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run });
+        if (mv.entered(a) && !saving) bx += G.button(cv, t, bx, y, 110, H, 'Back', () => { mv.back(a).catch((e) => this.log.warn('seat back: ' + e)); return null; }, { key: 'seat-' + a + '-back', busy: !!no }) + 10;
+        bx += G.button(cv, t, bx, y, 110, H, saving ? 'Cancel' : 'Save', () => { this.saving = saving ? null : { addr: a, until: this.now() + 8000 }; return null; },
+            { key: 'seat-' + a + '-save', color: saving ? t.warn : undefined, busy: !!run }) + 10;
+        // Clear: this seat's saved positions gone (pressed twice: the first asks)
+        const any = ['1', '2', 'E', 'R'].some((k) => slots[k]);
+        if (!saving) G.button(cv, t, bx, y, 100, H, 'Clear', () => { mv.clear(a); return null; }, { key: 'seat-' + a + '-clear', confirm: true, color: t.warn, busy: !any || !!run });
     }
 
     /** Setting easyEntry (on unless switched off): a front door opened moves its seat to its easy entry position. */

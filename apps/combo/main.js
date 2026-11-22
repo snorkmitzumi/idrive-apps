@@ -109,7 +109,9 @@ mgu.run({
         const perf = new Perf({ settings, log, dataDir: ctx.dataDir, engine });
         // the Seats tab: the driver seat's position from the car, read only while the tab shows (seats.js)
         // (memory 1-3 and easy entry: the link's one write, seat motors to 0x6D / 0x6E, handed to the Seats tab alone)
-        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
+        const seats = new Seats({ signals: ctx.signals, log, link, motor: seatMotors(link), values, settings, dataDir: ctx.dataDir, yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held),
+            // while a seat moves the ambient light writes nothing (its red door blink took the link from the seat)
+            quietOthers: (on) => (ambLights && ambLights.hold ? ambLights.hold('seats', on) : null) });
         // easy entry: only a front door opening takes its seat to its easy entry position (seats.js doors()); back by hand
         const DOOR_FIELDS = { statusDoorSwitchDRD: 'driver front', statusDoorSwitchPSD: 'passenger front' };
         // BMW's own seat functions, listened to (reading only): does the car let an app hear its memory buttons? (seatprobe.js)

@@ -1182,13 +1182,14 @@ function seatRig(o) {
             if (o.busy && ++st.n % o.busy === 0) { st.refused = (st.refused || 0) + 1; throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED'); }
             return a === 0x6D ? reply(a, did) : null;
         } };
-    let seed = 7;
+    let seed = o.seed || 7;
     const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const motor = async (a, m, act, pwm) => {
         step(20 + (o.jitter ? rnd() * o.jitter : 0));
         st.sent.push('2E ' + a.toString(16).toUpperCase() + ' ' + m + ' ' + act + ' ' + pwm);
         if (o.refuse) return [0x7F, 0x2E, 0x22];
         if (o.maxMotors && act !== 0 && !st.run[m] && st.run.filter((x) => x).length >= o.maxMotors) return [0x7F, 0x2E, 0x22];
+        if (o.single && act !== 0) st.run = st.run.map((x, j) => (j === m ? x : 0));      // one motor at a time: the next one stops the last
         if (o.busy && ++st.n % o.busy === 0) { st.refused = (st.refused || 0) + 1; throw new Error('transport refused: APP_REQUEST_TEMPORARILY_NOT_ACCEPTED'); }
         st.run[m] = act;
         st.maxAtOnce = Math.max(st.maxAtOnce, st.run.filter((x) => x).length);
@@ -1358,16 +1359,31 @@ checks.push(
         for (let k = 0; k < 20 && !s.mover.slots(0x6D)['2']; k++) await new Promise((res) => setImmediate(res));
         assert.deepStrictEqual(s.mover.slots(0x6D)['2'], st.pos, 'saved in 2');
     }],
-    ['2.6.1 an uneven link (each request 25-200 ms, every fourth turned away): ten recalls, each motor within 4 counts', async () => {
-        const r = seatRig({ jitter: 175, busy: 4 }), { st, mover, C } = r;
-        const places = [[C + 150, C - 200, C - 900, C + 20, C + 100], [C + 500, C + 100, C - 100, C - 90, C - 100], [C + 10, C - 340, C - 1400, C + 80, C + 120]];
-        for (let k = 0; k < 10; k++) {
-            const want = places[k % places.length];
-            mover.mem['6D'] = { '1': want };
-            const res = await mover.recall(0x6D, '1');
-            assert(res.ok, 'run ' + k + ': ' + res.why);
-            st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'run ' + k + ' axis ' + i + ': ' + (v - want[i])));
-            assert(st.run.every((x) => !x), 'run ' + k + ': a motor left running');
+    ['2.6.5 an uneven link (each request 25-80 ms as ISTA saw the seat module, every fourth turned away): ten recalls, each motor within 4 counts', async () => {
+        for (const seed of [7, 11, 23]) {
+            const r = seatRig({ jitter: 55, busy: 4, seed }), { st, mover, C } = r;
+            const places = [[C + 150, C - 200, C - 900, C + 20, C + 100], [C + 500, C + 100, C - 100, C - 90, C - 100], [C + 10, C - 340, C - 1400, C + 80, C + 120]];
+            for (let k = 0; k < 10; k++) {
+                const want = places[k % places.length];
+                mover.mem['6D'] = { '1': want };
+                const res = await mover.recall(0x6D, '1');
+                assert(res.ok, 'seed ' + seed + ' run ' + k + ': ' + res.why);
+                st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'seed ' + seed + ' run ' + k + ' axis ' + i + ': ' + (v - want[i])));
+                assert(st.run.every((x) => !x), 'run ' + k + ': a motor left running');
+            }
+        }
+    }],
+    ['2.6.5 a very uneven link (25-200 ms a request): no runaway, every motor stopped, each within 20 counts', async () => {
+        for (const seed of [7, 11, 23, 99]) {
+            const r = seatRig({ jitter: 175, busy: 4, seed }), { st, mover, C } = r;
+            const places = [[C + 150, C - 200, C - 900, C + 20, C + 100], [C + 500, C + 100, C - 100, C - 90, C - 100], [C + 10, C - 340, C - 1400, C + 80, C + 120]];
+            for (let k = 0; k < 6; k++) {
+                const want = places[k % places.length];
+                mover.mem['6D'] = { '1': want };
+                await mover.recall(0x6D, '1');
+                st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 20, 'seed ' + seed + ' run ' + k + ' axis ' + i + ': ' + (v - want[i])));
+                assert(st.run.every((x) => !x), 'a motor left running');
+            }
         }
     }],
     ['2.6.2 a module that takes two motors at once: the third turned away waits, the move still gets there; 2.6.1\'s Memory 3 is Easy entry', async () => {
@@ -1536,5 +1552,74 @@ checks.push(
         const free = await run(0), capped = await run(10);
         assert(free > 40, 'without a cap: the renderer\'s pace (' + free + ' in 1 s)');
         assert(capped >= 8 && capped <= 12, 'capped at 10: ' + capped + ' in 1 s');
+    }],
+);
+
+checks.push(
+    ['2.6.6 a module that runs one motor at a time (the next start stops the last): found out, then each motor straight to its target, kept', async () => {
+        const r = seatRig({ single: true }), { st, mover, C } = r;
+        const want = [C + 150, C - 200, C - 900, C + 20, C + 100];
+        mover.mem['6D'] = { E: want };
+        const res = await mover.recall(0x6D, 'E', 'Easy entry');
+        assert(res.ok, res.why + ' | ' + r.logs.join(' | '));
+        st.pos.forEach((v, i) => assert(Math.abs(v - want[i]) <= 4, 'axis ' + i + ': ' + (v - want[i])));
+        assert(r.logs.some((x) => /stopped when another started: one motor at a time from now on/.test(x)), r.logs.join(' | '));
+        assert.strictEqual(mover.slots(0x6D).atOnce, 1, 'kept for the next start of the app');
+        // the next run: one motor at a time from the start, each started once (no stop-and-go)
+        const again = [C + 345, C - 355, C - 380, C + 93, C - 9];
+        mover.mem['6D'].E = again;
+        const n = writes(st).length;
+        const res2 = await mover.recall(0x6D, 'E', 'Easy entry');
+        assert(res2.ok, res2.why);
+        st.pos.forEach((v, i) => assert(Math.abs(v - again[i]) <= 4, 'again axis ' + i + ': ' + (v - again[i])));
+        const starts = writes(st).slice(n).filter((x) => / [12] 100$/.test(x));
+        const per = {}; starts.forEach((x) => { const k = x.split(' ')[2]; per[k] = (per[k] || 0) + 1; });
+        assert(Object.keys(per).every((k) => per[k] <= 2), 'each motor started once or twice (a correction): ' + JSON.stringify(per));
+        assert(r.logs.some((x) => /Easy entry reached in .* \(SLV \d+>\d+ 1x/.test(x)), r.logs.slice(-2).join(' | '));
+    }],
+    ['2.6.6 Clear: a seat\'s saved positions gone (pressed twice), the one-motor limit kept; nothing to clear: not pressable', async () => {
+        const r = seatRig(), { st, C } = r;
+        const { Seats } = appModule('seats');
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link, motor: r.motor, settings: settingsOf(), dataDir: r.dir });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found';
+        s.mover.mem['6D'] = { '1': [C, C, C, C, C], E: [C, C, C, C, C], R: [C, C, C, C, C], entered: true, atOnce: 1 };
+        const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
+        let { cv, out } = draw();
+        assert(out.includes('CLEAR'), out.join(' | '));
+        const press = (c, key) => { const b = c.targets.find((x) => x.key === key); assert(b, key + ' not pressable'); return b.run(); };
+        press(cv, 'seat-109-clear');
+        assert(s.mover.slots(0x6D)['1'], 'the first press only asks');
+        ({ cv, out } = draw());
+        assert(out.includes('CONFIRM'), 'it asks: ' + out.join(' | '));
+        press(cv, 'seat-109-clear');
+        assert.deepStrictEqual(s.mover.slots(0x6D), { atOnce: 1 }, 'gone, the limit kept');
+        assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(r.dir, 'seatmem.json'), 'utf8'))['6D'], { atOnce: 1 }, 'in the file too');
+        ({ cv, out } = draw());
+        assert(!cv.targets.some((x) => x.key === 'seat-109-clear'), 'nothing left to clear: not pressable');
+    }],
+);
+
+checks.push(
+    ['2.6.6 a seat move holds the ambient light\'s writes (its door blink crowded the seat out) until it ends; waits for its write under way', async () => {
+        const firstWrite = async (light) => {
+            const r = seatRig(), { st, mover, C } = r, calls = [];
+            const t0 = st.clock;
+            let at = null;
+            const motor = mover.motor;
+            mover.motor = (...a) => { if (at === null) at = st.clock - t0; return motor(...a); };
+            mover.quietOthers = (on) => { calls.push(on); return on ? light() : null; };
+            mover.mem['6D'] = { E: [C + 150, C - 200, C - 380, C + 93, C - 9] };
+            const res = await mover.recall(0x6D, 'E', 'Easy entry');
+            return { res, at, calls };
+        };
+        // the light quiet at once: the motors start straight away; held first, let go last
+        const quick = await firstWrite(() => Promise.resolve());
+        assert(quick.res.ok, quick.res.why);
+        assert(quick.at < 500, 'first motor after ' + quick.at + ' ms (the seat read first, no wait for the light)');
+        assert.deepStrictEqual([quick.calls[0], quick.calls[quick.calls.length - 1]], [true, false], 'held, then let go: ' + quick.calls);
+        // a write of the light's that never ends: the motors wait for it 3 s, then go anyway
+        const stuck = await firstWrite(() => new Promise(() => {}));
+        assert(stuck.res.ok, 'not stuck on the light: ' + stuck.res.why);
+        assert(stuck.at >= 3000, 'no motor while the light\'s write is under way: ' + stuck.at + ' ms');
     }],
 );

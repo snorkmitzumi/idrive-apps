@@ -54,7 +54,9 @@ const AT_ONCE = 5;                   // every motor that has to move, at once (2
 const TOL = 4;                       // counts: at the target
 const MARGIN = 3;                    // counts kept from a learned end stop (a G26 memory position was 6 from one)
 const LEAD_S = 0.12;                 // at least this many seconds of a motor's speed: where it is stopped before the target
-const PASSES = 4;                    // corrections of an axis that stopped short or went past
+const PASSES = 5;                    // corrections of an axis that stopped short or went past
+const PULSE_PART = 0.75;             // a correction pulse goes this part of the way: from one side, closer each time, rather
+                                     // than past and back (a stop's delay on the link varies by a tenth of a second and more)
 const START_MS = 1500;               // a motor that hasn't moved MOVED counts by then: something holds it
 const MOVED = 3;
 const SPEEDS = [38, 62, 59, 40, 80]; // counts / s, each motor as measured on a G26 (until this seat's own are measured)
@@ -66,7 +68,8 @@ const MAX_RUN_MS = 60000;              // a whole run at most (the backrest end 
 const MAX_KMH = 2;
 const MISS_MS = 2500;                // no answer from the module this long: the run ends
 const MISS_WAIT_MS = 120;            // after a read turned away: this long before the next
-const TICK_MS = 40;                  // at least this between two rounds of reads
+const TICK_MS = 100;                 // at least this between two rounds of reads (2.6.5: 40, and the head unit's controller
+                                     // stopped answering during a move; the last stretch is timed, so fewer reads do)
 const MOTOR_EVERY = 2, SWITCH_EVERY = 4;
 const SETTLE_MS = 300;
 const RECENT_MS = 700;               // a motor stopped this long ago may still read as running
@@ -91,9 +94,24 @@ class SeatMover {
         // (2.6.1: Memory 3 was the entry position - it is Easy entry's own now, and there is no Memory 3)
         Object.keys(this.mem).forEach((k) => { const m = this.mem[k]; if (m && m['3']) { if (!m.E) m.E = m['3']; delete m['3']; } });
         this.run = null; this.last = null;
+        // the other writers on the diagnostic link held while a seat moves (main.js: the ambient light - a door opened
+        // starts its red door blink, whose writes crowded the seat out: 2.6.5 on a G26, every easy entry "stopped answering")
+        this.quietOthers = o.quietOthers || null;
         this.speeds = {};            // address -> each motor's speed as measured in this seat's moves (counts / s)
         this.gains = {};             // address -> each motor's pulse time per count, as the pulses moved it (1: as its speed says)
         this.atOnce = {};            // address -> motors the module took at once (when it turned one more away)
+    }
+    /** Motors this seat's module takes at once (learned: turned one away, or stopped one when the next started). */
+    most(addr) { const k = hex(addr), m = this.mem[k]; return this.atOnce[k] || (m && m.atOnce) || AT_ONCE; }
+    /** The seat's saved positions gone (Clear): memory 1 and 2, easy entry, the position kept before it. */
+    clear(addr) {
+        if (this.run) return false;
+        const k = hex(addr), m = this.mem[k] || {};
+        this.mem[k] = m.atOnce ? { atOnce: m.atOnce } : {};
+        this.write();
+        this.log.info('seat ' + A(addr) + ': saved positions cleared');
+        this.last = { addr, slot: 'clear', ok: true, why: 'Saved positions cleared' };
+        return true;
     }
     /** A motor's pulse time per count against its speed (1 at first). */
     gain(addr, i) { const g = this.gains[hex(addr)]; return g && g[i] ? g[i] : 1; }
@@ -192,10 +210,20 @@ class SeatMover {
     begin(addr, slot, why) {
         const run = this.run = { addr, slot, why, started: [], t0: this.now(), goodAt: this.now(), end: null };
         if (this.modules) this.modules.paused = true;
+        run.quiet = this.quietOthers ? Promise.resolve().then(() => this.quietOthers(true)).catch(() => {}) : Promise.resolve();
         return run;
+    }
+    /** Until the other writers are quiet (the write they had under way done), at most ms. */
+    async waitQuiet(run, ms) {
+        if (!this.quietOthers) return;
+        let done = false;
+        run.quiet.then(() => { done = true; });
+        for (let t = 0; !done && t < ms; t += 50) await this.sleep(50);
+        run.goodAt = this.now();
     }
     async end(run) {
         await this.stopAll(run);
+        if (this.quietOthers) Promise.resolve().then(() => this.quietOthers(false)).catch(() => {});
         // the seat modules' reads go on from where the seat is now: the moves of this run not logged again by them
         const s = this.seat(run.addr);
         if (s) { s.quiet = true; s.at = 0; }           // (its motor states as this run last read them: not current any more)
@@ -262,6 +290,7 @@ class SeatMover {
 
     async go(run, want, name) {
         const addr = run.addr;
+        await this.waitQuiet(run, 3000);
         const init = await this.limits(run);
         if (init.init !== 1) return { ok: false, why: 'The seat is not initialised' };
         const st = await this.state(run);
@@ -288,7 +317,7 @@ class SeatMover {
             const why = this.reason(run);
             if (why) return { ok: false, why, sum: summary() };
             // the next motors (every one that has to move, as many as the module takes at once)
-            const most = this.atOnce[hex(addr)] || AT_ONCE;
+            const most = this.most(addr);
             while (running.size < most && todo.length && this.now() >= settleUntil) {
                 const i = todo.shift(), dir = target[i] > pos[i] ? PLUS : MINUS;
                 const d = Math.abs(target[i] - pos[i]), v = this.speed(addr, i), g = this.gain(addr, i);
@@ -296,11 +325,11 @@ class SeatMover {
                     // a short move (a correction, or a small one), alone: run for the time it takes, then STOP - no read can
                     // be late for it; how far it went teaches the next pulse (a motor's start eats some of a short one)
                     await this.cmd(run, i, dir);
-                    const ms = Math.max(30, d / v * g * 1000 - STOP_LAT_MS);
+                    const ms = Math.max(30, d * (d > TOL ? PULSE_PART : 1) / v * g * 1000 - STOP_LAT_MS);
                     await this.sleep(ms);
                     await this.cmd(run, i, STOP);
                     stopped[i] = this.now(); stoppedDir[i] = dir;
-                    pulses.push({ i, from: pos[i], d });
+                    pulses.push({ i, from: pos[i], d: d * (d > TOL ? PULSE_PART : 1) });
                     stat(i).starts++; stat(i).ms += ms;
                     settleUntil = this.now() + 150;
                     continue;
@@ -310,6 +339,7 @@ class SeatMover {
                     // turned away with others running: the module takes no more at once - this one after them
                     if (!e.refused || !running.size) throw e;
                     this.atOnce[hex(addr)] = running.size;
+                    this.keep(addr, 'atOnce', running.size);
                     this.log.info('seat ' + A(addr) + ': ' + AXES[i] + ' turned away with ' + running.size + ' running: ' + running.size + ' at once from now');
                     todo.unshift(i);
                     break;
@@ -360,6 +390,23 @@ class SeatMover {
             const np = posOf(d);
             for (let i = 0; i < FITTED; i++) pos[i] = np[i];
             this.show(addr, pos, m);
+            // a motor the module stopped while one started after it kept going: its diagnostic control runs one motor at a
+            // time (2.6.4 on a G26: the motors went one after the other, like the driver's own steps). That one again later,
+            // not counted as a try; this seat one motor at a time from now on (kept in seatmem.json)
+            if (m) {
+                for (const [i, r] of Array.from(running.entries())) {
+                    const left = (target[i] - pos[i]) * (r.dir === PLUS ? 1 : -1);
+                    const later = Array.from(running.entries()).some(([j, q]) => j !== i && q.t0 > r.t0);
+                    if (m[i] !== STOP || left <= TOL || !later || now - r.t0 < 300) continue;
+                    running.delete(i);
+                    todo.unshift(i);
+                    if (this.most(addr) !== 1) {
+                        this.atOnce[hex(addr)] = 1;
+                        this.keep(addr, 'atOnce', 1);
+                        this.log.info('seat ' + A(addr) + ': ' + AXES[i] + ' stopped when another started: one motor at a time from now on');
+                    }
+                }
+            }
             for (const [i, r] of Array.from(running.entries())) {
                 const p = pos[i], dt = (now - r.at) / 1000;
                 if (dt > 0 && p !== r.was) { const v = Math.abs(p - r.was) / dt; r.v = r.v * 0.5 + v * 0.5; }
@@ -423,6 +470,7 @@ class SeatMover {
         return this.last;
     }
     async held(run, i, dir, lim, from, moved) {
+        await this.waitQuiet(run, 300);
         if (run.end === 'Let go') return { ok: true, why: 'Let go' };
         await this.cmd(run, i, dir);
         // let go while the start was on its way: release()'s STOP follows it, and end() sends one more
