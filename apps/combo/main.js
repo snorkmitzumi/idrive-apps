@@ -185,7 +185,9 @@ mgu.run({
         // the frame's place changed (the GPU renderer came after the first frame): the ambient tabs draw again too
         if (ctx.onLayout) ctx.onLayout(() => { if (amb) amb.dirty(); });
         // the ambient tabs: a finger dragged on the colour ring or the brightness dial (kit's onTouch), else a tap
-        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb && !onRail(x, y) ? amb.touch(phase, x, y) : false));
+        // the Seats tab: a finger held on an arrow moves that seat motor until it lifts (seats.js touch())
+        if (ctx.onTouch) ctx.onTouch((phase, x, y) => (tab === AMBIENT && amb && !onRail(x, y) ? amb.touch(phase, x, y)
+            : tab === SEATS && (phase !== 1 || !onRail(x, y)) ? seats.touch(phase, x, y) : false));
         if (ctx.onTap) ctx.onTap((x, y) => (tab === AMBIENT && amb && !onRail(x, y) ? amb.tap(x, y) : null));      // (no tap follows a gesture onTouch took)
 
         function drawDriving(cv, t) {

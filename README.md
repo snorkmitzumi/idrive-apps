@@ -58,11 +58,14 @@ The car's live values in four columns of the same size, in M Vitals' look:
 
 ### Seats
 
-<img src="docs/screens/combo_seats.png" alt="Seats: each motor's position from both front seat modules, with memory 1-3, easy entry and Save under each" width="100%">
+<img src="docs/screens/combo_seats.png" alt="Seats: both front seats drawn from the side, arrows by each part, memory 1-3, easy entry and Save under each" width="100%">
 
-Combo finds the front seat modules and shows each motor's position on its travel (forward / back, height, backrest,
-tilt, headrest), whether it is moving, and the seat's own switches. On a G26 these are 0x6D (driver) and 0x6E
-(passenger).
+Combo finds the front seat modules (0x6D driver, 0x6E passenger on a G26) and draws each seat from the side: its
+parts sit where the seat really is on its travel (forward / back, height, backrest, tilt, headrest), and a part that
+moves lights up, also when the seat's own switches move it.
+
+**Hold an arrow** by a part and that motor moves while you hold it; it stops the moment you let go or slide off, at the
+end of its travel, or after 10 s. A press with the controller moves it for a moment.
 
 Each seat has **memory 1–3** and **easy entry** (2.6.0). Press **Save**, then a slot, to keep the seat's position
 there; press the slot to go back to it. **Easy entry** moves the seat to its saved entry spot and keeps the driving

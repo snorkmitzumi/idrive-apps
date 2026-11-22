@@ -23,6 +23,9 @@
  *   const m = new SeatMover({ motor, modules, values, log, now, sleep, dataDir })
  *   m.recall(addr, slot)     slot '1' '2' '3' or 'E' (easy entry: the position before it is kept as 'R', back with recall(addr, 'R'))
  *   m.save(addr, slot)       the seat's position now into a slot
+ *   m.hold(addr, axis, dir)  one motor while a control is held (dir PLUS / MINUS): it runs until release(), at most
+ *                            HOLD_MS, never past the learned end stop (MARGIN), the same ways out as a recall
+ *   m.release()              the control let go: STOP at once
  *   m.stop()                 the run ends (its motors stopped)
  *   m.run                    null, or { addr, slot, why, done } while it goes;  m.last: how the last one ended
  *   m.slots(addr)            { '1': [5 counters] | undefined, ... }
@@ -30,7 +33,7 @@
 const fs = require('fs');
 const path = require('path');
 const { hex } = require('./kit/diag');
-const { AXES } = require('./seatmod');
+const { AXES, limitsOf } = require('./seatmod');
 const { writeWhole } = require('./store');
 
 const POS = 0xD702, MOTOR = 0xD708, SWITCH = 0xD712, INIT = 0xD704;
@@ -40,11 +43,12 @@ const ORDER = [0, 2, 3, 1, 4];       // SLV, LNV, SNV, SHV, KHV: the module's ow
 const AT_ONCE = 2;
 const TOL = 4;                       // counts: at the target
 const MARGIN = 3;                    // counts kept from a learned end stop (a G26 memory position was 6 from one)
-const LIMITS_AT = 48;                // D704: the end stops from this data byte
 const LEAD_S = 0.12;                 // a motor stopped this many seconds of its speed before the target
 const PASSES = 3;                    // corrections of an axis that stopped short or went past
 const START_MS = 1200;               // a motor that hasn't moved MOVED counts by then: something holds it
 const MOVED = 3;
+const GUESS = 60;                    // counts / s until a motor's own speed is measured (the first round's early stop)
+const ROOM = 10;                     // a hold with less travel left than this: not started (it would coast past)
 const SLOWEST = 20;                  // counts / s, for the time allowed (measured 38-80 on a G26)
 const MAX_RUN_MS = 25000;
 const MAX_KMH = 2;
@@ -54,21 +58,11 @@ const SWITCH_EVERY = 3;              // D712 every third round (D708 every round
 const SETTLE_MS = 300;
 const RECENT_MS = 600;               // a motor stopped this long ago may still read as running
 const SLOTS = ['1', '2', '3', 'E', 'R'];
+const HOLD_MS = 10000;               // a control held longer: stopped (a lost "finger up" can't run a motor for long)
 
 const A = (a) => '0x' + hex(a);
 const u16 = (b, i) => (b && b.length > i + 1 ? b[i] * 256 + b[i + 1] : null);
 const data = (u, did) => (u && u[0] === 0x62 && u[1] === (did >> 8) && u[2] === (did & 0xFF) ? u.slice(3) : null);
-
-/** D704: initialised (byte 0 is 1), and each fitted motor's learned end stops { plus, minus } (null: none / not plausible). */
-function limitsOf(d) {
-    if (!d || !d.length) return { init: null, limits: [] };
-    const limits = [];
-    for (let i = 0; i < FITTED; i++) {
-        const plus = u16(d, LIMITS_AT + i * 4), minus = u16(d, LIMITS_AT + i * 4 + 2);
-        limits.push(plus !== null && minus !== null && plus !== 0xFFFF && minus !== 0 && plus - minus >= 4 * MARGIN ? { plus, minus } : null);
-    }
-    return { init: d[0], limits };
-}
 
 class SeatMover {
     constructor(o) {
@@ -151,6 +145,77 @@ class SeatMover {
         this.write();
     }
 
+    /** One motor while a control is held. Resolves when it stopped: { ok, why } (ok: let go, or the end of its travel). */
+    async hold(addr, i, dir) {
+        if (this.run) return { ok: false, why: 'A move is running' };
+        if (!(i >= 0 && i < FITTED) || (dir !== PLUS && dir !== MINUS)) return { ok: false, why: 'No such control' };
+        const no = this.blocked(addr);
+        if (no) { this.last = { addr, slot: 'hold', ok: false, why: no }; return this.last; }
+        const run = this.run = { addr, slot: 'hold', axis: i, dir, why: AXES[i] + (dir === PLUS ? '+' : '-'), started: [], t0: this.now(), end: null };
+        if (this.modules) this.modules.paused = true;
+        let result, from = null, to = null;
+        try {
+            const init = limitsOf(await this.get(run, INIT));
+            if (init.init !== 1) result = { ok: false, why: 'The seat is not initialised' };
+            const m0 = !result && await this.get(run, MOTOR);
+            if (!result && (!m0 || m0[i] === 3)) result = { ok: false, why: m0 ? AXES[i] + ' is not fitted' : 'Motor state not read' };
+            if (!result && m0.slice(0, FITTED).some((x) => x === PLUS || x === MINUS)) result = { ok: false, why: 'A seat motor is running' };
+            const p0 = !result && await this.get(run, POS);
+            if (!result && !p0) result = { ok: false, why: 'Position not read' };
+            const lim = init.limits[i];
+            if (!result && !lim) result = { ok: false, why: AXES[i] + ': end stops not known' };
+            if (!result) {
+                from = to = u16(p0, i * 2);
+                const room = (dir === PLUS ? lim.plus - MARGIN - from : from - (lim.minus + MARGIN));
+                result = room < ROOM ? { ok: true, why: 'At the end of its travel' } : await this.held(run, i, dir, lim, from, (p) => { to = p; });
+            }
+        } catch (e) {
+            result = { ok: false, why: 'Stopped: ' + (e && e.message || e) };
+        } finally {
+            await this.stopAll(run);
+            if (this.modules) this.modules.paused = false;
+            this.run = null;
+        }
+        this.last = Object.assign({ addr, slot: 'hold' }, result);
+        this.log.info('seat ' + A(addr) + ': ' + AXES[i] + (dir === PLUS ? '+' : '-') + ' held ' + ((this.now() - run.t0) / 1000).toFixed(1) + ' s'
+            + (from !== null ? ', ' + from + '>' + to : '') + (result.why && result.why !== 'Let go' ? ': ' + result.why : ''));
+        return this.last;
+    }
+    async held(run, i, dir, lim, from, moved) {
+        await this.cmd(run, i, dir);
+        const t0 = this.now();
+        let v = GUESS, was = from, at = t0;
+        for (;;) {
+            if (run.end === 'Let go') return { ok: true, why: 'Let go' };
+            const why = this.reason(run);
+            if (why) return { ok: false, why };
+            if (this.now() - t0 > HOLD_MS) return { ok: true, why: 'Held ' + HOLD_MS / 1000 + ' s: stopped, press again to go on' };
+            await this.sleep(TICK_MS);
+            const m = await this.get(run, MOTOR);
+            const d = await this.get(run, POS);
+            if (run.end === 'Let go') return { ok: true, why: 'Let go' };
+            if (m && m.slice(0, FITTED).some((x, k) => (x === PLUS || x === MINUS) && (k !== i || x !== dir))) return { ok: false, why: 'Stopped: the seat was moved by hand' };
+            if (!d) continue;
+            const p = u16(d, i * 2), now = this.now();
+            if (now > at && p !== was) { const nv = Math.abs(p - was) / ((now - at) / 1000); v = v * 0.5 + nv * 0.5; }
+            was = p; at = now; moved(p);
+            const pos = [];
+            for (let k = 0; k < FITTED; k++) pos.push(u16(d, k * 2));
+            this.show(run.addr, pos, m);
+            const room = dir === PLUS ? lim.plus - MARGIN - p : p - (lim.minus + MARGIN);
+            if (room <= Math.max(1, v * LEAD_S)) return { ok: true, why: 'At the end of its travel' };
+            if (m && m[i] === STOP && now - t0 > 400) return { ok: true, why: 'Stopped by the seat' };
+            if (Math.abs(p - from) < MOVED && now - t0 > START_MS) return { ok: false, why: 'Stopped: ' + AXES[i] + ' does not move' };
+        }
+    }
+    /** The control let go: the motor stopped now (not at the loop's next round), the run ends. */
+    release() {
+        const r = this.run;
+        if (!r || r.slot !== 'hold' || r.end) return;
+        r.end = 'Let go';
+        if (r.started.length) Promise.resolve(this.motor(r.addr, r.axis, STOP, PWM)).catch(() => {});
+    }
+
     /** One read (a missed or refused one counts towards MISSES). */
     async get(run, did) {
         const d = data(await this.modules.link.read(run.addr, did, 600), did);
@@ -219,7 +284,7 @@ class SeatMover {
                 const i = todo.shift(), dir = target[i] > pos[i] ? PLUS : MINUS;
                 await this.cmd(run, i, dir);
                 const d = Math.abs(target[i] - pos[i]);
-                running.set(i, { dir, from: pos[i], t0: this.now(), at: this.now(), was: pos[i], v: 0, allow: Math.min(MAX_RUN_MS, 1500 + d / SLOWEST * 1000) });
+                running.set(i, { dir, from: pos[i], t0: this.now(), at: this.now(), was: pos[i], v: GUESS, allow: Math.min(MAX_RUN_MS, 1500 + d / SLOWEST * 1000) });
             }
             if (!running.size && !todo.length) {
                 // settled: anything still off is corrected, PASSES times at most
@@ -258,7 +323,7 @@ class SeatMover {
             this.show(addr, pos, m);
             for (const [i, r] of Array.from(running.entries())) {
                 const p = pos[i], dt = (now - r.at) / 1000;
-                if (dt > 0 && p !== r.was) { const v = Math.abs(p - r.was) / dt; r.v = r.v ? r.v * 0.5 + v * 0.5 : v; }
+                if (dt > 0 && p !== r.was) { const v = Math.abs(p - r.was) / dt; r.v = r.v * 0.5 + v * 0.5; }
                 r.was = p; r.at = now;
                 const left = (target[i] - p) * (r.dir === PLUS ? 1 : -1);
                 const stoppedBySeat = m && m[i] === STOP && now - r.t0 > 400;
@@ -284,4 +349,4 @@ class SeatMover {
     }
 }
 
-module.exports = { SeatMover, limitsOf, ORDER, MARGIN, TOL, MAX_KMH };
+module.exports = { SeatMover, limitsOf, ORDER, MARGIN, TOL, MAX_KMH, PLUS, MINUS, HOLD_MS };

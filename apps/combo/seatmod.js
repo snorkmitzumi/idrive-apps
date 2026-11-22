@@ -29,6 +29,17 @@ const A = (a) => '0x' + hex(a);
 const u16 = (b, i) => (b.length > i + 1 ? b[i] * 256 + b[i + 1] : null);
 /** The reply's data after 62 <DID>, or null (a refusal, another reply, none). */
 const data = (u, did) => (u && u[0] === 0x62 && u[1] === (did >> 8) && u[2] === (did & 0xFF) ? u.slice(3) : null);
+/** D704: initialised (byte 0 is 1), and each fitted motor's learned end stops { plus, minus } (null: none / not plausible). */
+const LIMITS_AT = 48, FITTED = 5;
+function limitsOf(d) {
+    if (!d || !d.length) return { init: null, limits: [] };
+    const limits = [];
+    for (let i = 0; i < FITTED; i++) {
+        const plus = u16(d, LIMITS_AT + i * 4), minus = u16(d, LIMITS_AT + i * 4 + 2);
+        limits.push(plus !== null && minus !== null && plus !== 0xFFFF && minus !== 0 && plus - minus >= 12 ? { plus, minus } : null);
+    }
+    return { init: d[0], limits };
+}
 /** D702's counters: an axis outside 8192..57344 has none (null). */
 function positions(d) {
     return AXES.map((a, i) => { const v = u16(d, i * 2); return v !== null && v >= LO && v <= HI ? v : null; });
@@ -115,6 +126,7 @@ class SeatModules {
         if (s.init === null || this.now() - (s.initAt || 0) >= INIT_MS) {
             const n = data(await this.read(s.addr, INIT), INIT);
             s.initAt = this.now();
+            if (n && n.length >= LIMITS_AT + FITTED * 4) s.limits = limitsOf(n).limits;
             if (n && n.length) { if (s.init !== n[0]) this.log.info('seat ' + A(s.addr) + ': initialisation ' + ({ 0: 'not done', 1: 'OK', 255: 'not OK' }[n[0]] || hex(n[0]))); s.init = n[0]; }
         }
     }
@@ -143,4 +155,4 @@ class SeatModules {
     show(pos) { return AXES.map((a, i) => (pos[i] === null ? null : a + ' ' + pos[i])).filter(Boolean).join(' '); }
 }
 
-module.exports = { SeatModules, AXES, positions, LO, HI };
+module.exports = { SeatModules, AXES, positions, limitsOf, LO, HI };

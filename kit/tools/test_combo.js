@@ -744,7 +744,7 @@ checks.push(
         assert(t1.includes('Dyno') && t1.includes('Drag timer'), 'Performance: ' + t1.join(' | '));
         assert(!t1.includes('Engine speed'), 'Driving still drawn on Performance');
         const t2 = await b.tab(2);
-        assert(t2.some((x) => /^Memory and easy entry only while the car stands still/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
+        assert(t2.some((x) => /^Only while the car stands still/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
         assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
         const ta = await b.tab(4);
@@ -1039,7 +1039,9 @@ checks.push(
         const cv = new Canvas(1600, 520), out = [];
         cv.own = true; const tx = cv.text; cv.text = function (x, ...r2) { out.push(String(x)); return tx.call(this, x, ...r2); };
         s.draw(cv, themes.theme('m_tricolour'));
-        assert(out.includes('Seat module 0x6D  0F2A31') && out.includes('Forward / back') && out.includes('23600') && !out.includes('Headrest height') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
+        // without the seat writer: the seat drawn, no arrows, no memory
+        assert(out.includes('Driver seat') && !out.includes('Fore / aft') && !out.includes('SAVE') && !out.some((x) => /NaN|undefined/.test(x)), out.join(' | '));
+        assert(!(cv.targets || []).some((x) => /^seat-/.test(x.key)), 'nothing to press');
         assert(/modules 0x6D/.test(s.summary()));
     }],
     ['2.4.5 Seats: a request the transport refuses now and then is asked again; a failed search starts again, not stuck "finding"', async () => {
@@ -1311,5 +1313,79 @@ checks.push(
         press(cv, 'seat-109-2');
         for (let k = 0; k < 20 && !s.mover.slots(0x6D)['2']; k++) await new Promise((res) => setImmediate(res));
         assert.deepStrictEqual(s.mover.slots(0x6D)['2'], st.pos, 'saved in 2');
+    }],
+);
+
+checks.push(
+    ['2.6.1 hold to move: the motor runs while held, a STOP the moment it is let go; never past the end stop; 10 s at most', async () => {
+        // let go after ~1 s
+        let r = seatRig({ during: (st) => { if (st.clock > 1e6 + 1000 && !st.let) { st.let = true; r.mover.release(); } } });
+        let { st, mover, C } = r;
+        const kh0 = st.pos[4];
+        let res = await mover.hold(0x6D, 4, 1);
+        assert(res.ok && res.why === 'Let go', res.why);
+        assert(st.pos[4] > kh0 + 30 && st.pos[4] < kh0 + 120, 'the headrest went up a little: ' + (st.pos[4] - kh0));
+        assert(st.run.every((x) => !x), 'stopped');
+        const w = writes(st);
+        assert(w[0] === '2E 6D 4 1 100' && w.slice(1).every((x) => x === '2E 6D 4 0 100'), w.join(' | '));
+        assert(r.logs.some((x) => /seat 0x6D: KHV\+ held \d+\.\d s, \d+>\d+$/.test(x)), r.logs.join(' | '));
+        // the height down at -355, its end stop -361: no further than MARGIN from it
+        r = seatRig(); ({ st, mover, C } = r);
+        res = await mover.hold(0x6D, 1, 2);
+        assert(res.ok && /end of its travel/.test(res.why), res.why);
+        assert(st.pos[1] >= C - 361 + 3 - 2, 'past the end stop: ' + (st.pos[1] - C));
+        r = seatRig(); ({ st, mover, C } = r);
+        st.pos[1] = C - 300;
+        res = await mover.hold(0x6D, 1, 2);
+        assert(res.ok && /end of its travel/.test(res.why) && st.pos[1] < C - 340, res.why + ' at ' + (st.pos[1] - C));
+        assert(st.pos[1] >= C - 361 + 3 - 2, 'from further up, past the end stop: ' + (st.pos[1] - C));
+        // never let go (a lost touch): 10 s, then stopped
+        r = seatRig(); ({ st, mover, C } = r);
+        st.pos[2] = C - 1300;
+        res = await mover.hold(0x6D, 2, 1);
+        assert(/Held 10 s/.test(res.why) && st.run.every((x) => !x), res.why);
+        // the driver's own switch meanwhile: stopped
+        r = seatRig({ during: (st2) => { if (st2.clock > 1e6 + 700) st2.run[0] = 2; } }); ({ st, mover } = r);
+        res = await mover.hold(0x6D, 4, 2);
+        assert(!res.ok && /moved by hand/.test(res.why) && st.run[4] === 0, res.why);
+        // driving: not started
+        r = seatRig(); r.values.live.speed = 20;
+        res = await r.mover.hold(0x6D, 4, 1);
+        assert(!res.ok && !writes(r.st).length, res.why);
+    }],
+    ['2.6.1 Seats tab: a seat drawn with an arrow pair by each part; a finger down holds, sliding off or up lets go', async () => {
+        const r = seatRig(), { st, C } = r;
+        const { Seats } = appModule('seats');
+        const sent = [];
+        const s = new Seats({ signals: { proxy: async () => { throw new Error('interface not found'); } }, log: quiet, now: () => st.clock, values: r.values, link: r.link,
+            motor: async (a, m, act, pwm) => { sent.push([a, m, act]); return r.motor(a, m, act, pwm); } });
+        s.modules.seats = r.modules.seats; s.modules.state = 'found';
+        s.mover.sleep = async (ms) => { st.clock += ms; await new Promise((res) => setImmediate(res)); };
+        const draw = () => { const cv = new Canvas(1600, 520), out = []; cv.own = true; const tx = cv.text; cv.text = function (x, ...a) { out.push(String(x)); return tx.call(this, x, ...a); }; s.draw(cv, themes.theme('m_tricolour')); return { cv, out }; };
+        const { cv, out } = draw();
+        ['Driver seat', 'Headrest', 'Backrest', 'Height', 'Tilt', 'Fore / aft', 'Hold an arrow to move the seat'].forEach((x) => assert(out.includes(x), x + ' missing: ' + out.join(' | ')));
+        assert.strictEqual(s.holds.length, 10, 'five pairs');
+        assert(['SLV+', 'SLV-', 'KHV+', 'KHV-'].every((k) => cv.targets.some((x) => x.key === 'seat-109-' + k)), 'the controller can press them');
+        const up = s.holds.find((h) => h.axis === 4 && h.dir === 1);
+        assert(s.touch(1, up.x + 3, up.y - 2), 'a finger on the arrow takes the touch');
+        for (let k = 0; k < 30; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[4], 1, 'the headrest runs while held');
+        assert(s.touch(2, up.x + 10, up.y));
+        assert.strictEqual(st.run[4], 1, 'a small slide keeps it');
+        s.touch(2, up.x + 120, up.y);
+        for (let k = 0; k < 30 && st.run[4]; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[4], 0, 'slid off: stopped');
+        for (let k = 0; k < 60 && s.mover.run; k++) await new Promise((res) => setImmediate(res));
+        assert(!s.mover.run, 'the hold ended');
+        assert(!s.touch(1, 5, 5), 'a touch elsewhere is the kit\'s');
+        // up on the arrow (no slide)
+        const back = s.holds.find((h) => h.axis === 2 && h.dir === 2);
+        s.touch(1, back.x, back.y);
+        for (let k = 0; k < 30; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[2], 2, 'the backrest reclines while held');
+        s.touch(3, back.x, back.y);
+        for (let k = 0; k < 30 && st.run[2]; k++) await new Promise((res) => setImmediate(res));
+        assert.strictEqual(st.run[2], 0, 'let go: stopped');
+        assert(sent.every((x) => x[0] === 0x6D && x[2] <= 2), JSON.stringify(sent));
     }],
 );
