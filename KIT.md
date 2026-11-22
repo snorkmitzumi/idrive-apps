@@ -309,10 +309,17 @@ python3 kit/tools/build.py --language ko       # Korean -> dist/<id>@<ver>-ko.1.
 python3 kit/tools/build.py --language es       # Spanish -> dist/<id>@<ver>-es.1.mgu
 python3 kit/tools/build.py --language ru       # Russian -> dist/<id>@<ver>-ru.<revision>.mgu
 python3 kit/tools/build.py --language zh-CN    # Simplified Chinese -> dist/<id>@<ver>-zh.cn.2.mgu
+python3 kit/tools/build.py --no-sdk combo      # to publish: dist/<id>@<ver>.tgz and .mgu without oap-sdk in them
 node kit/tools/preview.js dist/redline preview wait=10   # English PC preview -> preview/*.png
 ```
 
 (On Windows type `python` instead of `python3`.)
+
+`--no-sdk` builds the installable archives without BMW's SDK: `node_modules/oap-sdk` is left out, and no extracted
+`oap-sdk/` is needed. The head unit makes that module itself for an app that requires `oap-sdk` and ships none (the
+MGU Store's [publishing guide](https://github.com/robertnisipeanu/mgu-store/blob/main/docs/PUBLISHING.md), "Releases"
+layout). Use it for a package you publish, such as one attached to a GitHub release. A package built without it holds
+BMW's SDK: keep it for your own unit, and never share it.
 
 English is the default and the only UI language in a default package. Every package is fixed-language:
 there is no **Settings → Language** setting or runtime switch, and `--languages` multilanguage
