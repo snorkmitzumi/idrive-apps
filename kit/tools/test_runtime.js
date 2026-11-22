@@ -128,6 +128,23 @@ test('map style (layout "map"): the full layout, no tabs in the header (it names
         t.d._drawChrome(t.d.canvas(1600, 520));
         rec.text = tx;
         assert(texts.indexOf('M View') < 0 && texts.indexOf('Driving') < 0, 'no page name over the top bar: ' + texts.join(' | '));
+        // 2.6.9: the controller on a place marked 'hint' (an edge that opens a side bar): a slim chevron at the edge, no ring
+        const calls = [], spy = (name) => { const f = rec[name]; rec[name] = function () { calls.push(name); return f.apply(this, arguments); }; return () => { rec[name] = f; }; };
+        t.d.pageTargets = [{ x: 12, y: 190, w: 44, h: 160, key: 'rail', r: 'hint', run() {} }, { x: 600, y: 200, w: 200, h: 50, key: 'btn', run() {} }];
+        t.d.focusKey = 'tgt:rail';
+        let undo = [spy('polyline'), spy('strokeRoundRect')];
+        const lines = [], pl0 = rec.polyline;
+        rec.polyline = function (pts) { lines.push(pts); return pl0.apply(this, arguments); };
+        t.d._drawChrome(t.d.canvas(1600, 520));
+        rec.polyline = pl0; undo.forEach((u) => u());
+        assert(lines.length === 1 && lines[0].length === 3 && lines[0][1][0] > lines[0][0][0] && lines[0][0][0] < 40, 'a chevron pointing in, at the left edge: ' + JSON.stringify(lines));
+        assert(calls.indexOf('strokeRoundRect') < 0, 'no ring round it: ' + calls);
+        // an ordinary button keeps its ring
+        t.d.focusKey = 'tgt:btn';
+        undo = [spy('strokeRoundRect')];
+        t.d._drawChrome(t.d.canvas(1600, 520));
+        undo.forEach((u) => u());
+        assert(calls.indexOf('strokeRoundRect') >= 0, 'a ring round a button');
         let opened = 0;
         t.d._click = (id) => { if (id === 'BTN_SETTINGS') opened++; };
         t.d.openSettings();

@@ -123,10 +123,10 @@ Settings > Screen > **Screen layout** picks one of three:
 | Layout | Looks like | Tabs | Reset, Settings |
 |---|---|---|---|
 | **Full screen** (default) | Combo draws the whole screen | in the header; Ambient's three pages in a side rail | a side rail on the left; Settings is the header's last tab |
-| **Map style** | BMW's map: none of the app's, the head unit's own top bar shows | a left side bar | a right side bar |
+| **Map style** | BMW's map: full screen, only the head unit's home button and status box over the page | a left menu as BMW's map's | a narrow right column as BMW's map's |
 | **Standard** | BMW's own title and bottom bar | in the page | BMW's bottom bar, hidden 5 s after the last touch |
 
-**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges or over the head unit's top bar, as on BMW's map. An open bar covers one column and dims the rest of the page.
+**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges, as on BMW's map, and the page goes up to the top: only the head unit's home button and status box show over it (2.6.9). The bars are drawn as BMW's map draws its menus: the left one a panel from the screen's edge with a row a page (its icon and name, the page shown in BMW's orange-red), the right one a narrow column with each action's icon over its name. A touch on the dimmed page closes a bar. An open bar covers one column and dims the rest of the page.
 
 <img src="docs/screens/combo_map.png" alt="Map style: Driving over the whole height" width="100%">
 

@@ -1093,7 +1093,10 @@ checks.push(
         await b.draw();
         assert.strictEqual(b.tilt('W'), 'nav-0', 'pushed left: the pages, the knob on Driving');
         const tl = await b.draw();
-        ['DRIVING', 'PERFORMANCE', 'SEATS', 'M VIEW', 'AMBIENT', 'COLOUR', 'ANIMATIONS', 'MODES'].forEach((x) => assert(tl.includes(x), x + ' missing: ' + tl.join(' | ')));
+        // 2.6.9: as BMW's map draws its menu - a row a page, its name as written, no Hide row (a touch on the page closes it)
+        ['Driving', 'Performance', 'Seats', 'M View', 'Ambient', 'Colour', 'Animations', 'Modes'].forEach((x) => assert(tl.includes(x), x + ' missing: ' + tl.join(' | ')));
+        assert(!tl.some((x) => /hide/i.test(x)), 'no Hide row: ' + tl.join(' | '));
+        assert((b.canvas().targets || []).some((q) => q.key === 'rail-close' && q.x >= 394), 'the dimmed page closes it');
         await b.press('nav-3');
         const tm = await b.draw();
         assert(tm.includes('this drive') && !tm.includes('COLOUR'), 'M View shown, the bar closed: ' + tm.join(' | '));
@@ -1105,9 +1108,12 @@ checks.push(
         assert.deepStrictEqual(slim, [], 'no handle drawn in map style');
         assert.strictEqual(b.tilt('E'), 'misfires', 'pushed right: the knob on Reset misfires');
         const tr = await b.draw();
+        // 2.6.9: a narrow column as BMW's map's, each action's icon over its name; the page beside it closes it
         const hide = (b.canvas().targets || []).find((q) => q.key === 'rail-r-close');
-        assert(hide && hide.x <= 1206 + 20, 'the right bar over the whole last column: ' + JSON.stringify(hide));
-        assert(tr.includes('RESET MISFIRES') && tr.includes('SETTINGS'), 'the right bar: ' + tr.join(' | '));
+        assert(hide && hide.x === 0 && hide.w >= 1400, 'the dimmed page closes the right bar: ' + JSON.stringify(hide));
+        const col = (b.canvas().targets || []).find((q) => q.key === 'settings');
+        assert(col && col.w <= 180 && col.x + col.w >= 1580, 'a narrow column at the right edge: ' + JSON.stringify(col));
+        assert(tr.includes('Reset misfires') && tr.includes('Settings'), 'the right bar: ' + tr.join(' | '));
         assert.strictEqual(b.tilt('W'), true, 'pushed left: the right bar closes');
         await b.draw(); await b.press('rail-r'); await b.press('settings');
         assert.deepStrictEqual(b.opened, ['settings'], 'Settings from the right bar');

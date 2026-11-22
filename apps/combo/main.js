@@ -36,6 +36,7 @@ const { DidReader } = require('./kit/dids');
 const { Reads } = require('./reads');
 const { Perf, PerfDemo } = require('./perf');
 const { Seats } = require('./seats');
+const { drawBar } = require('./rail');
 const { probe } = require('./seatprobe');
 const { MView } = require('./mview');
 const ambientPage = require('./ambient_page');
@@ -226,7 +227,7 @@ mgu.run({
          */
         // EDGE: where the page shows from (the kit's full layout trims 12 px each side, display.js FULL.src)
         // MAP_W: one Driving column and half the gaps beside it (draw.js columns: 370 wide, 24 apart), so no card shows beside a bar
-        const RAIL_W = 300, MAP_W = 394, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
+        const RAIL_W = 300, MAP_W = 394, MAP_R_W = 172, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
         let railOpen = null, railT = 0, railShown = false, railByKnob = false;      // railOpen: null, 'L' or 'R'
         const mapped = () => owned && !!(ctx.mapStyle && ctx.mapStyle());
         const barW = () => (mapped() ? MAP_W : RAIL_W);
@@ -275,7 +276,7 @@ mgu.run({
             return null;
         });
         /** A touch on an open bar or a handle is the bar's, not the page's (the colour ring under it). */
-        const onRail = (x, y) => owned && (railOpen === 'L' ? x < barW() + EDGE : railOpen === 'R' ? x > W - barW() - EDGE
+        const onRail = (x, y) => owned && (railOpen === 'L' ? x < barW() + EDGE : railOpen === 'R' ? x > W - (mapped() ? MAP_R_W : barW()) - EDGE
             : (y > 190 && y < 350 && (x < EDGE + 44 || (mapped() && x > W - EDGE - 44))));
         function drawRail(cv, t) {
             // (opened with the controller: open until it is pushed back or a row is pressed)
@@ -286,11 +287,20 @@ mgu.run({
                 // map style (2.5.2): nothing drawn, as BMW's map - the controller pushed left / right, or a touch on the edge
                 const x = side === 'L' ? EDGE : W - EDGE - 10;
                 if (!mapped()) cv.roundRect(x, 210, 10, 120, 5, withAlpha('#ffffff', 0.42));
-                cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r');
+                // (map style: the controller on it shows a slim chevron at the edge, not a ring round it - the kit's 'hint')
+                cv.target(side === 'L' ? EDGE : W - EDGE - 44, 190, 44, 160, () => openRail(side), side === 'L' ? 'rail' : 'rail-r', mapped() ? 'hint' : undefined);
             };
             if (!railOpen) { handle('L'); if (mapped()) handle('R'); return; }
-            const side = railOpen, rows = railRows(side), bw = barW(), x0 = side === 'L' ? EDGE : W - bw - EDGE;
-            const bot = 516 + (cv.extra || 0);         // (down into the room below the page, as the cards)
+            const side = railOpen, rows = railRows(side), bot = 516 + (cv.extra || 0);         // (down into the room below the page, as the cards)
+            if (mapped()) {
+                // map style (2.6.9): BMW's own menus as its map draws them (rail.js) - the left one from the screen's edge,
+                // the right one a narrow column; the kit shows x 12..1588 of the page, so the panels start at its edges
+                const w = side === 'L' ? MAP_W : MAP_R_W, x0 = side === 'L' ? EDGE : W - w - EDGE;
+                drawBar(cv, t, { side, x0, top: 34, bot, w, rows, dim: true, redraw: () => render(),
+                    run: (r) => { railT = Date.now(); return r[1](); }, close: () => openRail(null) });
+                return;
+            }
+            const bw = barW(), x0 = side === 'L' ? EDGE : W - bw - EDGE;
             // map style: from the page's top (the kit shows y >= 38), over the cards' coloured top lines too
             const top = mapped() ? 38 : RAIL_TOP;
             // the page behind a map-style bar dimmed: the bar is over it, not beside it
