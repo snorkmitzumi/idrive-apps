@@ -938,7 +938,14 @@ class Display {
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
-        c.clip(sx, 0, W - sx, map ? FULL.headH : HMI.status.h).clear(0).noclip();
+        if (map) {
+            // map style, full screen as BMW's map (2.6.9): the HMI's title strip covered by the page's own background,
+            // only its home button (left) and its status box (right) show, over the page
+            const stx = HMI.status.x - pl.x;
+            c.fillRect(sx, 0, stx - sx, FULL.headH, t.bg);
+            c.fillRect(stx, HMI.status.h, W - stx, FULL.headH - HMI.status.h, t.bg);
+            c.clip(stx, 0, W - stx, HMI.status.h).clear(0).noclip();
+        } else c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();
         if (hx > 0) c.clip(0, 0, hx, (pl.left === 0 ? FULL.headH : HMI.colEnd) - pl.y).clear(0).noclip();
         drawCredit(c, W - 18, FULL.headH + 17);
         r.xf(1, 0, 0).append(c).xf();
