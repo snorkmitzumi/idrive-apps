@@ -705,15 +705,21 @@ async function runInner(impl) {
         /**
          * Run fn while screen `stateName` is visible: once per screen refresh (up to 60 fps)
          * when the GPU renderer shows it, else about `fps` times a second.
+         * The returned handle's fps(n) caps it at n frames a second with the GPU renderer too (0: no cap, the
+         * default): a page whose content changes a few times a second needn't be drawn in JS 60 times (Combo 2.6.4:
+         * a still page was, as an unchanged frame looks again after 16 ms). kick() draws at once, cap or not.
          */
         loop(stateName, fps, fn) {
-            let timer = null, on = false, running = false, frames = 0, spent = 0;
+            let timer = null, on = false, running = false, frames = 0, spent = 0, capMs = 0, lastStart = 0;
+            // the cap's wait before the next frame (0: may go now)
+            const capWait = () => (capMs ? Math.max(0, lastStart + capMs - Date.now()) : 0);
             const gpuOn = () => display.active(stateName);
             const tick = async () => {
                 timer = null;
                 if (!on || running) return;
                 running = true;
                 const t0 = Date.now();
+                lastStart = t0;
                 try { await fn(); } catch (e) { log.error('loop ' + stateName, e); }
                 running = false;
                 const dt = Date.now() - t0;
@@ -734,14 +740,14 @@ async function runInner(impl) {
                     // the renderer sends a tick when it can take the next frame; if this frame was
                     // not sent (unchanged), look again shortly
                     // (a tick normally follows a sent frame; 250 ms is the safety net if none comes)
-                    timer = setTimeout(tick, display.gpu.waiting ? 250 : 16);
-                } else timer = setTimeout(tick, Math.max(15, 1000 / fps - (dt || 0)));
+                    timer = setTimeout(tick, Math.max(display.gpu.waiting ? 250 : 16, capWait()));
+                } else timer = setTimeout(tick, Math.max(15, 1000 / fps - (dt || 0), capWait()));
             };
             display.onTick(() => {
                 // a tick from the renderer, or the renderer went away (then back to the timer)
                 if (!on || running) return;
                 if (timer !== null) { clearTimeout(timer); timer = null; }
-                if (gpuOn()) tick(); else schedule(0);
+                if (gpuOn()) { const w = capWait(); if (w) timer = setTimeout(tick, w); else tick(); } else schedule(0);
             });
             const set = (v) => {
                 on = v;
@@ -753,6 +759,12 @@ async function runInner(impl) {
             return {
                 stop: () => set(false),
                 kick: () => { if (on && !running) { if (timer !== null) clearTimeout(timer); timer = setTimeout(tick, 0); } },
+                fps: (n) => {
+                    const was = capMs;
+                    capMs = n > 0 ? 1000 / n : 0;
+                    // a faster rate now: the frame waiting under the old cap goes sooner
+                    if (capMs < was && on && !running && timer !== null) { clearTimeout(timer); timer = setTimeout(tick, capWait()); }
+                },
             };
         },
     };

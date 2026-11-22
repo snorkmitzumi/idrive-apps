@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.6.3",
+  "version": "2.6.4",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -824,6 +824,27 @@
       "default": "auto",
       "options": [["auto", "Hide after 5 s, a touch shows it"], ["off", "Always shown"]],
       "when": { "layout": "standard" }
+    },
+    {
+      "key": "frameRate",
+      "group": "Screen",
+      "label": "Gauges frame rate (Driving, Performance)",
+      "type": "choice",
+      "default": "30",
+      "options": [
+        [
+          "15",
+          "15 fps (lightest)"
+        ],
+        [
+          "30",
+          "30 fps"
+        ],
+        [
+          "60",
+          "60 fps (smoothest, most load)"
+        ]
+      ]
     },
     {
       "key": "renderer",

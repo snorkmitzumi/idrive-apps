@@ -88,18 +88,18 @@ async function boot(dir, opts) {
     booted.push(vis);
     const clicks = {};
     let frame = null, last = null, tab = null, tap = null, tilt = null;
-    const hidden = [], opened = [];
+    const hidden = [], opened = [], rates = [];
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
         signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
-        onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, mapStyle: () => !!opts.map, openSettings() { opened.push('settings'); }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; },
+        onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, mapStyle: () => !!opts.map, openSettings() { opened.push('settings'); }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; return { fps: (r) => rates.push(r) }; },
         theme: () => themes.theme('m_tricolour'),
         canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = opts.own !== false; last = cv; return cv; },
     };
     await app.start(ctx);
     return {
-        ctx, settings, vis, clicks,
+        ctx, settings, vis, clicks, rates,
         draw: () => textsOf(() => frame()),
         tab: (i) => textsOf(() => tab(i)), tap: (x, y) => tap(x, y), hidden, opened, tilt: (d) => tilt(d),
         /** press the page button with this key (drawn on the last frame) */
@@ -132,7 +132,7 @@ const checks = [
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
-            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
@@ -1502,5 +1502,39 @@ checks.push(
         assert.strictEqual(p.summary(), 'SeatFunction available, 2 values; seat proxy not offered');
         for (let k = 0; k < 200; k++) subs[SEAT_FUNCTION].statusSeatAdjustment({ n: k });
         assert(logs.filter((x) => /^seat functions: status/.test(x)).length <= 80, 'capped');
+    }],
+);
+
+checks.push(
+    ['2.6.4 frame rates: each tab drawn only as often as it needs (gauges at the setting, Seats 10, M View 5, Ambient on change)', async () => {
+        const b = await boot(tmp('rates'));
+        assert.strictEqual(b.rates[b.rates.length - 1], 30, 'Driving: 30 by default: ' + b.rates);
+        await b.tab(1); assert.strictEqual(b.rates[b.rates.length - 1], 30, 'Performance');
+        await b.tab(2); assert.strictEqual(b.rates[b.rates.length - 1], 10, 'Seats');
+        await b.tab(3); assert.strictEqual(b.rates[b.rates.length - 1], 5, 'M View');
+        await b.tab(4); assert.strictEqual(b.rates[b.rates.length - 1], 0, 'Ambient: as fast as the renderer, while it changes');
+        await b.tab(0); b.settings.set('frameRate', '60'); assert.strictEqual(b.rates[b.rates.length - 1], 60, 'the setting');
+        b.settings.set('frameRate', '15'); assert.strictEqual(b.rates[b.rates.length - 1], 15);
+    }],
+    ['2.6.4 the kit\'s loop: fps(n) caps it with the GPU renderer too (a still page was drawn 60 times a second)', async () => {
+        // kit/runtime/mgu.js's loop, run on a stand-in for its display and ui: the renderer ticks at 60 fps, every frame unchanged
+        const src = fs.readFileSync(path.join(KIT, 'mgu.js'), 'utf8');
+        const body = src.slice(src.indexOf('        loop(stateName, fps, fn) {'), src.indexOf('\n        },\n    };\n', src.indexOf('        loop(stateName, fps, fn) {')) + 10);
+        const tickers = [], display = { active: () => true, gpu: { waiting: false }, onTick: (fn) => tickers.push(fn) };
+        const ui = { onVisible() {}, isVisible: () => true, timing: { png: 0, push: 0 } };
+        // eslint-disable-next-line no-new-func
+        const make = new Function('display', 'ui', 'log', 'return {' + body.trim().replace(/,\s*$/, '') + '}');
+        const run = async (fps) => {
+            let n = 0;
+            const lp = make(display, ui, quiet).loop('MAIN', 10, async () => { n++; });
+            if (fps) lp.fps(fps);
+            const iv = setInterval(() => tickers.forEach((t) => t()), 16);
+            await new Promise((r) => setTimeout(r, 1000));
+            clearInterval(iv); lp.stop(); tickers.length = 0;
+            return n;
+        };
+        const free = await run(0), capped = await run(10);
+        assert(free > 40, 'without a cap: the renderer\'s pace (' + free + ' in 1 s)');
+        assert(capped >= 8 && capped <= 12, 'capped at 10: ' + capped + ' in 1 s');
     }],
 );
