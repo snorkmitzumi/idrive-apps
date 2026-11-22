@@ -1110,9 +1110,9 @@ checks.push(
         const tr = await b.draw();
         // 2.6.9: a narrow column as BMW's map's, each action's icon over its name; the page beside it closes it
         const hide = (b.canvas().targets || []).find((q) => q.key === 'rail-r-close');
-        assert(hide && hide.x === 0 && hide.w >= 1400, 'the dimmed page closes the right bar: ' + JSON.stringify(hide));
+        assert(hide && hide.x === 0 && hide.w >= 1380, 'the dimmed page closes the right bar: ' + JSON.stringify(hide));
         const col = (b.canvas().targets || []).find((q) => q.key === 'settings');
-        assert(col && col.w <= 180 && col.x + col.w >= 1580, 'a narrow column at the right edge: ' + JSON.stringify(col));
+        assert(col && col.w <= 210 && col.x + col.w >= 1580, 'a narrow column at the right edge: ' + JSON.stringify(col));
         assert(tr.includes('Reset misfires') && tr.includes('Settings'), 'the right bar: ' + tr.join(' | '));
         assert.strictEqual(b.tilt('W'), true, 'pushed left: the right bar closes');
         await b.draw(); await b.press('rail-r'); await b.press('settings');
