@@ -89,7 +89,7 @@ function drawBar(cv, t, o) {
     if (side === 'L') {
         // one row a page: its icon and name, a thin line under each; the ambient pages smaller, set in
         const main = rows.filter((r) => !r[2].sub).length, subs = rows.length - main;
-        const room = bot - top - 4, mh = Math.min(66, Math.floor(room / (main + subs * 0.72))), sh = Math.floor(mh * 0.72);
+        const room = bot - top - 4, mh = Math.min(74, Math.floor(room / (main + subs * 0.74))), sh = Math.floor(mh * 0.74);
         let y = top + 2;
         rows.forEach((r) => {
             const sub = !!r[2].sub, h = sub ? sh : mh, sel = r[2].primary && !r[2].head, ask = isArmed(r);
@@ -97,23 +97,24 @@ function drawBar(cv, t, o) {
                 cv.gradientRect(x0, y, w - 1.5, h, [[0, withAlpha(ask ? t.crit || SEL_B : SEL_A, 0.96)], [1, withAlpha(SEL_B, 0.96)]]);
                 cv.fillRect(x0, y + h - 3, w - 1.5, 3, SEL_LINE);
             } else cv.fillRect(x0 + (sub ? 64 : 16), y + h - 1, w - (sub ? 80 : 32), 1, withAlpha('#ffffff', 0.13));
-            const ix = x0 + (sub ? 70 : 36), is = sub ? 22 : 30, tc = sel || ask ? '#ffffff' : withAlpha('#ffffff', 0.92);
+            const ix = x0 + (sub ? 74 : 38), is = sub ? 28 : 36, tc = sel || ask ? '#ffffff' : withAlpha('#ffffff', 0.92);
             icon(cv, r[2].key || '', ix, y + h / 2, is, tc);
-            cv.text(ask ? 'Press again to confirm' : r[0], x0 + (sub ? 98 : 72), y + h / 2 + (sub ? 7 : 9), sub ? 19 : 25, tc);
+            // (2.6.10: as large as BMW's own menu - 25 / 19 read small next to it on a G26)
+            cv.text(ask ? 'Press again to confirm' : r[0], x0 + (sub ? 108 : 80), y + h / 2 + (sub ? 9 : 11), sub ? 24 : 31, tc);
             cv.target(x0, y, w, h, () => press(r, o.run, o.redraw), r[2].key || r[0], 0);
             y += h;
         });
     } else {
         // a narrow column: each action's icon over its name (two lines at most)
         let y = top + 10;
-        const h = 92;
+        const h = 116;
         rows.forEach((r) => {
             const ask = isArmed(r);
             if (ask) { cv.gradientRect(x0, y, w - 1.5, h, [[0, withAlpha(t.crit || SEL_B, 0.96)], [1, withAlpha(SEL_B, 0.96)]]); cv.fillRect(x0, y + h - 3, w, 3, SEL_LINE); }
-            icon(cv, r[2].key || '', x0 + w / 2, y + 32, 30, '#ffffff');
+            icon(cv, r[2].key || '', x0 + w / 2, y + 38, 38, '#ffffff');
             const words = String(ask ? 'Press again' : r[0]).split(' '), lines = [''];
-            words.forEach((wd) => { const l = lines[lines.length - 1], n = l ? l + ' ' + wd : wd; if (cv.textWidth(n, 16) > w - 16 && l) lines.push(wd); else lines[lines.length - 1] = n; });
-            lines.slice(0, 2).forEach((l, k) => cv.text(l, x0 + w / 2, y + 66 + k * 18, 16, withAlpha('#ffffff', 0.92), { align: 'center' }));
+            words.forEach((wd) => { const l = lines[lines.length - 1], n = l ? l + ' ' + wd : wd; if (cv.textWidth(n, 21) > w - 14 && l) lines.push(wd); else lines[lines.length - 1] = n; });
+            lines.slice(0, 2).forEach((l, k) => cv.text(l, x0 + w / 2, y + 84 + k * 23, 21, withAlpha('#ffffff', 0.94), { align: 'center' }));
             cv.target(x0, y, w, h, () => press(r, o.run, o.redraw), r[2].key || r[0], 0);
             y += h + 6;
         });

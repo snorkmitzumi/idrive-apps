@@ -227,7 +227,7 @@ mgu.run({
          */
         // EDGE: where the page shows from (the kit's full layout trims 12 px each side, display.js FULL.src)
         // MAP_W: one Driving column and half the gaps beside it (draw.js columns: 370 wide, 24 apart), so no card shows beside a bar
-        const RAIL_W = 300, MAP_W = 394, MAP_R_W = 172, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
+        const RAIL_W = 300, MAP_W = 394, MAP_R_W = 200, RAIL_HIDE_MS = 5000, RAIL_TOP = 50, EDGE = 12;
         let railOpen = null, railT = 0, railShown = false, railByKnob = false;      // railOpen: null, 'L' or 'R'
         const mapped = () => owned && !!(ctx.mapStyle && ctx.mapStyle());
         const barW = () => (mapped() ? MAP_W : RAIL_W);
