@@ -2,7 +2,7 @@
   "id": "combo",
   "title": "Combo",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -108,6 +108,21 @@
       "_methods": [
         "getCurrentPosition"
       ]
+    },
+    "de.bmw.infotainment.misc.SeatFunction": {
+      "_optional": "the Seats tab: BMW's own seat functions listened to (memory buttons, memory status, easy entry setting; reading only)",
+      "statusSeatAdjustment": "rs",
+      "statusSeatAdjustmentDR": "rs",
+      "statusSeatAdjustmentPS": "rs",
+      "statusConfigSMFAMode": "rs",
+      "operationSeatMenuDR": "s",
+      "operationSeatMenuPS": "s",
+      "statusRemoteControlSeatAdjustmentDRPS": "rs"
+    },
+    "com.harman.infotainment.systeminfrastructure.seatcommandproxy.seatcommandproxy.SeatCommandProxyCtrl": {
+      "_optional": "the Seats tab: the head unit's seat proxy listened to (its status only)",
+      "_instances": "Inst1",
+      "seatProxySeatOperationStatus": "rs"
     }
   },
   "screens": [

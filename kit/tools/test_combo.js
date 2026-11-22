@@ -1481,3 +1481,26 @@ checks.push(
         assert(sent.every((x) => x[0] === 0x6D && x[2] <= 2), JSON.stringify(sent));
     }],
 );
+
+checks.push(
+    ['2.6.3 seat functions probe: BMW\'s seat interfaces listened to, each new value logged once (capped), nothing written', async () => {
+        const { probe, SEAT_FUNCTION, PROXY } = appModule('seatprobe');
+        const calls = [], subs = {};
+        const signals = {
+            watch: async (iface, inst, handlers) => { calls.push('watch ' + iface.split('.').pop() + ' ' + inst); subs[iface] = handlers; return { available: iface === SEAT_FUNCTION, error: null }; },
+            call: () => { throw new Error('nothing may be called'); }, setValue: () => { throw new Error('nothing may be written'); },
+        };
+        const logs = [], log = { info: (m) => logs.push(m), warn: (m) => logs.push(m), error: (m) => logs.push(m) };
+        const p = probe(signals, log);
+        for (let k = 0; k < 5; k++) await new Promise((r) => setImmediate(r));
+        assert.deepStrictEqual(calls, ['watch SeatFunction 1', 'watch SeatCommandProxyCtrl Inst1']);
+        assert(Object.keys(subs[SEAT_FUNCTION]).indexOf('statusSeatAdjustmentDR') >= 0 && subs[PROXY].seatProxySeatOperationStatus);
+        const dr = subs[SEAT_FUNCTION].statusSeatAdjustmentDR;
+        dr({ operationMemoryButtonDR: 'TASTE_1_GEDRUECKT' }); dr({ operationMemoryButtonDR: 'TASTE_1_GEDRUECKT' }); dr({ operationMemoryButtonDR: 'KEINE_AKTION' });
+        assert.strictEqual(logs.filter((x) => /statusSeatAdjustmentDR/.test(x)).length, 2, 'a value again is not logged again: ' + logs.join(' | '));
+        assert(logs.some((x) => /seat functions: SeatFunction set up, offered by the car: true/.test(x)) && logs.some((x) => /seat proxy set up, offered by the car: false/.test(x)), logs.join(' | '));
+        assert.strictEqual(p.summary(), 'SeatFunction available, 2 values; seat proxy not offered');
+        for (let k = 0; k < 200; k++) subs[SEAT_FUNCTION].statusSeatAdjustment({ n: k });
+        assert(logs.filter((x) => /^seat functions: status/.test(x)).length <= 80, 'capped');
+    }],
+);
