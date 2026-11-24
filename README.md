@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.8.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.8.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -118,7 +118,8 @@ taken from the source repo at build time.
 - **Colour:** the whole car or upper / lower lights separately, with brightness.
 - **Animations:** moving scenes.
 - **Modes:** a look for each driving mode (Sport, Comfort, Eco Pro, Adaptive).
-- **Signals:** the turn signals blink the door lines at an even pace of their own, and an open door can show red.
+- **Signals:** a turn signal blinks that side's front door line green, the whole line (both strips on a G26), at an even
+  pace of its own; the rear doors keep your colour. An open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
 first drives the lights and the other leaves them alone. To leave the lights to another app for good, switch Cockpit's

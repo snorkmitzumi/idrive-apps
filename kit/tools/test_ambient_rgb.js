@@ -379,15 +379,21 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     // a car with door lines (G20): only those blink, one write each a frame; a door without its own line: all its lights
     fake.lights = [0x05, 0x07, 0x08, 0x09, 0x0b, 0x21, 0x13, 0x01, 0x0c, 0x0e, 0x0f, 0x10, 0x12, 0x22, 0x04].map(pl);
     settings.set('turnGlow', true); settings.set('doorRed', true); c.turn('left');
-    ok(fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x07)) && !fake.overs.turn.test(pl(0x0b))
-        && !fake.overs.turn.test(pl(0x0c)), 'door lines on the car: the turn glow blinks the driver\'s front and rear door lines only');
+    ok(fake.overs.turn.test(pl(0x05)) && !fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x07)) && !fake.overs.turn.test(pl(0x0b))
+        && !fake.overs.turn.test(pl(0x0c)), 'door lines on the car: the turn glow blinks the driver\'s front door line only (2.8.2: not the rear one)');
     c.doors(['passenger rear']);
     ok(fake.overs.doors.test(pl(0x10)) && !fake.overs.doors.test(pl(0x12)) && !fake.overs.doors.test(pl(0x22)) && !fake.overs.doors.test(pl(0x0c)),
         'door lines on the car: an open door blinks its own line only');
-    // a G26: each door line in two strips (0x62-0x65); only the first blinks, so the blink keeps its pace (#169)
+    // a G26: each door line in two strips (0x62-0x65). The turn glow: the front door's whole line (both strips, two writes
+    // a side as before), not the rear door; an open door: its first strip only, so its blink keeps its pace (#169)
     c.doors([]); fake.lights = fake.lights.concat([0x62, 0x63, 0x64, 0x65].map(pl)); c.turn(null); c.turn('left'); c.doors(['passenger front']);
-    ok(fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x62)) && !fake.overs.turn.test(pl(0x63))
-        && fake.overs.doors.test(pl(0x0c)) && !fake.overs.doors.test(pl(0x64)), 'two-strip door lines: the turn glow and an open door blink the first strip only');
+    ok(fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x62)) && !fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x63))
+        && !fake.overs.turn.test(pl(0x0c)) && !fake.overs.turn.test(pl(0x64)), 'two-strip door lines: the turn glow blinks the front door line\'s both strips, not the rear door');
+    ok(fake.overs.doors.test(pl(0x0c)) && !fake.overs.doors.test(pl(0x64)), 'two-strip door lines: an open door blinks its first strip only');
+    c.turn(null); c.turn('both');
+    ok(fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x62)) && fake.overs.turn.test(pl(0x0c)) && fake.overs.turn.test(pl(0x64))
+        && !fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x10)), 'hazards: both front door lines, whole');
+    c.turn(null);
     fake.lights = fake.lights.filter((l) => l.loc < 0x62);
     c.doors([]); c.doors(['driver front']);
     fake.lights = fake.lights.filter((l) => l.loc !== 0x05);

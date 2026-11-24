@@ -261,6 +261,29 @@ test('a connection cut in the middle of a message: the next connection\'s READY 
     } finally { g.close(); }
 });
 
+test('X_READY: whether the renderer offers in-page drawing (embed) now, and its box, is read and logged', async () => {
+    const lines = [];
+    onConn = (c) => { c.send(X_READY, Buffer.concat([u32(1, 3, 7), Buffer.from(new Int32Array([104, 88, 1796, 632, 0, 0, 1920, 720]).buffer)])); c.send(READY, u32(4, 1920, 720, 1)); };
+    const g = new RenderClient('test', { info: (m) => lines.push(m), warn() {}, error() {} }, { native: true });
+    try {
+        let ok = 0;
+        g.on('ready', () => ok++);
+        g.connect();
+        await waitFor(() => ok, 5000);
+        assert(g.info.embed === true && g.info.embedBox.join() === '104,88,1796,632', JSON.stringify(g.info));
+        assert(lines.some((m) => /connected.*"embed":true,"embedBox":\[104,88,1796,632\]/.test(m)), lines.join(' | '));
+    } finally { g.close(); }
+    onConn = (c) => ready(c);
+    const h = new RenderClient('test', { info() {}, warn() {}, error() {} }, { native: true });
+    try {
+        let ok = 0;
+        h.on('ready', () => ok++);
+        h.connect();
+        await waitFor(() => ok, 5000);
+        assert(h.info.embed === false && !h.info.embedBox, 'layer only (no page template): ' + JSON.stringify(h.info));
+    } finally { h.close(); }
+});
+
 test('the one-time move to the new default theme: a theme picked on a fresh install stays', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'runtime', 'mgu.js'), 'utf8').replace(/\r\n/g, '\n');
     const cls = src.match(/class Settings[\s\S]*?\n}\n/)[0];      // (as hu-stub.js: the real class without the SDK)
