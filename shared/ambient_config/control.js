@@ -14,7 +14,7 @@
  * The car locked and left (parked or standby, nobody in it: away(true)): every light back to the car's own and nothing
  * renewed; someone back in (living, ignition, driving): the look again, with the welcome sweep when it is on.
  * Over the look (or the car's own colour), with their settings switched on (both off by default): turn(side) - while a turn signal is on, that side's
- * door lines blink green, fully on and off, as fast as the lights take it (setting turnGlow; hazards: both sides; not with
+ * front door line blinks green (both its strips), fully on and off, as fast as the lights take it (setting turnGlow; hazards: both sides; not with
  * the car locked and left); doors(open) - an open door's line blinks red until it closes (setting doorRed; not with
  * the car locked and left, so a door left open does not keep the body module awake); with the hazards on (setting
  * hazardRed) every light pulses red, bright then dim, in place of the turn glow (not with the car locked and left). Left is
@@ -66,6 +66,16 @@ const isLine = (l) => / door line$/i.test(String(l.name || ''));
 const CAR_DOOR_MODE = { 'driver front': 0x23, 'driver rear': 0x24, 'passenger front': 0x25, 'passenger rear': 0x26 };
 const CAR_DOOR_S = 4, CAR_DOOR_RENEW_MS = 3000;
 const linesOf = (all, pick) => (l) => pick(l) && (isLine(l) || !all().some((x) => pick(x) && isLine(x)));
+/* The turn glow: a side's front door line, the whole of it (a G26's two strips, "door line" and "door line 2"), the one
+ * the driver sees; the rear door keeps the look. Two writes a side, as the first strips of both doors were, so the
+ * same pace - but the whole line lights, not its front half (Cockpit 2.8.2). A side without a front door line: its door
+ * lines, or all its lights (linesOf). */
+const isFrontLine = (l) => / front door line( 2)?$/i.test(String(l.name || ''));
+const turnLightsOf = (all, sides) => (l) => {
+    const s = sideOf(l);
+    if (sides.indexOf(s) < 0) return false;
+    return all().some((x) => sideOf(x) === s && isFrontLine(x)) ? isFrontLine(l) : linesOf(all, (x) => sideOf(x) === s)(l);
+};
 
 const copy = (x) => (x == null ? x : JSON.parse(JSON.stringify(x)));
 const valid = (l) => !!l && typeof l === 'object' && !!l.upper && Array.isArray(l.upper.rgb) && !!l.lower && Array.isArray(l.lower.rgb);
@@ -171,7 +181,7 @@ class Control {
         const key = sides.join();
         if (key !== this._glow) {
             this._glow = key;
-            this.lights.overlay('turn', sides.length ? linesOf(all, (l) => sides.indexOf(sideOf(l)) >= 0) : null, blink(GLOW));
+            this.lights.overlay('turn', sides.length ? turnLightsOf(all, sides) : null, blink(GLOW));
         }
         this._carDoor();
         // our red blink: the open doors the car's own warning doesn't show

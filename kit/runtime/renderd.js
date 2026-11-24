@@ -208,9 +208,14 @@ class RenderClient extends EventEmitter {
             const p = this.inbuf.slice(8, 8 + len);
             this.inbuf = this.inbuf.slice(8 + len);
             if (type === X.READY && p.length >= 12) {
-                const caps = p.readUInt32LE(8);
+                const caps = p.readUInt32LE(8), modes = p.readUInt32LE(4);
                 this.native = true;
                 this.info = { touch: !!(caps & 1), controller: !!(caps & 2), frontGate: !!(caps & 4) };
+                // the modes offered now (PROTOCOL.md X_READY): bit 0 layer (over the HMI, as the kit draws), bit 1 embed (in the
+                // app's own HMI page, under BMW's title bar and popups: only once the renderer's page template is loaded) and
+                // the embed box; logged, not used yet (the volume popup and the car's messages are under a layer app)
+                this.info.embed = !!(modes & 2);
+                if (this.info.embed && p.length >= 28) this.info.embedBox = [p.readInt32LE(12), p.readInt32LE(16), p.readInt32LE(20), p.readInt32LE(24)];
                 // the app area (where the HMI leaves room for apps, in screen px): after the embed box
                 this.area = p.length >= 44 ? { x: p.readInt32LE(28), y: p.readInt32LE(32), w: p.readInt32LE(36), h: p.readInt32LE(40) } : null;
             } else if (type === E.READY) {
