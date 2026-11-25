@@ -59,6 +59,7 @@ function watches(values, engine, sc, log) {
     // the car locked and left (its own state: parked or standby, nobody in it, 1-3) or in use again
     const leftFrom = (v) => {
         const n = conditionOf(v && v.statusConditionVehicle);
+        if (n !== undefined) L.condition = n;            // (the trip book: a trip is a drive cycle, trips.js)
         if (n === undefined || L.left === (n <= 3)) return;
         L.left = n <= 3;
         log.info(L.left ? 'the car is locked and left: no reads, so it can sleep' : 'the car is in use again');
