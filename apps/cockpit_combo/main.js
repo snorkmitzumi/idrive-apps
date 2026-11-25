@@ -231,7 +231,7 @@ mgu.run({
         /** The tabs switched on, by id: Driving, Performance, Seats, M View (Ambient after them, ambOn()). */
         const shownIds = () => [DRIVING, PERF, SEATS, MVIEW, TRIPS].filter(enabled);
         const ambOn = () => !!amb && enabled(AMBIENT);
-        const tabs = () => shownIds().map((i) => TABS[i]).concat(!ambOn() ? [] : owned ? [owned && ctx.mapStyle && ctx.mapStyle() ? 'Ambient · ' + ['Colour', 'Animations', 'Modes'][amb.page || 0] : 'Ambient'] : amb.tabs());
+        const tabs = () => shownIds().map((i) => TABS[i]).concat(!ambOn() ? [] : owned ? ['Ambient'] : amb.tabs());
         const sel = () => { const ids = shownIds(); return tab === AMBIENT ? ids.length + (owned ? 0 : amb.page) : Math.max(0, ids.indexOf(tab)); };
         if (ctx.hideButton) ctx.hideButton('BTN_RESET');
 

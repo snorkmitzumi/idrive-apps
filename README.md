@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -153,10 +153,10 @@ Settings > Screen > **Screen layout** picks one of three:
 | Layout | Looks like | Tabs | Reset, Settings |
 |---|---|---|---|
 | **Full screen** (default) | Cockpit draws the whole screen | in the header; Ambient's three pages in a side rail | a side rail on the left; Settings is the header's last tab |
-| **Map style** | BMW's map: full screen, only the head unit's home button and status box over the page | a left menu as BMW's map's | a narrow right column as BMW's map's |
+| **Map style** | BMW's map: full screen, only the head unit's home button and status box over the page | in the top strip between them, and a left menu as BMW's map's | a narrow right column as BMW's map's |
 | **Standard** | BMW's own title and bottom bar | in the page | BMW's bottom bar, hidden 5 s after the last touch |
 
-**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges, as on BMW's map, and the page goes up to the top: only the head unit's home button and status box show over it (2.6.9). The bars are drawn as BMW's map draws its menus: the left one a panel from the screen's edge with a row a page (its icon and name, the page shown in BMW's orange-red), the right one a narrow column with each action's icon over its name. A touch on the dimmed page closes a bar. An open bar covers one column and dims the rest of the page.
+**Map style:** the cards use the whole height of the screen (no bar under them), and over the back arrow column too, so the left margin is the same as the right one (BACK and the home button still work). Nothing is drawn on the edges, as on BMW's map, and the page goes up to the top: only the head unit's home button and status box show over it (2.6.9). The pages' names run along the top strip between the two (2.9.2): a touch on one opens it, the page shown underlined in the theme's colour. The bars are drawn as BMW's map draws its menus: the left one a panel from the screen's edge with a row a page (its icon and name, the page shown in BMW's orange-red), the right one a narrow column with each action's icon over its name. A touch on the dimmed page closes a bar. An open bar covers one column and dims the rest of the page.
 
 <img src="docs/screens/combo_map.png" alt="Map style: Driving over the whole height" width="100%">
 
