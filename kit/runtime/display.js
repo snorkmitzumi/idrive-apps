@@ -262,8 +262,10 @@ class Display {
     mapStyle() { return this.layout() === 'map' && this.own(); }
     /** The header's tabs: the app's, then Settings. { tabs, sel, badges, settings: index or -1 } */
     _tabList() {
-        if (this.mapStyle()) return { tabs: [], sel: -1, badges: (this.tabInfo && this.tabInfo.badges) || [], settings: -1 };
         const base = this.tabInfo || { tabs: [], sel: -1, badges: [] };
+        // map style: the app's pages in the HMI's top strip too (Cockpit 2.9.2, on a G26: "more slick"), between its home
+        // button and its status box - no name, no Settings (the app's side bar has it)
+        if (this.mapStyle()) return { tabs: (base.tabs || []).slice(), sel: this.sheet ? -1 : base.sel, badges: base.badges || [], settings: -1 };
         const tabs = (base.tabs || []).slice();
         const settings = this.own() && this.hasSettings() ? tabs.push('Settings') - 1 : -1;
         const sel = this.sheet && this.sheet.settings ? settings : this.sheet ? -1 : base.sel;
@@ -900,7 +902,7 @@ class Display {
         // map style (2.6.4 on a G26: the page's name over the HMI's own top bar): no header of the kit's at all - the
         // HMI's top bar shows, as over BMW's map; the app's pages are in its side bars there
         const map = this.mapStyle();
-        let sx = hx;
+        let sx = hx, mapEnd = hx;
         if (!map) {
             const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
                 this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
@@ -909,6 +911,10 @@ class Display {
             if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);
             sx = Math.min(HMI.status.x - pl.x, Math.ceil(Math.max(end, this.headMax || 0)));
             if (sx > end) { c.fillRect(end, 0, sx - end, FULL.headH - 2, HMI.headBg); c.fillRect(end, FULL.headH - 2, sx - end, 2, G.withAlpha('#ffffff', 0.22)); }
+        } else if (tb.tabs.length > 1) {
+            // map style: the tabs alone, on the page's own background (the strip is the page's there), no line under them
+            mapEnd = Math.ceil(G.header(c, t, hx, 0, HMI.status.x - pl.x - hx, FULL.headH, '', tb.tabs, tb.sel, tb.badges, true, true));
+            c.fillRect(hx, FULL.headH - 2, mapEnd - hx, 2, t.bg);
         } else c.tabRects = [];
         this.headEnd = sx;
         // the tab the controller is on (the kit holds it: Display._ccu)
@@ -948,7 +954,7 @@ class Display {
             // map style, full screen as BMW's map (2.6.9): the HMI's title strip covered by the page's own background,
             // only its home button (left) and its status box (right) show, over the page
             const stx = HMI.status.x - pl.x;
-            c.fillRect(sx, 0, stx - sx, FULL.headH, t.bg);
+            c.fillRect(mapEnd, 0, stx - mapEnd, FULL.headH, t.bg);
             c.fillRect(stx, HMI.status.h, W - stx, FULL.headH - HMI.status.h, t.bg);
             c.clip(stx, 0, W - stx, HMI.status.h).clear(0).noclip();
         } else c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();

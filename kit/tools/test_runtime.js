@@ -109,25 +109,33 @@ test('ctx.onTilt: the app takes a push (a key: the knob onto that button once dr
     } finally { t.end(); }
 });
 
-test('map style (layout "map"): the full layout, no tabs in the header (it names the page), Settings from the app', async () => {
+test('map style (layout "map"): the full layout, the app\'s tabs in the HMI\'s top strip (no name, no Settings tab), Settings from the app', async () => {
     const t = await setup({ settings: { layout: 'map' } });
     try {
         assert(t.d.own() && t.d.mapStyle(), 'map style where the kit runs the screen');
         const r = t.d.canvas(1600, 520); r.chrome = { tabs: { tabs: ['Driving', 'M View'], sel: 1, badges: [] } };
         t.d.present('MAIN', r, () => Promise.resolve()); await sleep(30);
-        assert.deepStrictEqual(t.d._tabList().tabs, [], 'no tabs (and no Settings tab)');
+        // 2.9.2: the app's pages in the top strip, between the home button and the status box (no Settings tab: the app's bar)
+        assert.deepStrictEqual(t.d._tabList().tabs, ['Driving', 'M View'], 'the app\'s tabs, no Settings tab');
         // 2.5.2: the page over the back arrow column too, the same margin left and right; its touches the app's
         const pl = t.d.place, lx = pl.ox + 24 * pl.scale, rx = pl.w - (pl.ox + 1576 * pl.scale);
         assert(Math.abs(lx - rx) <= 2 && lx < 40, 'the cards as far from the left edge as from the right: ' + lx + ' / ' + rx);
         const cl = JSON.parse(t.d.gpu.claimed || '[]');
         assert(cl.some((q) => q.x * pl.scale + pl.ox <= 1 && q.y * pl.scale + pl.oy >= 70), 'the page claimed from the left edge: ' + t.d.gpu.claimed);
-        // 2.6.4: no header of the kit's over the HMI's top bar - nothing claimed there, the page's name not drawn
-        assert(!cl.some((q) => q.y * pl.scale + pl.oy < 40 && q.w > 1), 'the top bar left to the HMI: ' + t.d.gpu.claimed);
-        const texts = [], rec = t.d.chromeRec, tx = rec.text;
+        const texts = [], rec = t.d.chromeRec, tx = rec.text, fills = [], fr = rec.fillRect;
         rec.text = function (str, ...rest) { texts.push(String(str)); return tx.call(this, str, ...rest); };
+        rec.fillRect = function (x, y, w, h, c) { fills.push([x, y, w, h, c]); return fr.apply(this, arguments); };
         t.d._drawChrome(t.d.canvas(1600, 520));
-        rec.text = tx;
-        assert(texts.indexOf('M View') < 0 && texts.indexOf('Driving') < 0, 'no page name over the top bar: ' + texts.join(' | '));
+        rec.text = tx; rec.fillRect = fr;
+        // the tabs drawn in the strip, the page's own (no app name, no black header), the selected one marked
+        assert(texts.indexOf('DRIVING') >= 0 && texts.indexOf('M VIEW') >= 0 && texts.indexOf('Settings') < 0 && texts.indexOf('SETTINGS') < 0, 'the tabs in the strip: ' + texts.join(' | '));
+        assert(!fills.some((f) => f[1] === 0 && f[3] >= 60 && /^#000000$/i.test(String(f[4]))), 'no black header: the strip is the page\'s background');
+        const tabs = rec.tabRects || [];
+        assert(tabs.length === 2 && tabs.every((q) => q.y === 0 && q.x + q.w <= 1340), 'tab places left of the status box: ' + JSON.stringify(tabs));
+        // touches: the tabs' places only, the rest of the top bar (the status box) the HMI's
+        t.d._claimTabs(tabs, null);
+        const cl2 = JSON.parse(t.d.gpu.claimed || '[]');
+        assert(!cl2.some((q) => q.y * pl.scale + pl.oy < 40 && (q.x + q.w) * pl.scale + pl.ox > 1350), 'the status box left to the HMI: ' + t.d.gpu.claimed);
         // 2.6.9: the controller on a place marked 'hint' (an edge that opens a side bar): a slim chevron at the edge, no ring
         const calls = [], spy = (name) => { const f = rec[name]; rec[name] = function () { calls.push(name); return f.apply(this, arguments); }; return () => { rec[name] = f; }; };
         t.d.pageTargets = [{ x: 12, y: 190, w: 44, h: 160, key: 'rail', r: 'hint', run() {} }, { x: 600, y: 200, w: 200, h: 50, key: 'btn', run() {} }];
