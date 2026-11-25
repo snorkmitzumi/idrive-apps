@@ -1132,6 +1132,50 @@ checks.push(
         us.w.TPMS.statusTyreTemperature(T([108, 108, 108, 108]));
         assert.strictEqual(us.v.live.tyres.FL.t, 20, '68 F = 20 C');
     }],
+    ['2.9.4 log upload: off by default, nothing without upload.json or internet; each upload the new lines only, a VIN masked, the token never logged', async () => {
+        const { LogUpload, newLines } = require(path.join(KIT, 'logupload'));
+        const data = tmp('up'), file = path.join(data, 'cockpit_combo.log'), logged = [];
+        const log = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error: (m) => logged.push(m) };
+        const line = (t, m) => '2026-11-26T10:00:' + t + '.000Z INFO ' + m + '\n';
+        fs.writeFileSync(file + '.1', line('01', 'old one'));
+        fs.writeFileSync(file, line('02', 'starting WBA12345678901234 here') + '    at a stack line\n' + line('03', 'drive'));
+        const puts = [];
+        let on = false, status = 201;
+        const fake = (cfg, f, body, lookup) => { puts.push({ cfg, f, body, lookup }); return Promise.resolve({ status, text: '{}' }); };
+        const lease = path.join(data, 'lease.json');
+        const up = new LogUpload({ file, dataDir: data, app: 'cockpit_combo', version: '2.9.4', log, enabled: () => on, put: fake, leases: [lease] });
+        assert.strictEqual(await up.send('t'), 'off', 'off by default');
+        on = true;
+        assert.strictEqual(await up.send('t'), 'no config');
+        fs.writeFileSync(path.join(data, 'upload.json'), JSON.stringify({ repo: 'me/cockpit-logs', token: 'github_pat_SECRET' }));
+        assert.strictEqual(await up.send('t'), 'offline', 'no mgu-uplink lease');
+        assert(/No internet/.test(up.status()));
+        fs.writeFileSync(lease, JSON.stringify({ dns: ['1.1.1.1'] }));
+        assert.strictEqual(await up.send('car stopped'), 'sent');
+        assert.strictEqual(puts.length, 1);
+        assert.strictEqual(puts[0].f, 'logs/cockpit_combo/2026-11/2026-11-26T10-00-01-2.9.4.log');
+        assert.strictEqual(typeof puts[0].lookup, 'function', 'names resolved through the lease\'s DNS');
+        const txt = Buffer.from(puts[0].body.content, 'base64').toString();
+        assert(/old one/.test(txt) && /at a stack line/.test(txt) && /<VIN>/.test(txt) && !/WBA12345678901234/.test(txt), txt);
+        assert(!puts[0].body.branch, 'the default branch');
+        assert.strictEqual(await up.send('t'), 'nothing', 'nothing new');
+        fs.appendFileSync(file, line('09', 'parked'));
+        status = 403;
+        assert.strictEqual(await up.send('t'), 'failed');
+        status = 201;
+        const up2 = new LogUpload({ file, dataDir: data, app: 'cockpit_combo', version: '2.9.4', log, enabled: () => true, put: fake, leases: [lease] });
+        assert.strictEqual(await up2.send('start'), 'sent', 'the state kept over a restart');
+        const txt2 = Buffer.from(puts[2].body.content, 'base64').toString();
+        assert(/parked/.test(txt2) && !/drive/.test(txt2), 'only the lines after the last sent: ' + txt2);
+        assert(!logged.some((m) => /SECRET/.test(m)), 'the token never in the log');
+        assert.deepStrictEqual(newLines(file, '2026-11-26T10:00:05.000Z'), [line('09', 'parked').trim()]);
+        // a kit feature: app.json "logUpload" -> build.py adds the setting (off) and the Store's internet (mgu-uplink)
+        assert.strictEqual(SPEC.logUpload, true);
+        const py = require('child_process').spawnSync('python3', ['-c', 'import json,sys; sys.path.insert(0, sys.argv[1]); import build; '
+            + 's = build.kit_features(json.load(open(sys.argv[2]))); u = [x for x in s["settings"] if x["key"] == "uploadLogs"]; '
+            + 'print(json.dumps([s.get("internet"), len(u), u[0]["default"], u[0]["group"]]))', path.join(ROOT, 'kit', 'tools'), path.join(APP, 'app.json')], { encoding: 'utf8' });
+        assert.deepStrictEqual(JSON.parse(py.stdout), [true, 1, false, 'Log upload'], py.stderr);
+    }],
     ['2.9.3 tyres: a car with no units event (G26) reads deg C unless its own pressures are psi; one odd value latches nothing', async () => {
         const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });
         const P = (a) => ({ actualValuePressureTyreFLH: a[0], actualValuePressureTyreFRH: a[1], actualValuePressureTyreRLH: a[2], actualValuePressureTyreRRH: a[3] });

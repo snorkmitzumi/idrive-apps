@@ -169,6 +169,16 @@ mgu.run({
         setInterval(() => { if (enabled(TRIPS)) trips.tick({ speed: values.live.speed, condition: values.live.condition }); }, 1000);
         process.on('exit', () => { if (enabled(TRIPS)) trips.save(); });
         settings.onChange((k) => { if (k === TAB_KEYS[TRIPS] && !enabled(TRIPS)) trips.endNow(); });
+        // the log to the owner's GitHub repository as the car stops (ready to drive -> not, the trip book's test): the kit's
+        // log upload (app.json "logUpload", 2.9.4), which itself sends after a start, when switched on and from its row
+        let wasReady = null;
+        if (ctx.logUpload) setInterval(() => {
+            const c = values.live.condition;
+            if (typeof c !== 'number') return;
+            const ready = c === 8 || c === 10;
+            if (wasReady && !ready) setTimeout(() => ctx.logUpload.send('car stopped'), 5000);
+            wasReady = ready;
+        }, 1000);
         // the car's odometer and the fuel in the tank, where the car offers them to apps (each logged once as it first comes,
         // to see on a car which ones it sends); read every minute too, as a car may only notify a change
         const num = (x) => (typeof x === 'number' && isFinite(x) ? x : null), firstSeen = {};

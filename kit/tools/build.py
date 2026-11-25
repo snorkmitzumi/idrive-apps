@@ -577,6 +577,25 @@ def build_start_widget(spec, app_id, icon_src, out, pkg_out=None):
     return {'component': comp, 'layout': ui['containers']['500']['components'][str(WIDGET_COMPONENT_ID)]['cells']['Widget']['value']}
 
 
+# app.json "logUpload": true: the kit's log upload (kit/runtime/logupload.js) - its setting, off by default, and the
+# internet it needs (the MGU Store's mgu-uplink). The kit adds the Settings row and the uploads (mgu.js).
+UPLOAD_SETTING = {
+    'key': 'uploadLogs', 'group': 'Log upload', 'type': 'bool', 'default': False,
+    'label': "Upload the log to my GitHub repository (off: nothing leaves the car; needs upload.json in the app's "
+             "data folder and the Store's internet, mgu-uplink)",
+}
+
+
+def kit_features(spec):
+    """app.json with what its kit features need: "logUpload" adds the uploadLogs setting and "internet"."""
+    if spec.get('logUpload'):
+        spec['internet'] = True
+        settings = spec.setdefault('settings', [])
+        if not any(s.get('key') == UPLOAD_SETTING['key'] for s in settings):
+            settings.append(dict(UPLOAD_SETTING))
+    return spec
+
+
 def build(app_id, language='en', preview_only=False, no_sdk=False):
     """no_sdk: the installable archives without BMW's oap-sdk in them (node_modules/oap-sdk left out), for a package
     that may be published (a GitHub release): the head unit makes that module itself when an app requires 'oap-sdk'
@@ -587,7 +606,7 @@ def build(app_id, language='en', preview_only=False, no_sdk=False):
         raise SystemExit('BMW oap-sdk is missing. Extract it from your own head unit with kit/tools/extract_sdk.js, '
                          'or use --preview-only for an offline preview (no installable package).')
     adir = os.path.join(APPS, app_id)
-    spec = json.load(open(os.path.join(adir, 'app.json'), encoding='utf-8'))
+    spec = kit_features(json.load(open(os.path.join(adir, 'app.json'), encoding='utf-8')))
     spec = localize_spec(spec, language)
     spec.setdefault('id', app_id)
     ver = spec['version']
@@ -636,6 +655,9 @@ def build(app_id, language='en', preview_only=False, no_sdk=False):
     # the head units it is for, read from the package itself by the MGU Store's Releases and Catalog layouts
     if spec.get('mguHmi'):
         pkg['mguHmi'] = spec['mguHmi']
+    # app.json "internet": true: the MGU Store's mgu-uplink lets the app out to the internet (its docs/PUBLISHING.md)
+    if spec.get('internet'):
+        pkg['mguInternet'] = True
     # an app with its own licence (apps/<id>/LICENSE, packed with it below): npm's way of naming it
     if os.path.isfile(os.path.join(adir, 'LICENSE')):
         pkg['license'] = 'SEE LICENSE IN javascript/LICENSE'
