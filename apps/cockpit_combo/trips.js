@@ -64,14 +64,28 @@ class Trips {
         try { writeWhole(this.file, JSON.stringify({ v: 1, current: this.current, since: this.since || null, level: isNum(this.lastLevel) ? this.lastLevel : null, trips: this.trips.slice(0, KEEP) })); this.savedAt = this.now(); } catch (e) { this.log.warn('trips: ' + e.message); }
     }
 
-    /** The car's odometer in km (whole km), as it comes. */
-    odometer(km) {
+    /**
+     * The car's odometer in km (whole km), as it comes (src: which signal, for the log). Its count is used only where it
+     * agrees with the speed's (odoKm()): on a G26 the first reading was 1024 km against a real 35748 (2.9.1).
+     */
+    odometer(km, src) {
         if (!isNum(km) || km <= 0 || km >= 16777214) return;
-        if (this.odo === null) this.log.info('trips: odometer ' + km + ' km');
+        const seen = this.odoSeen || (this.odoSeen = {}), k = src || 'odometer', n = seen[k] || { n: 0, last: null };
+        if (n.last !== km && n.n < 8) { n.n++; this.log.info('trips: odometer ' + k + ' ' + km + ' km'); }
+        n.last = km; seen[k] = n;
+        // one source at a time, SecureMileage first: two signals' readings mixed in one count gave 1024 > 35748 (2.9.1)
+        if (this.odoSrc && k !== this.odoSrc) {
+            if (k !== ODO_FIRST) return;
+            this.log.info('trips: odometer from ' + k + ' (not ' + this.odoSrc + ')');
+            const c0 = this.current;
+            if (c0) { c0.odo0 = km; c0.kmAtOdo0 = c0.kmSum; }
+            if (this.since) { this.since.odo0 = km; this.since.kmAtOdo0 = this.since.kmSum || 0; }
+        }
+        this.odoSrc = k;
         this.odo = km;
-        if (this.since && !isNum(this.since.odo0)) this.since.odo0 = km;
+        if (this.since && !isNum(this.since.odo0)) { this.since.odo0 = km; this.since.kmAtOdo0 = this.since.kmSum || 0; }
         const c = this.current;
-        if (c) { if (!isNum(c.odo0)) c.odo0 = km; c.odo1 = km; }
+        if (c) { if (!isNum(c.odo0)) { c.odo0 = km; c.kmAtOdo0 = c.kmSum; } c.odo1 = km; }
     }
     /**
      * The fuel in the tank, litres, as it comes. A refuel: the level REFUEL_L or more over the lowest one since the last
@@ -155,14 +169,18 @@ class Trips {
         const s = this.closed(c);
         this.lastRaw = c; this.lastKept = s.km >= 0.2;
         // a few metres in the drive (the car woken and parked again): not kept
-        if (this.lastKept) { this.trips.unshift(s); this.log.info('trips: ended, ' + s.km.toFixed(1) + ' km in ' + Math.round((s.end - s.start) / 60000) + ' min' + (isNum(s.fuel) ? ', ' + s.fuel + ' l' : '')); }
+        if (this.lastKept) {
+            this.trips.unshift(s);
+            this.log.info('trips: ended, ' + s.km.toFixed(1) + ' km (' + s.kmFrom + ') in ' + Math.round((s.end - s.start) / 60000) + ' min' + (isNum(s.fuel) ? ', ' + s.fuel + ' l' : '')
+                + '; speed ' + c.kmSum.toFixed(1) + ' km, odometer ' + (isNum(c.odo0) ? c.odo0 + ' > ' + c.odo1 + ' from ' + (c.kmAtOdo0 || 0).toFixed(1) + ' km in' : 'none'));
+        }
         this.save();
     }
     endNow() { if (this.current) this.finish(this.now()); }
 
-    /** A trip's summary: km (the odometer's when it counted at least 1 km, else the speed's), fuel used, consumption. */
+    /** A trip's summary: km (the odometer's where it agrees with the speed's, else the speed's), fuel used, consumption. */
     closed(c) {
-        const odo = isNum(c.odo0) && isNum(c.odo1) && c.odo1 - c.odo0 >= 1 ? c.odo1 - c.odo0 : null;
+        const odo = odoKm(c.odo0, c.odo1, c.kmAtOdo0, c.kmSum);
         const km = odo !== null ? odo : Math.round(c.kmSum * 10) / 10;
         const fuel = isNum(c.fuel0) ? c.fuelUsed + Math.max(0, c.fuelBase - c.fuelLast) : null;
         return { start: c.start, end: c.end, km, kmFrom: odo !== null ? 'odometer' : 'speed', movingS: Math.round(c.movingS), top: Math.round(c.top),
@@ -172,7 +190,7 @@ class Trips {
     sinceRefuel() {
         const r = this.since;
         if (!r) return null;
-        const odo = isNum(r.odo0) && isNum(this.odo) && this.odo - r.odo0 >= 1 ? this.odo - r.odo0 : null;
+        const odo = odoKm(r.odo0, this.odo, r.kmAtOdo0, r.kmSum || 0);
         const km = odo !== null ? odo : Math.round((r.kmSum || 0) * 10) / 10;
         const fuel = isNum(this.lastLevel) ? Math.max(0, r.level - this.lastLevel) : null;
         return { at: r.at, km, kmFrom: odo !== null ? 'odometer' : 'speed', fuel, per100: isNum(fuel) && km >= MIN_FUEL_KM ? Math.round(fuel / km * 1000) / 10 : null };
@@ -251,6 +269,17 @@ function cells(cv, t, x, y, items, on) {
         cv.text(k, x + i * 145, y + 76, 18, t.dim, { font: 'bold' });
         cv.text(v, x + i * 145, y + 112, v.length > 10 ? 24 : 30, on && !/^--$|^from /.test(v) ? t.text : t.dim, { font: 'num' });
     });
+}
+/**
+ * The distance by the odometer (odo0 first read when the speed had counted kmAt0 of it), or null where it doesn't agree
+ * with the speed's within ODO_AGREE (at least 2 km) - a reading the car got wrong - or has counted no whole km yet.
+ */
+const ODO_AGREE = 0.2, ODO_FIRST = 'SecureMileage';
+function odoKm(odo0, odo1, kmAt0, kmSum) {
+    if (!isNum(odo0) || !isNum(odo1) || odo1 - odo0 < 1) return null;
+    const part = odo1 - odo0, speedPart = kmSum - (kmAt0 || 0);
+    if (Math.abs(part - speedPart) > Math.max(2, speedPart * ODO_AGREE)) return null;
+    return Math.round((part + (kmAt0 || 0)) * 10) / 10;
 }
 function big(cv, t, x, y, text, unit, size) {
     const w = cv.text(text, x, y, size, t.text, { font: 'num' });

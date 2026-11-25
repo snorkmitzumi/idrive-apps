@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -117,7 +117,7 @@ A trip book, kept by itself (new in 2.9.0, a first version):
 - **A trip is one drive:** it starts when the car is ready to drive and ends a minute after it isn't. Started again
   within 3 minutes (the engine off at a fuel station), the same trip goes on. **End trip** ends it by hand.
 - **Each trip:** when, distance, time, average and top speed, the fuel used and the consumption. The distance comes
-  from the car's odometer where it sends one, else from the speed; the fuel from the tank's level, so it counts in
+  from the car's odometer where it sends one and it agrees with the speed's count (within 20 %), else from the speed; the fuel from the tank's level, so it counts in
   whole litres, a refuel on the way is noticed, and the consumption shows from 20 km on.
 - **This month:** trips, distance and fuel.
 - **Since refuelling:** distance, fuel and consumption since the last refuel. A refuel is the tank's level rising 3 l
@@ -126,7 +126,8 @@ A trip book, kept by itself (new in 2.9.0, a first version):
 - Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
 
 Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in
-the QR log).
+the QR log), and every 10 minutes a `status:` line repeats the latest of each, with whether the renderer can draw
+in-page.
 
 ### Ambient
 
