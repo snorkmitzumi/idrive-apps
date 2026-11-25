@@ -1169,6 +1169,25 @@ checks.push(
         assert(/parked/.test(txt2) && !/drive/.test(txt2), 'only the lines after the last sent: ' + txt2);
         assert(!logged.some((m) => /SECRET/.test(m)), 'the token never in the log');
         assert.deepStrictEqual(newLines(file, '2026-11-26T10:00:05.000Z'), [line('09', 'parked').trim()]);
+        // 2.9.5: GitHub took an earlier try but its answer was lost: the same name is refused (422), so once more under
+        // a name of its own instead of failing for good
+        fs.appendFileSync(file, line('20', 'again'));
+        let n = 0;
+        const up3 = new LogUpload({ file, dataDir: data, app: 'cockpit_combo', version: '2.9.5', log, enabled: () => true, leases: [lease],
+            put: (cfg, f) => { puts.push({ f }); return Promise.resolve({ status: n++ ? 201 : 422, text: 'sha' }); } });
+        const before = puts.length;
+        assert.strictEqual(await up3.send('t'), 'sent', 'not stuck on a name that is taken');
+        assert(/T10-00-\d\d-2\.9\.5-\d{6}\.log$/.test(puts[before + 1].f) && puts[before].f !== puts[before + 1].f, puts[before + 1].f);
+        assert.strictEqual(await up3.send('t'), 'nothing');
+        // the rotated file is read only while the current one does not reach back to the last line sent
+        fs.writeFileSync(file + '.1', line('30', 'stale: later than the mark, but the current file starts before it'));
+        assert.deepStrictEqual(newLines(file, '2026-11-26T10:00:05.000Z').map((l) => l.slice(30)), ['parked', 'again']);
+        assert.strictEqual(newLines(file, '').length, 6, 'all of both when nothing was sent yet');
+        // the settings row asks for the status each frame: upload.json is not read from the disk each time
+        const reads = [], readFileSync = fs.readFileSync;
+        fs.readFileSync = function (f) { reads.push(String(f)); return readFileSync.apply(fs, arguments); };
+        try { for (let k = 0; k < 50; k++) up3.status(); } finally { fs.readFileSync = readFileSync; }
+        assert(reads.filter((f) => /upload\.json$/.test(f)).length <= 1, 'read ' + reads.length + ' times for 50 frames');
         // a kit feature: app.json "logUpload" -> build.py adds the setting (off) and the Store's internet (mgu-uplink)
         assert.strictEqual(SPEC.logUpload, true);
         const py = require('child_process').spawnSync('python3', ['-c', 'import json,sys; sys.path.insert(0, sys.argv[1]); import build; '

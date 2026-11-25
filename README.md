@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.4.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.5.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -294,7 +294,8 @@ photos are needed. It is **off by default**: nothing is sent until you switch it
 Cockpit uploads when the car stops (ready to drive, then not), two minutes after it starts (anything a stop without
 internet left behind), and when you press the Log upload row. Each upload is a new file,
 `logs/cockpit_combo/<month>/<time of its first line>-<version>.log`, holding the lines since the last one, with a VIN
-masked. The token is never written to the log or shown.
+masked. The token is never written to the log or shown. An upload GitHub took while its answer got lost on a weak connection is sent
+once more under a name with the time added, not refused for good (2.9.5).
 
 The head unit's apps reach the internet only through the MGU Store's **mgu-uplink** (a USB modem, a phone tethered
 by USB, or Wi-Fi); the car's own connection isn't open to apps. Without it the row says *No internet* and the lines
