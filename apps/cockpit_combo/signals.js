@@ -80,8 +80,20 @@ function watches(values, engine, sc, log) {
         const v = sc('tyrePress', raw);
         if (v === null) return null;
         const k = PRESS_TO_BAR[carUnits.press];
-        const bar = k ? v * k : v >= TYRE_P[0] && v <= TYRE_P[1] ? v : v >= 7 && v < 60 ? (carUnits.psiSeen = true, v / 14.5038) : v >= 60 && v <= 600 ? v / 100 : null;
+        const bar = k ? v * k : v >= TYRE_P[0] && v <= TYRE_P[1] ? v : v >= 7 && v < 60 ? v / 14.5038 : v >= 60 && v <= 600 ? v / 100 : null;
         return bar !== null && bar >= TYRE_P[0] && bar <= TYRE_P[1] ? bar : null;
+    };
+    // a car with no units event (a G26: 'Unknown event'): psi when most of the four actual pressures read as psi, taken
+    // again with each reading. 2.9.2 latched psi on one odd value (a target, a start-up reading) and showed a 7 deg C tyre
+    // as -14 (read as deg F) for the rest of the drive
+    const psiOf = (v) => {
+        let psi = 0, bar = 0;
+        TYRES.forEach((w) => {
+            const x = sc('tyrePress', v && v['actualValuePressureTyre' + w + 'H']);
+            if (x === null) return;
+            if (x >= TYRE_P[0] && x <= TYRE_P[1]) bar++; else if (x >= 7 && x < 60) psi++;
+        });
+        if (psi + bar) carUnits.psiSeen = psi > bar;
     };
     const tyreT = (raw) => {
         // deg F only on an imperial car (deg F and psi): a G26 in bar / deg C said deg F in its units (2.4.1), but its
@@ -108,7 +120,7 @@ function watches(values, engine, sc, log) {
             },
         }],
         ['de.bmw.infotainment.vehicle.TPMS', {
-            statusTyrePressure: (v) => { logRaw('tyre pressure', TYRES.map((w) => v && v['actualValuePressureTyre' + w + 'H'])); tyre('p', (w) => 'actualValuePressureTyre' + w + 'H', v, tyreP); },
+            statusTyrePressure: (v) => { psiOf(v); logRaw('tyre pressure', TYRES.map((w) => v && v['actualValuePressureTyre' + w + 'H'])); tyre('p', (w) => 'actualValuePressureTyre' + w + 'H', v, tyreP); },
             statusTyreTemperature: (v) => { logRaw('tyre temperature', TYRES.map((w) => v && v['actualValueTemperatureTyre' + w + 'H'])); tyre('t', (w) => 'actualValueTemperatureTyre' + w + 'H', v, tyreT); },
             statusTargetTyrePressure: (v) => tyre('pt', (w) => 'targetPressureTyre' + w + 'H', v, tyreP),
         }],

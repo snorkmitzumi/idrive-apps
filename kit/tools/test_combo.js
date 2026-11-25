@@ -1132,6 +1132,23 @@ checks.push(
         us.w.TPMS.statusTyreTemperature(T([108, 108, 108, 108]));
         assert.strictEqual(us.v.live.tyres.FL.t, 20, '68 F = 20 C');
     }],
+    ['2.9.3 tyres: a car with no units event (G26) reads deg C unless its own pressures are psi; one odd value latches nothing', async () => {
+        const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });
+        const P = (a) => ({ actualValuePressureTyreFLH: a[0], actualValuePressureTyreFRH: a[1], actualValuePressureTyreRLH: a[2], actualValuePressureTyreRRH: a[3] });
+        const eu = signalRig();
+        // 2.9.2 on the G26: raw 47 (7 deg C) shown as -14 after an odd pressure value had latched psi
+        eu.w.TPMS.statusTargetTyrePressure({ targetPressureTyreFLH: 300, targetPressureTyreFRH: 27, targetPressureTyreRLH: 27, targetPressureTyreRRH: 27 });
+        eu.w.TPMS.statusTyrePressure(P([300, 27, 27, 27]));
+        eu.w.TPMS.statusTyreTemperature(T([47, 47, 47, 46]));
+        assert.deepStrictEqual(['FL', 'FR', 'RL', 'RR'].map((k) => eu.v.live.tyres[k].t), [7, 7, 7, 6]);
+        const us = signalRig();
+        us.w.TPMS.statusTyrePressure(P([410, 410, 400, 400]));
+        us.w.TPMS.statusTyreTemperature(T([108, 108, 108, 108]));
+        assert.strictEqual(us.v.live.tyres.FL.t, 20, 'a psi car: 68 F = 20 C');
+        us.w.TPMS.statusTyrePressure(P([27, 27, 27, 27]));
+        us.w.TPMS.statusTyreTemperature(T([47, 47, 47, 47]));
+        assert.strictEqual(us.v.live.tyres.FL.t, 7, 'taken again with each reading');
+    }],
     ['2.4.2 #2 misfires: the read-only link lets service 06 out; a link that blocks it: the UDS form instead, not 06 again', async () => {
         const { check } = require(path.join(KIT, 'readonly-diag'));
         check(0x12, 0x06, [0xA2], false);
