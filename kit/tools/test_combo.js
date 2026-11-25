@@ -852,9 +852,18 @@ checks.push(
         // the odometer, when the car sends it, counts the distance
         clock += RESUME_MS + 1000; tb.odometer(1000); run(tb, 1, 0, 10); run(tb, 300, 100, 10); tb.odometer(1009); run(tb, END_MS / 1000 + 1, 0, 5);
         assert(tb.trips.length === 2 && tb.trips[0].km === 9 && tb.trips[0].kmFrom === 'odometer', JSON.stringify(tb.trips[0]));
+        // a G26 (2.9.1): the first reading bogus (1024), the real one later; the odometer first read mid-trip
+        clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 600, 60, 10); tb.odometer(1024, 'SecureMileage'); run(tb, 600, 60, 10); tb.odometer(35748, 'SecureMileage'); tb.odometer(99, 'MileageVehicle'); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert(tb.trips[0].kmFrom === 'speed' && Math.abs(tb.trips[0].km - 20) < 0.3, 'an odometer that disagrees with the speed: the speed\'s 20 km: ' + JSON.stringify(tb.trips[0]));
+        assert(lines.some((m) => /trips: ended, 20\.0 km \(speed\).*odometer \d+ > 35748/.test(m)) && lines.some((m) => /odometer SecureMileage 35748 km/.test(m)) && lines.some((m) => /odometer from SecureMileage/.test(m)) && tb.odoSrc === 'SecureMileage', lines.slice(-4).join(' | '));
+        {
+            const tm = new Trips({ dataDir: tmp('trips-mid'), log, now: () => clock });
+            run(tm, 1, 0, 10); run(tm, 300, 72, 10); tm.odometer(35748); run(tm, 600, 72, 10); tm.odometer(35760); run(tm, END_MS / 1000 + 1, 0, 5);
+            assert(tm.trips[0].kmFrom === 'odometer' && tm.trips[0].km === 18, 'first read 6 km in: 6 km + the odometer\'s 12: ' + JSON.stringify(tm.trips[0]));
+        }
         // a few metres (woken and parked again): not kept
         clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 5, 5, 10); run(tb, END_MS / 1000 + 1, 0, 5);
-        assert.strictEqual(tb.trips.length, 2, 'a trip under 0.2 km not kept');
+        assert.strictEqual(tb.trips.length, 3, 'a trip under 0.2 km not kept');
         // the app stopped mid-trip: resumed by the next start within RESUME_MS, else ended at its last save
         clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 120, 90, 10); tb.save();
         const started = tb.current.start;
@@ -897,7 +906,7 @@ checks.push(
         let r = tb.sinceRefuel();
         assert(r && r.fuel === 0 && r.km === 0 && lines.filter((m) => /refuelled/.test(m)).length === 1, 'one refuel, counted from the full tank: ' + JSON.stringify(r) + ' ' + lines.join(' | '));
         // driven 450 km (odometer), 30 l used: 6.7 l/100
-        run(tb, 1, 0, 10); run(tb, 600, 100, 10); tb.odometer(1450); tb.fuel(40); tb.fuel(25); run(tb, 62, 0, 5);
+        run(tb, 1, 0, 10); run(tb, 16200, 100, 10); tb.odometer(1450); tb.fuel(40); tb.fuel(25); run(tb, 62, 0, 5);
         r = tb.sinceRefuel();
         assert(r.km === 450 && r.kmFrom === 'odometer' && r.fuel === 30 && r.per100 === 6.7, JSON.stringify(r));
         // kept across a restart

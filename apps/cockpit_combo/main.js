@@ -175,12 +175,20 @@ mgu.run({
         const raw = (name) => (v) => { if (!firstSeen[name]) { firstSeen[name] = true; let s; try { s = JSON.stringify(v); } catch (e) { s = String(v); } log.info('trips signal ' + name + ': ' + (s && s.length > 300 ? s.slice(0, 300) + '...' : s)); } };
         const tripWatch = (iface, handlers) => ctx.signals.watch(iface, '1', handlers, log, { pollMs: 60000 }).then((r) => log.info('trips signal ' + iface.split('.').pop() + (r.error ? ' not set up: ' + r.error : ' offered by the car: ' + r.available)))
             .catch((e) => log.warn('trips signal ' + iface.split('.').pop() + ': ' + (e && e.message || e)));
-        let odoSecure = false;
-        tripWatch('de.bmw.infrastructure.SecureMileage', { mileage: (v) => { raw('SecureMileage')(v); const km = num(v && v.currentMileage); if (km !== null && km > 0) { odoSecure = true; trips.odometer(km); } } });
-        tripWatch('de.bmw.chassis.VehicleModel', { MileageVehicle: (v) => { raw('MileageVehicle')(v); const km = num(v && v.mileageVehicle); if (!odoSecure && km !== null && km > 0 && km < 65535) trips.odometer(km); } });
+        // (each source's latest value, for the status line below)
+        const lastOf = {}, seenOf = (k, x) => { lastOf[k] = x; return x; };
+        tripWatch('de.bmw.infrastructure.SecureMileage', { mileage: (v) => { raw('SecureMileage')(v); const km = seenOf('SecureMileage', num(v && v.currentMileage)); if (km !== null && km > 0) trips.odometer(km, 'SecureMileage'); } });
+        tripWatch('de.bmw.chassis.VehicleModel', { MileageVehicle: (v) => { raw('MileageVehicle')(v); const km = seenOf('MileageVehicle', num(v && v.mileageVehicle)); if (km !== null && km > 0 && km < 65535) trips.odometer(km, 'MileageVehicle'); } });
         let fuelKombi = false;
-        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => { raw('RangeTankStatus')(v); const l = num(v && v.fluidLevelFuelTank); if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); } } });
-        tripWatch('de.bmw.infotainment.lsc.LSCDataSink', { mileageRange: (v) => { raw('LSC mileageRange')(v); const l = num(v && v.fluidLevelFuelTank); if (!fuelKombi && l !== null && l < 255) trips.fuel(l); }, fuelSupply: (v) => raw('LSC fuelSupply')(v) });
+        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => { raw('RangeTankStatus')(v); const l = seenOf('RangeTankStatus', num(v && v.fluidLevelFuelTank)); if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); } } });
+        tripWatch('de.bmw.infotainment.lsc.LSCDataSink', { mileageRange: (v) => { raw('LSC mileageRange')(v); const l = seenOf('LSC mileageRange', num(v && v.fluidLevelFuelTank)); if (!fuelKombi && l !== null && l < 255) trips.fuel(l); }, fuelSupply: (v) => raw('LSC fuelSupply')(v) });
+        // every 10 minutes, what was only logged at the start (the QR log keeps the newest lines): whether the renderer
+        // can draw in-page (BMW's popups over the app) and the odometer and fuel values per source
+        setInterval(() => {
+            const g = ctx.display && ctx.display.gpu, info = g && g.info;
+            log.info('status: renderer ' + (info ? JSON.stringify(info) : g ? 'connected, no mgu-render/1 info' : 'none (software)') + '; trips odometer ' + (trips.odoSrc || 'none')
+                + ' ' + JSON.stringify(lastOf) + (trips.current ? '; trip ' + trips.closed(trips.current).km + ' km' : ''));
+        }, 600000);
         tripWatch('de.bmw.infotainment.resetlogic.ResetLogic', { averageConsumption: (v) => raw('ResetLogic averageConsumption')(v) });
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
