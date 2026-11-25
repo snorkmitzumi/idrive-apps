@@ -1,7 +1,7 @@
 <h1 align="center">Cockpit</h1>
 
 <p align="center">
-  <b>Driving data, performance timing, engine health, seats and the ambient light: one app for the BMW MGU head unit (iDrive 7).</b><br>
+  <b>Driving data, performance timing, engine health, seats, a trip book and the ambient light: one app for the BMW MGU head unit (iDrive 7).</b><br>
   Drawn by its own GPU renderer. It reads the car; the only things it changes are the seat positions and the ambient light.
 </p>
 
@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.8.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -108,6 +108,23 @@ The engine's and gearbox's health at a glance:
 - **Fuel trims and timing:** short and long-term fuel trim, and ignition advance. A long-term trim 10 % from zero
   is shown yellow, 20 % red.
 
+### Trips
+
+<img src="docs/screens/cockpit_trips.png" alt="Trips: this trip's distance, time, average and top speed, fuel and consumption; the last trips; this month's totals" width="100%">
+
+A trip book, kept by itself (new in 2.9.0, a first version):
+
+- **A trip is one drive:** it starts when the car is ready to drive and ends a minute after it isn't. Started again
+  within 3 minutes (the engine off at a fuel station), the same trip goes on. **End trip** ends it by hand.
+- **Each trip:** when, distance, time, average and top speed, the fuel used and the consumption. The distance comes
+  from the car's odometer where it sends one, else from the speed; the fuel from the tank's level, so it counts in
+  whole litres, a refuel on the way is noticed, and the consumption shows from 20 km on.
+- **This month:** trips, distance, time and fuel.
+- Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
+
+Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in
+the QR log).
+
 ### Ambient
 
 <img src="docs/screens/combo_ambient.png" alt="Ambient: the colour ring and brightness, with the side rail open on Colour, Animations and Modes" width="100%">
@@ -161,7 +178,7 @@ Seven groups:
 
 | Group | What it holds |
 |---|---|
-| **Tabs** | which tabs Cockpit has: Performance, Seats, M View and Ambient each switch off (Driving is always there) |
+| **Tabs** | which tabs Cockpit has: Performance, Seats, M View, Trips and Ambient each switch off (Driving is always there) |
 | **Gauges** | engine type, redline, rev scale, boost and torque scales, power and boost sources, peak markers and hold, xDrive card, 48 V battery |
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
@@ -173,7 +190,7 @@ Seven groups:
 
 ### Only the tabs you need
 
-Settings > **Tabs** switches Performance, Seats, M View and Ambient off and on again, while Cockpit runs. A tab switched
+Settings > **Tabs** switches Performance, Seats, M View, Trips and Ambient off and on again, while Cockpit runs. A tab switched
 off is gone from the tab bar and the side bars, its settings are hidden, and it costs nothing:
 
 - **Seats off:** no seat is read and none moves. Easy entry is off too, so another seat app can have the seats.
@@ -181,6 +198,7 @@ off is gone from the tab bar and the side bars, its settings are hidden, and it 
   (Ambient config, or IterioDev's) has them to itself. Switched off, the ambient light isn't started with the car either.
 - **Performance off:** the dyno and the drag timer stop sampling.
 - **M View off:** its reads are never made (they run only while the tab shows anyway).
+- **Trips off:** nothing is recorded (a trip under way ends).
 
 ## Install
 
@@ -207,8 +225,8 @@ Cockpit starts with the car (the ambient light needs it running) and shows up in
 
 ## What Cockpit reads, and what it doesn't do
 
-- **Car signals** over SOME/IP: speed, rpm, gear, torque, temperatures, tyres, driving mode, doors, turn signals, and
-  so on.
+- **Car signals** over SOME/IP: speed, rpm, gear, torque, temperatures, tyres, driving mode, doors, turn signals, the
+  odometer and the fuel in the tank (Trips), and so on.
 - **The diagnostic link, read-only:** Cockpit's link only lets reads out:
   - UDS `22` (read by identifier);
   - OBD `01`, `06` and `09` (current data, on-board monitor results, vehicle information).
@@ -261,6 +279,7 @@ The code is in [`apps/cockpit_combo/`](apps/cockpit_combo). The ambient light's 
 | `seats.js`, `seatmod.js`, `seatmove.js`, `seatprobe.js` | Seats (`seatmove.js`: memory and easy entry; `seatprobe.js`: BMW's seat interfaces, read only) |
 | `rail.js` | the side bars in map style |
 | `mview.js` | M View |
+| `trips.js` | Trips: the trip book |
 | `signals.js` | the car's signals |
 | `reads.js` | the diagnostic reads |
 | `values.js` | values and peaks |

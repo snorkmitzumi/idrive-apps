@@ -138,7 +138,7 @@ const checks = [
         const others = fs.readdirSync(path.join(ROOT, 'apps')).filter((d) => d !== 'cockpit_combo' && fs.existsSync(path.join(ROOT, 'apps', d, 'app.json')))
             .map((d) => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps', d, 'app.json'), 'utf8')).loggingId);
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
-        const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
+        const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabTrips', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
             'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
@@ -734,7 +734,7 @@ checks.push(
         const t2 = await page(Object.assign(car(), { slip: null }));
         assert(t2.includes('AXLE SLIP') && !t2.some((x) => /NaN|undefined/.test(x)));
     }],
-    ['2.0 #1 tabs: Driving, Performance, Seats, M View, then Ambient config\'s three (no Favourites, no Strobe); each tab drawn', async () => {
+    ['2.0 #1 tabs: Driving, Performance, Seats, M View, Trips, then Ambient config\'s three (no Favourites, no Strobe); each tab drawn', async () => {
         fakeAmb.calls = [];
         const b = await boot(tmp('tabs'));
         assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0, 'the ambient service without the strobe: ' + fakeAmb.calls.join(' | '));
@@ -755,7 +755,7 @@ checks.push(
         assert(t2.some((x) => /^Only while the car stands still/.test(x)) && !t2.includes('Engine speed'), 'Seats: ' + t2.join(' | '));
         const tm = await b.tab(3);
         assert(tm.includes('Engine oil') && tm.includes('Gearbox oil') && tm.includes('Misfires') && tm.includes('Tyres') && tm.includes('Fuel trims & timing') && !tm.includes('Engine oil level') && !tm.some((x) => /NaN|undefined/.test(x)), 'M View: ' + tm.join(' | '));
-        const ta = await b.tab(4);
+        const ta = await b.tab(5);
         assert(ta.includes('AMBIENT TAB 0') && ['COLOUR', 'ANIMATIONS', 'MODES'].every((x) => ta.includes(x)), 'Ambient with its sub-tabs: ' + ta.join(' | '));
         await b.press('amb-1');
         const t3 = await b.draw();
@@ -801,7 +801,7 @@ checks.push(
         assert(t.includes('GEAR · SHIFT AT') && !t.includes('SEATS'), 'Seats switched off while shown: Driving: ' + t.join(' | '));
         b.settings.set('tabSeats', true);
         assert((await b.draw()).includes('SEATS'), 'Seats back');
-        await b.tab(4);
+        await b.tab(5);
         b.settings.set('tabAmbient', false);
         assert(fakeAmb.calls.indexOf('carColour') >= 0, 'the lights given back at once: ' + fakeAmb.calls.join(' | '));
         assert(fakeAmb.calls.indexOf('hold off true') < 0, 'held only once the give-back is out');
@@ -822,6 +822,73 @@ checks.push(
         assert(fakeAmb.calls.indexOf('background {"strobe":false}') >= 0 && fakeAmb.calls.some((c) => /^mount/.test(c)), fakeAmb.calls.join(' | '));
         assert((await b.draw()).includes('AMBIENT'));
     }],
+    ['2.9.0 trips: a drive cycle from the car\'s state, distance from the speed or the odometer, fuel with a refuel, resumed after a short stop', async () => {
+        const { Trips, END_MS, RESUME_MS, IDLE_MS } = appModule('trips');
+        let clock = Date.UTC(2026, 10, 25, 8, 0, 0);
+        const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
+        const dir = tmp('trips'), mk = (o) => new Trips(Object.assign({ dataDir: dir, log, now: () => clock }, o));
+        const run = (tb, s, kmh, cond) => { for (let i = 0; i < s; i++) { clock += 1000; tb.tick({ speed: kmh, condition: cond }); } };
+        let tb = mk();
+        run(tb, 5, 0, 5);
+        assert(!tb.current, 'living, not ready to drive: no trip');
+        run(tb, 1, 0, 10);
+        assert(tb.current, 'ready to drive: a trip');
+        tb.fuel(40);
+        run(tb, 600, 60, 10);                                        // 10 minutes at 60 km/h
+        tb.fuel(35); tb.fuel(55); tb.fuel(50);                        // 5 l used, a refuel to 55, 5 l more
+        run(tb, 30, 0, 12);                                          // ending drive readiness...
+        assert(tb.current, 'not ended at once');
+        run(tb, END_MS / 1000 + 1, 0, 5);
+        assert(!tb.current && tb.trips.length === 1, 'ended once out of drive readiness for END_MS');
+        let x = tb.trips[0];
+        assert(Math.abs(x.km - 10) < 0.2 && x.kmFrom === 'speed' && x.top === 60 && Math.abs(x.movingS - 600) <= 2, JSON.stringify(x));
+        assert(x.fuel === 10 && x.refuelled && x.per100 === null, 'fuel before and after the refuel, no consumption under 20 km: ' + JSON.stringify(x));
+        // driven again within RESUME_MS: the same trip goes on (an engine-off stop)
+        clock += RESUME_MS - 120000; run(tb, 1, 0, 10);                     // (3 min from leaving drive readiness: 91 s gone already)
+        assert(tb.current && tb.current.start === x.start && tb.trips.length === 0, 'resumed: ' + tb.trips.length);
+        run(tb, 900, 80, 10); run(tb, END_MS / 1000 + 1, 0, 5);
+        x = tb.trips[0];
+        assert(tb.trips.length === 1 && Math.abs(x.km - 30) < 0.3 && x.per100 !== null && x.top === 80, 'one trip, 30 km, consumption now: ' + JSON.stringify(x));
+        // the odometer, when the car sends it, counts the distance
+        clock += RESUME_MS + 1000; tb.odometer(1000); run(tb, 1, 0, 10); run(tb, 300, 100, 10); tb.odometer(1009); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert(tb.trips.length === 2 && tb.trips[0].km === 9 && tb.trips[0].kmFrom === 'odometer', JSON.stringify(tb.trips[0]));
+        // a few metres (woken and parked again): not kept
+        clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 5, 5, 10); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert.strictEqual(tb.trips.length, 2, 'a trip under 0.2 km not kept');
+        // the app stopped mid-trip: resumed by the next start within RESUME_MS, else ended at its last save
+        clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 120, 90, 10); tb.save();
+        const started = tb.current.start;
+        tb = mk(); clock += 60000; run(tb, 1, 0, 10);
+        assert(tb.current && tb.current.start === started, 'resumed after the app restarted');
+        run(tb, 60, 90, 10); tb.save();
+        tb = mk(); clock += RESUME_MS + 60000; run(tb, 1, 0, 10);
+        assert(tb.current && tb.current.start !== started && tb.trips[0].start === started && Math.abs(tb.trips[0].km - 4.5) < 0.2, 'too late: the old one ended, a new one: ' + JSON.stringify(tb.trips[0]));
+        // a car that sends no state: moving starts it, IDLE_MS standing ends it
+        const nd = tmp('trips-nostate'); let t2 = new Trips({ dataDir: nd, log, now: () => clock });
+        run(t2, 10, 0, undefined); assert(!t2.current, 'standing, no state: no trip');
+        run(t2, 120, 50, undefined); assert(t2.current, 'moving: a trip');
+        run(t2, IDLE_MS / 1000 + 2, 0, undefined); assert(!t2.current && t2.trips.length === 1, 'standing IDLE_MS: ended');
+        // the month, and the tab (km and mph) with nothing undefined
+        const m = tb.months()[0];
+        assert(m.key === '2026-11' && m.trips >= 4 && m.km > 40, JSON.stringify(m));
+        const draw = async (tr, unit) => { tr.settings = { get: (k) => (k === 'speedUnit' ? unit : null) }; return textsOf(() => tr.draw(new Canvas(1600, 520), themes.theme('m_tricolour'))); };
+        for (const u of ['kmh', 'mph']) {
+            const tx = await draw(tb, u);
+            assert((u === 'mph' || (tx.includes('This trip') && tx.includes('This month'))) && !tx.some((q) => /NaN|undefined|null|^0 l$/.test(q)), u + ': ' + tx.join(' | '));      // (titles cached after the first draw)
+            assert(tx.some((q) => (u === 'mph' ? / mi$/ : / km$/).test(q)), u + ' distance unit: ' + tx.join(' | '));
+        }
+        const empty = await draw(new Trips({ log, now: () => clock }), 'kmh');
+        assert(empty.includes('No trip yet') && !empty.some((q) => /NaN|undefined/.test(q)), empty.join(' | '));
+    }],
+    ['2.9.0 the Trips tab: between M View and Ambient, End trip, off in Settings > Tabs', async () => {
+        const b = await boot(tmp('tripstab'));
+        const t4 = await b.tab(4);
+        assert(t4.includes('TRIPS') && (t4.includes('No trip yet') || t4.includes('Last trip') || t4.includes('This trip')), t4.join(' | '));
+        assert.strictEqual(b.rates[b.rates.length - 1], 1, 'Trips drawn once a second');
+        b.settings.set('tabTrips', false);
+        const t = await b.draw();
+        assert(!t.includes('TRIPS') && t.includes('GEAR · SHIFT AT'), 'switched off: gone, Driving shown: ' + t.join(' | '));
+    }],
     ['2.0 #2 the diagnostic link reads only on the Driving tab', async () => {
         const b = await boot(tmp('reads'), { settings: { demo: 'off' } });
         link.available = true; link.ready = true;
@@ -833,7 +900,7 @@ checks.push(
         const before = link.asked.length;
         await new Promise((r) => setTimeout(r, 1200));
         assert.strictEqual(link.asked.length, before, 'read on the Performance tab: ' + link.asked.slice(before).map((a) => a.ecu).join());
-        await b.tab(4);
+        await b.tab(5);
         await new Promise((r) => setTimeout(r, 600));
         assert.strictEqual(link.asked.length, before, 'read on an ambient tab');
     }],
@@ -842,7 +909,7 @@ checks.push(
         const b = await boot(tmp('reset'));
         await b.tab(1);
         b.clicks.BTN_RESET();
-        await b.tab(4);
+        await b.tab(5);
         b.clicks.BTN_RESET();
         assert(fakeAmb.calls.indexOf('original') >= 0, 'Original colour on the ambient tabs');
         // the kit runs the screen: each tab's own button on the page
@@ -1131,7 +1198,7 @@ checks.push(
         const t0 = await b.draw();
         ['AMBIENT', 'ANIMATIONS', 'MODES'].forEach((x) => assert(t0.includes(x), x + ' missing: ' + t0.join(' | ')));
         assert(!t0.includes('RESET PEAKS'), 'no page buttons where the HMI has the bar');
-        const t3 = await b.tab(5);
+        const t3 = await b.tab(6);
         assert(t3.includes('AMBIENT TAB 1'), 'Animations as a tab: ' + t3.join(' | '));
     }],
     ['2.4.10 the side rail with the controller: pushed left opens it (the knob on its first row), right closes it', async () => {
@@ -1145,7 +1212,7 @@ checks.push(
         const t2 = await b.draw();
         assert(!t2.includes('RESET MISFIRES'), 'closed');
         assert.strictEqual(b.tilt('E'), null, 'closed: right is the kit\'s');
-        await b.tab(4);
+        await b.tab(5);
         assert.strictEqual(b.tilt('E'), true, 'the Ambient tab opened it by itself the first time: right closes it');
         assert.strictEqual(b.tilt('W'), 'amb-0', 'Ambient: the knob onto Colour');
     }],
@@ -1613,7 +1680,7 @@ checks.push(
         await b.tab(1); assert.strictEqual(b.rates[b.rates.length - 1], 30, 'Performance');
         await b.tab(2); assert.strictEqual(b.rates[b.rates.length - 1], 10, 'Seats');
         await b.tab(3); assert.strictEqual(b.rates[b.rates.length - 1], 5, 'M View');
-        await b.tab(4); assert.strictEqual(b.rates[b.rates.length - 1], 0, 'Ambient: as fast as the renderer, while it changes');
+        await b.tab(5); assert.strictEqual(b.rates[b.rates.length - 1], 0, 'Ambient: as fast as the renderer, while it changes');
         await b.tab(0); b.settings.set('frameRate', '60'); assert.strictEqual(b.rates[b.rates.length - 1], 60, 'the setting');
         b.settings.set('frameRate', '15'); assert.strictEqual(b.rates[b.rates.length - 1], 15);
     }],

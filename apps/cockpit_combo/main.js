@@ -39,18 +39,19 @@ const { Seats } = require('./seats');
 const { drawBar } = require('./rail');
 const { probe } = require('./seatprobe');
 const { MView } = require('./mview');
+const { Trips } = require('./trips');
 const ambientPage = require('./ambient_page');
 
 const W = 1600, H = 520;
-const TABS = ['Driving', 'Performance', 'Seats', 'M View'];
+const TABS = ['Driving', 'Performance', 'Seats', 'M View', 'Ambient', 'Trips'];      // by id (Ambient's own names: AMBIENT_TABS)
 // Ambient config's tabs under names that say what they are next to Driving and Performance (its Favourites left out:
 // M View took its place, 2.4.0)
 const AMBIENT_TABS = ['Ambient', 'Animations', 'Modes'];
-const DRIVING = 0, PERF = 1, SEATS = 2, MVIEW = 3, AMBIENT = 4;
+const DRIVING = 0, PERF = 1, SEATS = 2, MVIEW = 3, AMBIENT = 4, TRIPS = 5;     // (Trips shows before Ambient: shownIds())
 // the tabs Settings > Tabs switches off (2.7.0; Driving always there): an app beside Combo doing the same job (Ambient
 // config, another seats app) gets it to itself, and an unused tab costs nothing - Seats off reads no seat and moves none
 // (no easy entry), Ambient off gives the lights back and leaves them alone (owner.js: another app of ours takes them)
-const TAB_KEYS = { [PERF]: 'tabPerformance', [SEATS]: 'tabSeats', [MVIEW]: 'tabMView', [AMBIENT]: 'tabAmbient' };
+const TAB_KEYS = { [PERF]: 'tabPerformance', [SEATS]: 'tabSeats', [MVIEW]: 'tabMView', [TRIPS]: 'tabTrips', [AMBIENT]: 'tabAmbient' };
 const isOn = (settings, id) => !TAB_KEYS[id] || !settings || settings.get(TAB_KEYS[id]) !== false;
 const AMB_OFF_MS = 3000;             // Ambient switched off: the give-back's writes go out this long, then none at all
 
@@ -162,6 +163,25 @@ mgu.run({
         // the M View tab: temperatures, fuel trims and timing, misfires; its reads only while the tab shows (mview.js)
         const mview = new MView({ reader: new DidReader(link), values, cfg: cfg.mview, settings, log, link,
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
+        // the trip book (trips.js, 2.9.0): each drive cycle from the car's own state, its distance from the odometer or the
+        // speed, its fuel from the tank's level; recorded whether the Trips tab shows or not (not with the tab switched off)
+        const trips = new Trips({ dataDir: ctx.dataDir, log, settings });
+        setInterval(() => { if (enabled(TRIPS)) trips.tick({ speed: values.live.speed, condition: values.live.condition }); }, 1000);
+        process.on('exit', () => { if (enabled(TRIPS)) trips.save(); });
+        settings.onChange((k) => { if (k === TAB_KEYS[TRIPS] && !enabled(TRIPS)) trips.endNow(); });
+        // the car's odometer and the fuel in the tank, where the car offers them to apps (each logged once as it first comes,
+        // to see on a car which ones it sends); read every minute too, as a car may only notify a change
+        const num = (x) => (typeof x === 'number' && isFinite(x) ? x : null), firstSeen = {};
+        const raw = (name) => (v) => { if (!firstSeen[name]) { firstSeen[name] = true; let s; try { s = JSON.stringify(v); } catch (e) { s = String(v); } log.info('trips signal ' + name + ': ' + (s && s.length > 300 ? s.slice(0, 300) + '...' : s)); } };
+        const tripWatch = (iface, handlers) => ctx.signals.watch(iface, '1', handlers, log, { pollMs: 60000 }).then((r) => log.info('trips signal ' + iface.split('.').pop() + (r.error ? ' not set up: ' + r.error : ' offered by the car: ' + r.available)))
+            .catch((e) => log.warn('trips signal ' + iface.split('.').pop() + ': ' + (e && e.message || e)));
+        let odoSecure = false;
+        tripWatch('de.bmw.infrastructure.SecureMileage', { mileage: (v) => { raw('SecureMileage')(v); const km = num(v && v.currentMileage); if (km !== null && km > 0) { odoSecure = true; trips.odometer(km); } } });
+        tripWatch('de.bmw.chassis.VehicleModel', { MileageVehicle: (v) => { raw('MileageVehicle')(v); const km = num(v && v.mileageVehicle); if (!odoSecure && km !== null && km > 0 && km < 65535) trips.odometer(km); } });
+        let fuelKombi = false;
+        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => { raw('RangeTankStatus')(v); const l = num(v && v.fluidLevelFuelTank); if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); } } });
+        tripWatch('de.bmw.infotainment.lsc.LSCDataSink', { mileageRange: (v) => { raw('LSC mileageRange')(v); const l = num(v && v.fluidLevelFuelTank); if (!fuelKombi && l !== null && l < 255) trips.fuel(l); }, fuelSupply: (v) => raw('LSC fuelSupply')(v) });
+        tripWatch('de.bmw.infotainment.resetlogic.ResetLogic', { averageConsumption: (v) => raw('ResetLogic averageConsumption')(v) });
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
         values.onPut = (k, v) => {
@@ -201,7 +221,7 @@ mgu.run({
         // the bottom bar is gone (2.4.6). Elsewhere (the HMI's own bar and title) as before.
         let owned = false;
         /** The tabs switched on, by id: Driving, Performance, Seats, M View (Ambient after them, ambOn()). */
-        const shownIds = () => [DRIVING, PERF, SEATS, MVIEW].filter(enabled);
+        const shownIds = () => [DRIVING, PERF, SEATS, MVIEW, TRIPS].filter(enabled);
         const ambOn = () => !!amb && enabled(AMBIENT);
         const tabs = () => shownIds().map((i) => TABS[i]).concat(!ambOn() ? [] : owned ? [owned && ctx.mapStyle && ctx.mapStyle() ? 'Ambient · ' + ['Colour', 'Animations', 'Modes'][amb.page || 0] : 'Ambient'] : amb.tabs());
         const sel = () => { const ids = shownIds(); return tab === AMBIENT ? ids.length + (owned ? 0 : amb.page) : Math.max(0, ids.indexOf(tab)); };
@@ -211,11 +231,12 @@ mgu.run({
         // clears them, M Vitals' confirm pattern), Reset run (Performance), Original colour (the ambient tabs)
         const CONFIRM_MS = 6000;
         let confirmUntil = 0;
-        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : tab === MVIEW ? 'Reset misfires' : 'Original colour');
+        const resetLabel = () => ui.text('BTN_RESET', tab === DRIVING ? 'Reset peaks' : tab === PERF ? 'Reset run' : tab === SEATS ? 'Read again' : tab === MVIEW ? 'Reset misfires' : tab === TRIPS ? 'End trip' : 'Original colour');
         ui.onClick('BTN_RESET', () => {
             if (tab === PERF) { perf.resetRun(); return render(); }
             if (tab === SEATS) { seats.again(); seats.poll(); return render(); }
             if (tab === MVIEW) { mview.resetMisfires(); return render(); }
+            if (tab === TRIPS) { trips.endNow(); return render(); }
             if (tab === AMBIENT) { if (amb) { amb.original(); amb.dirty(); } return render(); }
             reads.opened();                                  // a button press counts as using the screen
             if (Date.now() > confirmUntil) { confirmUntil = Date.now() + CONFIRM_MS; return render(); }
@@ -228,7 +249,7 @@ mgu.run({
         settings.onChange((k) => { if (k === 'boostSource') { delete values.peaks.boost; delete demoPeaks.peaks.boost; } });
 
         /** The frame rate the tab shown needs (0: as fast as the renderer, the ambient tabs: they draw only while they change). */
-        function rateOf() { return tab === DRIVING || tab === PERF ? Number(settings.get('frameRate')) || 30 : tab === SEATS ? 10 : tab === MVIEW ? 5 : 0; }
+        function rateOf() { return tab === DRIVING || tab === PERF ? Number(settings.get('frameRate')) || 30 : tab === SEATS ? 10 : tab === MVIEW ? 5 : tab === TRIPS ? 1 : 0; }
         function setRate() { if (loop && loop.fps) loop.fps(rateOf()); }
 
         /** The tab at place i of the tab bar (the tabs switched on, then the ambient ones): { id, page }. */
@@ -250,7 +271,7 @@ mgu.run({
         ctx.onTab((i) => { const a = at(i); return pick(a.id, a.page); });
         // a tab switched on or off (Settings > Tabs): the one shown, switched off, gives way to Driving
         settings.onChange((k) => {
-            if ([PERF, SEATS, MVIEW, AMBIENT].every((id) => TAB_KEYS[id] !== k)) return;
+            if ([PERF, SEATS, MVIEW, TRIPS, AMBIENT].every((id) => TAB_KEYS[id] !== k)) return;
             if (k === TAB_KEYS[SEATS]) { if (enabled(SEATS)) probeSeats(); else seats.off(); }
             if (k === TAB_KEYS[AMBIENT]) ambientSwitched();
             log.info('tabs: ' + tabs().join(', '));
@@ -297,6 +318,7 @@ mgu.run({
             else if (tab === PERF) rows.push(['Reset run', () => { perf.resetRun(); return openRail(null); }, { key: 'perf-run' }]);
             else if (tab === SEATS) rows.push(['Read again', () => { seats.again(); seats.poll(); return openRail(null); }, { key: 'seats-again' }]);
             else if (tab === MVIEW) rows.push(['Reset misfires', () => { mview.resetMisfires(); return openRail(null); }, { key: 'misfires' }]);
+            else if (tab === TRIPS && trips.current) rows.push(['End trip', () => { trips.endNow(); return openRail(null); }, { key: 'trip-end', confirm: true }]);
             return rows;
         }
         const ambRows = (sub) => AMBIENT_TABS.map((n, k) => [n === 'Ambient' ? 'Colour' : n, () => {
@@ -392,6 +414,9 @@ mgu.run({
                 seats.poll();
                 seats.draw(cv, t);
                 G.frame(cv, t, tabs(), sel(), []);
+            } else if (tab === TRIPS) {
+                trips.draw(cv, t);
+                G.frame(cv, t, tabs(), sel(), [trips.current && { text: 'RECORDING' }]);
             } else if (tab === PERF) {
                 perf.draw(cv, t, { redraw: () => render() });
                 G.frame(cv, t, tabs(), sel(), [perf.isDemo && { text: 'DEMO' }, settings.get('rollout') && { text: 'ROLLOUT 1 FT', color: 'dim' }]);

@@ -40,6 +40,11 @@ function icon(cv, key, cx, cy, s, c) {
             const a = k * Math.PI / 4, r0 = s * 0.32, r1 = s * 0.48;
             cv.line(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, cx + Math.cos(a) * r1, cy + Math.sin(a) * r1, lw, c);
         }
+    } else if (/^nav-5$|trip-end/.test(key)) {                   // Trips: a road from a start to a flag
+        cv.polyline([[cx - s * 0.4, cy + s * 0.4], [cx - s * 0.05, cy + s * 0.1], [cx - s * 0.25, cy - s * 0.12], [cx + s * 0.2, cy - s * 0.3]], lw * 1.3, c);
+        cv.circle(cx - s * 0.4, cy + s * 0.4, s * 0.09, c);
+        cv.line(cx + s * 0.2, cy - s * 0.3, cx + s * 0.2, cy - s * 0.55, lw * 1.2, c);
+        cv.fill([[cx + s * 0.2, cy - s * 0.55], [cx + s * 0.46, cy - s * 0.47], [cx + s * 0.2, cy - s * 0.39]], c);
     } else if (/^amb-0$/.test(key)) {                            // Colour: a ring
         ring(s * 0.42, 0, 360); cv.circle(cx, cy, s * 0.16, c);
     } else if (/^amb-1$/.test(key)) {                            // Animations: a wave
