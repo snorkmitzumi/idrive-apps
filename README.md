@@ -110,7 +110,7 @@ The engine's and gearbox's health at a glance:
 
 ### Trips
 
-<img src="docs/screens/cockpit_trips.png" alt="Trips: this trip's distance, time, average and top speed, fuel and consumption; the last trips; this month's totals" width="100%">
+<img src="docs/screens/cockpit_trips.png" alt="Trips: this trip's distance, time, average and top speed, fuel and consumption; the last trips; this month's totals; since refuelling" width="100%">
 
 A trip book, kept by itself (new in 2.9.0, a first version):
 
@@ -119,7 +119,10 @@ A trip book, kept by itself (new in 2.9.0, a first version):
 - **Each trip:** when, distance, time, average and top speed, the fuel used and the consumption. The distance comes
   from the car's odometer where it sends one, else from the speed; the fuel from the tank's level, so it counts in
   whole litres, a refuel on the way is noticed, and the consumption shows from 20 km on.
-- **This month:** trips, distance, time and fuel.
+- **This month:** trips, distance and fuel.
+- **Since refuelling:** distance, fuel and consumption since the last refuel. A refuel is the tank's level rising 3 l
+  or more, also a litre at a time with Cockpit running at the pump, or between two drives; the count starts from the
+  full tank. Over a tank's worth of driving this is the most exact consumption Cockpit shows.
 - Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
 
 Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in

@@ -880,6 +880,46 @@ checks.push(
         const empty = await draw(new Trips({ log, now: () => clock }), 'kmh');
         assert(empty.includes('No trip yet') && !empty.some((q) => /NaN|undefined/.test(q)), empty.join(' | '));
     }],
+    ['2.9.0 since refuelling: a refuel (also a litre at a time at the pump, or while the app was off) starts a count: distance, fuel, consumption', async () => {
+        const { Trips } = appModule('trips');
+        let clock = Date.UTC(2026, 10, 25, 8, 0, 0);
+        const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
+        const dir = tmp('refuel'), mk = () => new Trips({ dataDir: dir, log, now: () => clock });
+        const run = (tb, s, kmh, cond) => { for (let i = 0; i < s; i++) { clock += 1000; tb.tick({ speed: kmh, condition: cond }); } };
+        let tb = mk();
+        tb.fuel(20); tb.fuel(21); tb.fuel(20);
+        assert.strictEqual(tb.sinceRefuel(), null, 'no refuel seen yet');
+        const empty = await textsOf(() => tb.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
+        assert(empty.includes('Counts from the next refuel'), empty.join(' | '));
+        // at the pump, the app running: the level climbs a litre at a time to 55
+        tb.odometer(1000);
+        for (let l = 21; l <= 55; l++) { clock += 5000; tb.fuel(l); }
+        let r = tb.sinceRefuel();
+        assert(r && r.fuel === 0 && r.km === 0 && lines.filter((m) => /refuelled/.test(m)).length === 1, 'one refuel, counted from the full tank: ' + JSON.stringify(r) + ' ' + lines.join(' | '));
+        // driven 450 km (odometer), 30 l used: 6.7 l/100
+        run(tb, 1, 0, 10); run(tb, 600, 100, 10); tb.odometer(1450); tb.fuel(40); tb.fuel(25); run(tb, 62, 0, 5);
+        r = tb.sinceRefuel();
+        assert(r.km === 450 && r.kmFrom === 'odometer' && r.fuel === 30 && r.per100 === 6.7, JSON.stringify(r));
+        // kept across a restart
+        tb.save(); tb = mk(); tb.odometer(1450); tb.fuel(25);
+        r = tb.sinceRefuel();
+        assert(r && r.km === 450 && r.fuel === 30, 'after a restart: ' + JSON.stringify(r));
+        // refuelled while the app wasn't running: the first level against the last one known
+        tb.save(); tb = mk(); clock += 3600000; tb.odometer(1452); tb.fuel(52);
+        r = tb.sinceRefuel();
+        assert(r && r.fuel === 0 && r.km === 0, 'a refuel between two starts: ' + JSON.stringify(r));
+        // without the odometer: the speed's distance; consumption only from 20 km
+        const d2 = tmp('refuel-speed'), t2 = new Trips({ dataDir: d2, log, now: () => clock });
+        t2.fuel(15); t2.fuel(50); run(t2, 1, 0, 10); run(t2, 360, 100, 10); t2.fuel(49);
+        r = t2.sinceRefuel();
+        assert(r.kmFrom === 'speed' && Math.abs(r.km - 10) < 0.2 && r.fuel === 1 && r.per100 === null, '10 km: no consumption yet: ' + JSON.stringify(r));
+        // a refuel during a trip, a litre at a time: the trip's fuel is what went before it and after it
+        t2.fuel(40); for (let l = 41; l <= 58; l++) t2.fuel(l); t2.fuel(55);
+        assert.strictEqual(t2.closed(t2.current).fuel, 13, 'trip fuel: 50 > 40, then 58 > 55: ' + JSON.stringify(t2.closed(t2.current)));
+        const tx = await textsOf(() => t2.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
+        assert(tx.some((q) => /^from 20 km$/.test(q)) || tx.some((q) => /l\/100$/.test(q)), tx.join(' | '));
+        assert(!tx.some((q) => /NaN|undefined|null/.test(q)), tx.join(' | '));
+    }],
     ['2.9.0 the Trips tab: between M View and Ambient, End trip, off in Settings > Tabs', async () => {
         const b = await boot(tmp('tripstab'));
         const t4 = await b.tab(4);

@@ -11,6 +11,10 @@
  * Fuel: the tank's level (litres) at the start against the end; a rise of REFUEL_L or more is a refuel, and what was
  * used before it counts too. Consumption only from MIN_FUEL_KM on (the tank's level moves in whole litres).
  *
+ * Since refuelling: a rise of REFUEL_L or more in the tank's level, during a trip or between two (the level at a start
+ * against the last one known), starts a new count: the distance since (odometer or speed), the fuel since (the level
+ * just after the refuel less the level now) and the consumption, from MIN_FUEL_KM on.
+ *
  * Kept in trips.json in the app's data folder (at most KEEP trips, newest first): saved when a trip ends, every
  * SAVE_MS while one runs, and as the app exits; a trip running when the app stopped is resumed if the car is driven
  * again within RESUME_MS of its last save, else ended there.
@@ -18,7 +22,7 @@
  *   const tb = new Trips({ dataDir, log, now, settings })
  *   tb.tick({ speed, condition })     once a second: the speed (km/h) and the car's state (Car.conditionOf) now
  *   tb.odometer(km)  tb.fuel(litres)  the car's values as they come (null: not given)
- *   tb.current  tb.trips  tb.months()  tb.endNow()  tb.save()  tb.draw(cv, t)
+ *   tb.current  tb.trips  tb.months()  tb.sinceRefuel()  tb.endNow()  tb.save()  tb.draw(cv, t)
  */
 const fs = require('fs');
 const path = require('path');
@@ -50,12 +54,14 @@ class Trips {
         try { d = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch (e) { d = null; }
         if (!d) return;
         this.trips = Array.isArray(d.trips) ? d.trips.filter((x) => x && isNum(x.start)) : [];
+        if (d.since && isNum(d.since.at)) this.since = d.since;
+        if (isNum(d.level)) this.lastLevel = d.level;
         // a trip running when the app last stopped: resumed below if the car is driven again soon, else ended there
         if (d.current && isNum(d.current.start)) this.paused = d.current;
     }
     save() {
         if (!this.file) return;
-        try { writeWhole(this.file, JSON.stringify({ v: 1, current: this.current, trips: this.trips.slice(0, KEEP) })); this.savedAt = this.now(); } catch (e) { this.log.warn('trips: ' + e.message); }
+        try { writeWhole(this.file, JSON.stringify({ v: 1, current: this.current, since: this.since || null, level: isNum(this.lastLevel) ? this.lastLevel : null, trips: this.trips.slice(0, KEEP) })); this.savedAt = this.now(); } catch (e) { this.log.warn('trips: ' + e.message); }
     }
 
     /** The car's odometer in km (whole km), as it comes. */
@@ -63,22 +69,38 @@ class Trips {
         if (!isNum(km) || km <= 0 || km >= 16777214) return;
         if (this.odo === null) this.log.info('trips: odometer ' + km + ' km');
         this.odo = km;
+        if (this.since && !isNum(this.since.odo0)) this.since.odo0 = km;
         const c = this.current;
         if (c) { if (!isNum(c.odo0)) c.odo0 = km; c.odo1 = km; }
     }
-    /** The fuel in the tank, litres, as it comes. */
+    /**
+     * The fuel in the tank, litres, as it comes. A refuel: the level REFUEL_L or more over the lowest one since the last
+     * refuel (also when it climbs a litre at a time, the app running at the pump); the level is then followed up while
+     * it rises, so the count starts from the full tank.
+     */
     fuel(l) {
         if (!isNum(l) || l < 0 || l > 250) return;
         if (this.litres === null) this.log.info('trips: fuel in the tank ' + l + ' l');
         this.litres = l;
+        // since refuelling (the last level known kept across restarts: a refuel while the app wasn't running counts too)
+        if (!isNum(this.floor)) this.floor = isNum(this.lastLevel) ? Math.min(this.lastLevel, l) : l;
+        if (this.filling && this.since && l > this.floor) {
+            this.since.level = Math.max(this.since.level, l); this.floor = l;            // still filling up: the count from the top
+        } else if (l >= this.floor + REFUEL_L) {
+            this.log.info('trips: refuelled ' + this.floor + ' > ' + l + ' l: counting since refuelling');
+            this.since = { at: this.now(), level: l, kmSum: 0, odo0: isNum(this.odo) ? this.odo : null };
+            this.filling = true; this.floor = l;
+            this.save();
+        } else if (l < this.floor) { this.floor = l; this.filling = false; }
+        this.lastLevel = l;
+        // this trip's fuel: what the tank lost, before and after a refuel on the way
         const c = this.current;
         if (!c) return;
-        if (!isNum(c.fuel0)) { c.fuel0 = l; c.fuelBase = l; c.fuelUsed = 0; c.fuelLast = l; return; }
-        if (l >= c.fuelLast + REFUEL_L) {
-            // a refuel: what the tank lost since the last base counts, the new level is the base from here
-            c.fuelUsed += Math.max(0, c.fuelBase - c.fuelLast); c.fuelBase = l; c.refuelled = true;
-            this.log.info('trips: refuelled to ' + l + ' l');
-        }
+        if (!isNum(c.fuel0)) { c.fuel0 = l; c.fuelBase = l; c.fuelUsed = 0; c.fuelLow = l; c.fuelLast = l; return; }
+        if (c.filling && l > c.fuelLow) { c.fuelBase = Math.max(c.fuelBase, l); c.fuelLow = l; }
+        else if (l >= c.fuelLow + REFUEL_L) {
+            c.fuelUsed += Math.max(0, c.fuelBase - c.fuelLow); c.refuelled = true; c.filling = true; c.fuelBase = l; c.fuelLow = l;
+        } else if (l < c.fuelLow) { c.fuelLow = l; c.filling = false; }
         c.fuelLast = l;
     }
 
@@ -98,6 +120,7 @@ class Trips {
             const dt = this.lastT === null ? 0 : (now - this.lastT) / 1000;
             if (dt > 0 && dt <= MAX_GAP_S) {
                 c.kmSum += speed * dt / 3600;
+                if (this.since) this.since.kmSum = (this.since.kmSum || 0) + speed * dt / 3600;
                 if (speed > MOVING_KMH) c.movingS += dt;
             }
             if (speed > c.top) c.top = speed;
@@ -144,6 +167,15 @@ class Trips {
         const fuel = isNum(c.fuel0) ? c.fuelUsed + Math.max(0, c.fuelBase - c.fuelLast) : null;
         return { start: c.start, end: c.end, km, kmFrom: odo !== null ? 'odometer' : 'speed', movingS: Math.round(c.movingS), top: Math.round(c.top),
             fuel, per100: isNum(fuel) && km >= MIN_FUEL_KM ? Math.round(fuel / km * 1000) / 10 : null, refuelled: !!c.refuelled };
+    }
+    /** Since the last refuel seen: { at, km, kmFrom, fuel, per100 }, or null (none seen yet). */
+    sinceRefuel() {
+        const r = this.since;
+        if (!r) return null;
+        const odo = isNum(r.odo0) && isNum(this.odo) && this.odo - r.odo0 >= 1 ? this.odo - r.odo0 : null;
+        const km = odo !== null ? odo : Math.round((r.kmSum || 0) * 10) / 10;
+        const fuel = isNum(this.lastLevel) ? Math.max(0, r.level - this.lastLevel) : null;
+        return { at: r.at, km, kmFrom: odo !== null ? 'odometer' : 'speed', fuel, per100: isNum(fuel) && km >= MIN_FUEL_KM ? Math.round(fuel / km * 1000) / 10 : null };
     }
     /** The running trip's summary, or the last one's. */
     shown() { return this.current ? Object.assign(this.closed(this.current), { live: true }) : this.trips[0] || null; }
@@ -196,19 +228,30 @@ class Trips {
             cv.text(isNum(x.per100) ? (mi ? G.fmt(235.215 / x.per100, 1) + ' mpg' : G.fmt(x.per100, 1) + ' l/100') : isNum(x.fuel) ? litres(x.fuel) : '', 1380, y, 20, t.dim, { align: 'right' });
             cv.text('top ' + G.fmt(D(x.top), 0), 1556, y, 20, t.dim, { align: 'right' });
         });
-        // right bottom: this month
-        const my = 44 + listH + 12, mh = 468 + ex - listH - 12, mo = this.months()[0];
-        G.panel(cv, t, 656, my, 920, mh, 'This month');
+        // right bottom: this month, and since refuelling (side by side)
+        const my = 44 + listH + 12, mh = 468 + ex - listH - 12, mo = this.months()[0], pw = 454;
+        G.panel(cv, t, 656, my, pw, mh, 'This month');
         const cur = new Date(this.now()), key = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
         const a = mo && mo.key === key ? mo : { trips: 0, km: 0, hours: 0, fuel: 0 };
-        [['Trips', String(a.trips)], ['Distance', G.fmt(D(a.km), 0) + ' ' + dU], ['Time', dur(a.hours * 60)], ['Fuel', a.fuel ? G.fmt(a.fuel, 0) + ' l' : '--']].forEach(([k, v], i) => {
-            const x = 676 + i * 225;
-            cv.text(k, x, my + 76, 18, t.dim, { font: 'bold' });
-            cv.text(v, x, my + 116, 34, a.trips ? t.text : t.dim, { font: 'num' });
-        });
+        cells(cv, t, 676, my, [['Trips', String(a.trips)], ['Distance', G.fmt(D(a.km), 0) + ' ' + dU], ['Fuel', a.fuel ? G.fmt(a.fuel, 0) + ' l' : '--']], !!a.trips);
+        const rx = 656 + pw + 12, r = this.sinceRefuel();
+        G.panel(cv, t, rx, my, 1576 - rx, mh, 'Since refuelling');
+        if (!r) cv.text('Counts from the next refuel', rx + 20, my + 100, 20, t.dim);
+        else {
+            cv.text(when(r.at), 1556, my + 34, 18, t.dim, { align: 'right', font: 'bold' });
+            cells(cv, t, rx + 20, my, [['Distance', G.fmt(D(r.km), 0) + ' ' + dU], ['Fuel', isNum(r.fuel) ? litres(r.fuel) : '--'],
+                ['Consumption', isNum(r.per100) ? (mi ? G.fmt(235.215 / r.per100, 1) + ' mpg' : G.fmt(r.per100, 1) + ' l/100') : 'from ' + MIN_FUEL_KM + ' ' + dU]], true);
+        }
     }
 }
 
+/** A panel's row of labelled values, 145 px apart. */
+function cells(cv, t, x, y, items, on) {
+    items.forEach(([k, v], i) => {
+        cv.text(k, x + i * 145, y + 76, 18, t.dim, { font: 'bold' });
+        cv.text(v, x + i * 145, y + 112, v.length > 10 ? 24 : 30, on && !/^--$|^from /.test(v) ? t.text : t.dim, { font: 'num' });
+    });
+}
 function big(cv, t, x, y, text, unit, size) {
     const w = cv.text(text, x, y, size, t.text, { font: 'num' });
     cv.text(' ' + unit, x + w, y, 30, t.dim);
