@@ -22,11 +22,10 @@
  */
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
-const dns = require('dns');
+// (https and dns are loaded at the first upload: an app that never sends pays nothing for them)
 
 const LEASES = ['/run/mgu-uplink/lease.json'];
-const TIMEOUT_MS = 30000, MAX_BYTES = 900 * 1024;
+const TIMEOUT_MS = 30000, MAX_BYTES = 900 * 1024, CONFIG_MS = 5000;
 const TS = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+Z) /;
 
 function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } }
@@ -34,11 +33,13 @@ function readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } ca
 /** The log's lines newer than `after` (an ISO time, '' = all), the rotated file's first. Lines without a time (a stack's)
  *  go with the line before. */
 function newLines(file, after) {
+    const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (e) { return ''; } };
+    const cur = read(file), first = TS.exec(cur);
+    // the rotated file is older than the current one's first line: read only when that line is still to be sent
+    const texts = first && first[1] <= after ? [cur] : [read(file + '.1'), cur];
     const out = [];
     let keep = false;
-    [file + '.1', file].forEach((f) => {
-        let text = '';
-        try { text = fs.readFileSync(f, 'utf8'); } catch (e) { return; }
+    texts.forEach((text) => {
         text.split('\n').forEach((l) => {
             if (!l) return;
             const m = TS.exec(l);
@@ -60,6 +61,7 @@ function mask(text) { return text.replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, '<VIN>'); 
 
 /** dns.lookup's shape over the lease's DNS servers (none: the unit's resolver). */
 function lookupVia(servers) {
+    const dns = require('dns');
     if (!servers || !servers.length || !dns.Resolver) return undefined;
     const r = new dns.Resolver();
     try { r.setServers(servers); } catch (e) { return undefined; }
@@ -75,7 +77,7 @@ function lookupVia(servers) {
 function put(cfg, file, body, lookup) {
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(body);
-        const req = https.request({
+        const req = require('https').request({
             host: 'api.github.com', method: 'PUT', lookup,
             path: '/repos/' + cfg.repo + '/contents/' + file.split('/').map(encodeURIComponent).join('/'),
             headers: {
@@ -107,10 +109,15 @@ class LogUpload {
         this.sentAt = st.sentAt || null;
     }
 
-    config() {
+    /** upload.json, read again at most every CONFIG_MS (status() is called for each frame of the settings; fresh: now). */
+    config(fresh) {
+        const now = Date.now();
+        if (!fresh && this.cfgAt && now - this.cfgAt < CONFIG_MS) return this.cfg;
         const c = readJson(path.join(this.dataDir, 'upload.json'));
-        if (!c || typeof c.repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(c.repo) || typeof c.token !== 'string' || !c.token) return null;
-        return { repo: c.repo, token: c.token, branch: typeof c.branch === 'string' ? c.branch : null, dir: typeof c.dir === 'string' ? c.dir.replace(/^\/+|\/+$/g, '') : 'logs' };
+        this.cfgAt = now;
+        this.cfg = !c || typeof c.repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(c.repo) || typeof c.token !== 'string' || !c.token ? null
+            : { repo: c.repo, token: c.token, branch: typeof c.branch === 'string' ? c.branch : null, dir: typeof c.dir === 'string' ? c.dir.replace(/^\/+|\/+$/g, '') : 'logs' };
+        return this.cfg;
     }
 
     lease() {
@@ -126,7 +133,7 @@ class LogUpload {
     async send(why) {
         if (!this.enabled()) return 'off';
         if (this.busy) return 'busy';
-        const cfg = this.config();
+        const cfg = this.config(true);
         if (!cfg) { if (!this.last || this.last.what !== 'no config') this.log.warn('log upload: no upload.json (repo and token) in ' + this.dataDir); return this.note('no config'); }
         const lease = this.lease();
         if (!lease) { if (!this.last || this.last.what !== 'offline') this.log.info('log upload (' + why + '): no internet (no mgu-uplink lease), later'); return this.note('offline'); }
@@ -140,7 +147,14 @@ class LogUpload {
             const file = (cfg.dir ? cfg.dir + '/' : '') + this.app + '/' + t0.slice(0, 7) + '/' + t0 + '-' + this.version + '.log';
             const body = { message: this.app + ' ' + this.version + ' log (' + why + ', ' + lines.length + ' lines)', content: Buffer.from(mask(lines.join('\n')) + '\n').toString('base64') };
             if (cfg.branch) body.branch = cfg.branch;
-            const r = await this.put(cfg, file, body, lookupVia(lease.dns));
+            const lookup = lookupVia(lease.dns);
+            let r = await this.put(cfg, file, body, lookup), name = file;
+            // 422: a file of that name is there already (an earlier try GitHub took, its answer lost on the way): sent
+            // once more under a name of its own, as the lines after that try's are not in it
+            if (r.status === 422 || r.status === 409) {
+                name = file.replace(/\.log$/, '-' + new Date().toISOString().slice(11, 19).replace(/:/g, '') + '.log');
+                r = await this.put(cfg, name, body, lookup);
+            }
             if (r.status !== 201 && r.status !== 200) {
                 this.log.warn('log upload: GitHub said ' + r.status + (r.status === 401 || r.status === 403 ? ' (the token: its repository and "Contents: read and write")' : r.status === 404 ? ' (no such repository for this token)' : '') + ' ' + String(r.text || '').slice(0, 120));
                 return this.note('failed');
@@ -148,7 +162,7 @@ class LogUpload {
             this.sent = lastT ? lastT[1] : new Date().toISOString();
             this.sentAt = Date.now();
             try { fs.writeFileSync(this.stateFile, JSON.stringify({ sent: this.sent, sentAt: this.sentAt })); } catch (e) { /* read-only (preview) */ }
-            this.log.info('log upload (' + why + '): ' + lines.length + ' lines sent to ' + cfg.repo + ' ' + file);
+            this.log.info('log upload (' + why + '): ' + lines.length + ' lines sent to ' + cfg.repo + ' ' + name);
             return this.note('sent');
         } catch (e) {
             this.log.warn('log upload (' + why + '): ' + (e && e.code || e && e.message || e) + ', later');

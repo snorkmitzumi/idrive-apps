@@ -26,7 +26,6 @@ const { Display } = require('./display');
 const { HmiText } = require('./hmi-text');
 const { listSheet } = require('./sheet');
 const { qrLogSheet } = require('./qrlog');
-const { LogUpload } = require('./logupload');
 
 const sdkLog = logging.getSDKLogger();
 const SPEC = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-spec.json'), 'utf8'));
@@ -563,6 +562,7 @@ class Widget {
 // stopped); null for an app without it.
 function logUpload(settings, log) {
     if (!settings.schema.some((s) => s.key === 'uploadLogs')) return null;
+    const { LogUpload } = require('./logupload');          // (only an app with the feature loads it)
     const up = new LogUpload({ file: LOG_FILE, dataDir: DATA_DIR, app: SPEC.id, version: SPEC.version, log, enabled: () => !!settings.get('uploadLogs') });
     const send = (why) => up.send(why).catch((e) => { log.warn('log upload: ' + e); return 'failed'; });
     const t = setTimeout(() => send('start'), 2 * 60 * 1000);
