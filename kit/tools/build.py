@@ -636,6 +636,9 @@ def build(app_id, language='en', preview_only=False, no_sdk=False):
     # the head units it is for, read from the package itself by the MGU Store's Releases and Catalog layouts
     if spec.get('mguHmi'):
         pkg['mguHmi'] = spec['mguHmi']
+    # app.json "internet": true: the MGU Store's mgu-uplink lets the app out to the internet (its docs/PUBLISHING.md)
+    if spec.get('internet'):
+        pkg['mguInternet'] = True
     # an app with its own licence (apps/<id>/LICENSE, packed with it below): npm's way of naming it
     if os.path.isfile(os.path.join(adir, 'LICENSE')):
         pkg['license'] = 'SEE LICENSE IN javascript/LICENSE'

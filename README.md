@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.3.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.4.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -31,7 +31,7 @@ with the MGU should work for the values they send. The seats are tested on a G26
 - [Settings](#settings) (and [only the tabs you need](#only-the-tabs-you-need))
 - [Install](#install)
 - [What Cockpit reads, and what it doesn't do](#what-combo-reads-and-what-it-doesnt-do)
-- [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log)
+- [Reporting a problem: the QR log](#reporting-a-problem-the-qr-log) (or [the log uploaded to GitHub](#the-log-uploaded-to-your-github))
 - [Development](#development)
 - [How the seats were worked out](#how-the-seats-were-worked-out)
 - [Thanks](#thanks)
@@ -178,7 +178,7 @@ Settings > Screen > **Screen layout** picks one of three:
 
 <img src="docs/screens/combo_settings.png" alt="Settings in groups" width="100%">
 
-Seven groups:
+Eight groups:
 
 | Group | What it holds |
 |---|---|
@@ -187,10 +187,11 @@ Seven groups:
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
 | **Seats** | easy entry when a front door opens (on by default) |
+| **Log upload** | the log sent to your own GitHub repository as the car stops (off by default, [below](#the-log-uploaded-to-your-github)) |
 | **Units** | speed, pressure, power, torque, temperature |
 | **Screen** | colour theme, layout, bottom bar (Standard), gauges frame rate, renderer, demo data |
 
-**QR log** is at the bottom of Settings (see below).
+**Log upload** (how the last upload went; a press sends now) and **QR log** are at the bottom of Settings (see below).
 
 ### Only the tabs you need
 
@@ -240,6 +241,8 @@ Cockpit starts with the car (the ambient light needs it running) and shows up in
   details, gearbox oil, misfires, fuel trims, the seat positions.
 - **Reads only while the tab that needs them is on screen,** and none once the car is locked and left, so a parked car
   can sleep. A tab switched off in Settings > Tabs reads nothing at all (Seats off: no door moves a seat either).
+- **Nothing leaves the car** unless you switch Settings > Log upload on and give it a repository (below). The package
+  asks for the MGU Store's internet (`mguInternet`) only for that.
 - **The ambient light is the one thing written:** through the body module, as BMW's own menu does. *Original colour*
   gives the car its own colours back.
 - **The seat motors are the one diagnostic write:** `2E D7 08 <motor> <action> <power>` to 0x6D and 0x6E only (the
@@ -269,6 +272,33 @@ python3 kit/tools/qrlog_decode.py photo1.jpg photo2.jpg ...
 ```
 
 The log names what the car answered, which reads it refused, and the app's version.
+
+### The log uploaded to your GitHub
+
+With SSH to the head unit, Cockpit can send its log to a GitHub repository of yours as the car stops (2.9.4), so no
+photos are needed. It is **off by default**: nothing is sent until you switch it on *and* give it a repository.
+
+1. Make a **private** repository (the log names your driving times, the odometer and what the car sent).
+2. Make a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for that repository only,
+   with **Contents: Read and write**.
+3. Put `upload.json` in Cockpit's data folder, `/var/opt/public/oap/oap_<uid>/data/` (the folder that holds
+   `cockpit_combo.log`):
+
+   ```json
+   { "repo": "you/cockpit-logs", "token": "github_pat_..." }
+   ```
+
+   `"branch"` (default: the repository's own) and `"dir"` (default `logs`) are optional.
+4. Settings > Log upload: **on**.
+
+Cockpit uploads when the car stops (ready to drive, then not), two minutes after it starts (anything a stop without
+internet left behind), and when you press the Log upload row. Each upload is a new file,
+`logs/cockpit_combo/<month>/<time of its first line>-<version>.log`, holding the lines since the last one, with a VIN
+masked. The token is never written to the log or shown.
+
+The head unit's apps reach the internet only through the MGU Store's **mgu-uplink** (a USB modem, a phone tethered
+by USB, or Wi-Fi); the car's own connection isn't open to apps. Without it the row says *No internet* and the lines
+wait for the next try.
 
 ## Development
 

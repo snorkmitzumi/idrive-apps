@@ -11,7 +11,7 @@
  *     },
  *   });
  *
- * ctx = { app, ui, settings, log, theme(), signals, spec, dataDir }
+ * ctx = { app, ui, settings, log, theme(), signals, spec, dataDir, logFile }
  *
  * The screens / component names come from the app's app.json (see
  * kit/tools/build.py, which generates the RHMI layout from it). Every screen
@@ -669,6 +669,7 @@ async function runInner(impl) {
     ui.display = display;
     const ctx = {
         app, ui, settings, log, spec: SPEC, dataDir: DATA_DIR, display, widget, background,
+        logFile: LOG_FILE,               // the app's log (in RAM, rotated to <logFile>.1): logupload.js reads it
         signals: require('./signals'),
         theme: () => themes.theme(settings.get('theme')),
         /**

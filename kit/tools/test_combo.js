@@ -140,7 +140,7 @@ const checks = [
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabTrips', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
-            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'uploadLogs', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
@@ -1131,6 +1131,47 @@ checks.push(
         us.w.Vehicle.statusNewCurrentUnitsStatusExt({ unitOfMeasurementAirPressure: 'PSI', unitOfMeasurementTemperature: 'F' });
         us.w.TPMS.statusTyreTemperature(T([108, 108, 108, 108]));
         assert.strictEqual(us.v.live.tyres.FL.t, 20, '68 F = 20 C');
+    }],
+    ['2.9.4 log upload: off by default, nothing without upload.json or internet; each upload the new lines only, a VIN masked, the token never logged', async () => {
+        const { LogUpload, newLines } = require(path.join(KIT, 'logupload'));
+        const data = tmp('up'), file = path.join(data, 'cockpit_combo.log'), logged = [];
+        const log = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error: (m) => logged.push(m) };
+        const line = (t, m) => '2026-11-26T10:00:' + t + '.000Z INFO ' + m + '\n';
+        fs.writeFileSync(file + '.1', line('01', 'old one'));
+        fs.writeFileSync(file, line('02', 'starting WBA12345678901234 here') + '    at a stack line\n' + line('03', 'drive'));
+        const puts = [];
+        let on = false, status = 201;
+        const fake = (cfg, f, body, lookup) => { puts.push({ cfg, f, body, lookup }); return Promise.resolve({ status, text: '{}' }); };
+        const lease = path.join(data, 'lease.json');
+        const up = new LogUpload({ file, dataDir: data, app: 'cockpit_combo', version: '2.9.4', log, enabled: () => on, put: fake, leases: [lease] });
+        assert.strictEqual(await up.send('t'), 'off', 'off by default');
+        on = true;
+        assert.strictEqual(await up.send('t'), 'no config');
+        fs.writeFileSync(path.join(data, 'upload.json'), JSON.stringify({ repo: 'me/cockpit-logs', token: 'github_pat_SECRET' }));
+        assert.strictEqual(await up.send('t'), 'offline', 'no mgu-uplink lease');
+        assert(/No internet/.test(up.status()));
+        fs.writeFileSync(lease, JSON.stringify({ dns: ['1.1.1.1'] }));
+        assert.strictEqual(await up.send('car stopped'), 'sent');
+        assert.strictEqual(puts.length, 1);
+        assert.strictEqual(puts[0].f, 'logs/cockpit_combo/2026-11/2026-11-26T10-00-01-2.9.4.log');
+        assert.strictEqual(typeof puts[0].lookup, 'function', 'names resolved through the lease\'s DNS');
+        const txt = Buffer.from(puts[0].body.content, 'base64').toString();
+        assert(/old one/.test(txt) && /at a stack line/.test(txt) && /<VIN>/.test(txt) && !/WBA12345678901234/.test(txt), txt);
+        assert(!puts[0].body.branch, 'the default branch');
+        assert.strictEqual(await up.send('t'), 'nothing', 'nothing new');
+        fs.appendFileSync(file, line('09', 'parked'));
+        status = 403;
+        assert.strictEqual(await up.send('t'), 'failed');
+        status = 201;
+        const up2 = new LogUpload({ file, dataDir: data, app: 'cockpit_combo', version: '2.9.4', log, enabled: () => true, put: fake, leases: [lease] });
+        assert.strictEqual(await up2.send('start'), 'sent', 'the state kept over a restart');
+        const txt2 = Buffer.from(puts[2].body.content, 'base64').toString();
+        assert(/parked/.test(txt2) && !/drive/.test(txt2), 'only the lines after the last sent: ' + txt2);
+        assert(!logged.some((m) => /SECRET/.test(m)), 'the token never in the log');
+        assert.deepStrictEqual(newLines(file, '2026-11-26T10:00:05.000Z'), [line('09', 'parked').trim()]);
+        // the package says it needs the internet (the Store's mgu-uplink)
+        assert.strictEqual(SPEC.internet, true);
+        assert.strictEqual(SPEC.settings.find((x) => x.key === 'uploadLogs').default, false, 'off unless switched on');
     }],
     ['2.9.3 tyres: a car with no units event (G26) reads deg C unless its own pressures are psi; one odd value latches nothing', async () => {
         const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });

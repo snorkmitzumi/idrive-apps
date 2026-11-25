@@ -2,10 +2,11 @@
   "id": "cockpit_combo",
   "title": "Cockpit",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "2.9.3",
+  "version": "2.9.4",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
+  "internet": true,
   "mguHmi": [
     "ID7"
   ],
@@ -741,6 +742,13 @@
       "label": "Easy entry: a front door opened moves its seat to its easy entry position, closed again moves it back",
       "type": "bool",
       "default": true
+    },
+    {
+      "key": "uploadLogs",
+      "group": "Log upload",
+      "label": "Upload the log to my GitHub repository when the car stops (off: nothing leaves the car; needs upload.json in the app's data folder and the Store's internet, mgu-uplink)",
+      "type": "bool",
+      "default": false
     },
     {
       "key": "speedUnit",
