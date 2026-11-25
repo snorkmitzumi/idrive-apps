@@ -187,9 +187,9 @@ Eight groups:
 | **Dyno & drag** | weight, body shape, drivetrain loss, the ECU torque overlay, the drag split, one-foot rollout |
 | **Ambient light** | decor lights with upper or lower, night dimming, your colour back at each start, the car's own door warning, steering wheel side |
 | **Seats** | easy entry when a front door opens (on by default) |
-| **Log upload** | the log sent to your own GitHub repository as the car stops (off by default, [below](#the-log-uploaded-to-your-github)) |
 | **Units** | speed, pressure, power, torque, temperature |
 | **Screen** | colour theme, layout, bottom bar (Standard), gauges frame rate, renderer, demo data |
+| **Log upload** | the log sent to your own GitHub repository as the car stops (off by default, [below](#the-log-uploaded-to-your-github)) |
 
 **Log upload** (how the last upload went; a press sends now) and **QR log** are at the bottom of Settings (see below).
 
@@ -299,6 +299,9 @@ masked. The token is never written to the log or shown.
 The head unit's apps reach the internet only through the MGU Store's **mgu-uplink** (a USB modem, a phone tethered
 by USB, or Wi-Fi); the car's own connection isn't open to apps. Without it the row says *No internet* and the lines
 wait for the next try.
+
+It is a kit feature, as the QR log is: an app of your own gets it with `"logUpload": true` in its `app.json`
+([KIT.md](KIT.md), 6.1).
 
 ## Development
 

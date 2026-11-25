@@ -27,7 +27,6 @@ const mgu = require('./kit/mgu');
 const G = require('./kit/gauges');
 const { withAlpha } = require('./kit/canvas');
 const Engine = require('./kit/engine');
-const { LogUpload } = require('./kit/logupload');
 const draw = require('./draw');
 const Demo = require('./demo');
 const { Values, PEAKS } = require('./values');
@@ -170,23 +169,16 @@ mgu.run({
         setInterval(() => { if (enabled(TRIPS)) trips.tick({ speed: values.live.speed, condition: values.live.condition }); }, 1000);
         process.on('exit', () => { if (enabled(TRIPS)) trips.save(); });
         settings.onChange((k) => { if (k === TAB_KEYS[TRIPS] && !enabled(TRIPS)) trips.endNow(); });
-        // the log to the owner's GitHub repository (logupload.js, 2.9.4), only with "uploadLogs" on and upload.json in the data
-        // folder: as the car stops (ready to drive -> not, the trip book's test), 2 min after a start (what a stop that had
-        // no internet left), and when switched on; the settings row shows how it went and sends at a press
-        const upload = new LogUpload({ file: ctx.logFile, dataDir: ctx.dataDir, app: ctx.spec.id, version: ctx.spec.version, log,
-            enabled: () => !!settings.get('uploadLogs') });
-        const sendLog = (why) => upload.send(why).catch((e) => log.warn('log upload: ' + e));
+        // the log to the owner's GitHub repository as the car stops (ready to drive -> not, the trip book's test): the kit's
+        // log upload (app.json "logUpload", 2.9.4), which itself sends after a start, when switched on and from its row
         let wasReady = null;
-        setInterval(() => {
+        if (ctx.logUpload) setInterval(() => {
             const c = values.live.condition;
             if (typeof c !== 'number') return;
             const ready = c === 8 || c === 10;
-            if (wasReady && !ready) setTimeout(() => sendLog('car stopped'), 5000);
+            if (wasReady && !ready) setTimeout(() => ctx.logUpload.send('car stopped'), 5000);
             wasReady = ready;
         }, 1000);
-        setTimeout(() => sendLog('start'), 2 * 60 * 1000);
-        settings.onChange((k) => { if (k === 'uploadLogs' && settings.get('uploadLogs')) sendLog('switched on'); });
-        if (ctx.settingsRow) ctx.settingsRow({ label: 'Log upload', value: () => upload.status(), open: () => { sendLog('by hand'); return null; } });
         // the car's odometer and the fuel in the tank, where the car offers them to apps (each logged once as it first comes,
         // to see on a car which ones it sends); read every minute too, as a car may only notify a change
         const num = (x) => (typeof x === 'number' && isFinite(x) ? x : null), firstSeen = {};

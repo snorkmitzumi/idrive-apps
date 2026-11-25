@@ -140,7 +140,7 @@ const checks = [
         assert(others.indexOf('OAA3') < 0, 'OAA3 used by another app');
         const want = ['tabPerformance', 'tabSeats', 'tabMView', 'tabTrips', 'tabAmbient', 'engine', 'redline', 'rpmScale', 'boostMax', 'boostSource', 'maxPower', 'powerSource', 'torqueMax', 'maxTorqueKgm', 'peaks', 'peakHold',
             'xdrive', 'battery48', 'weight', 'body', 'loss', 'ecuTorque', 'distance', 'rollout',
-            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'uploadLogs', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
+            'carKind', 'follow', 'welcome', 'sportPulse', 'decorWith', 'nightDim', 'keep', 'flashAlerts', 'turnGlow', 'doorRed', 'doorCar', 'hazardRed', 'drive', 'easyEntry', 'speedUnit', 'pressUnit', 'powerUnit', 'torqueUnit', 'tempUnit', 'theme', 'layout', 'barHide', 'frameRate', 'renderer', 'advanced', 'speedRate', 'demo'];
         assert.deepStrictEqual(SPEC.settings.map((s) => s.key), want);
     }],
     ['2. peak hold: kept for peakHold s, 0 = until Reset peaks', async () => {
@@ -1169,9 +1169,12 @@ checks.push(
         assert(/parked/.test(txt2) && !/drive/.test(txt2), 'only the lines after the last sent: ' + txt2);
         assert(!logged.some((m) => /SECRET/.test(m)), 'the token never in the log');
         assert.deepStrictEqual(newLines(file, '2026-11-26T10:00:05.000Z'), [line('09', 'parked').trim()]);
-        // the package says it needs the internet (the Store's mgu-uplink)
-        assert.strictEqual(SPEC.internet, true);
-        assert.strictEqual(SPEC.settings.find((x) => x.key === 'uploadLogs').default, false, 'off unless switched on');
+        // a kit feature: app.json "logUpload" -> build.py adds the setting (off) and the Store's internet (mgu-uplink)
+        assert.strictEqual(SPEC.logUpload, true);
+        const py = require('child_process').spawnSync('python3', ['-c', 'import json,sys; sys.path.insert(0, sys.argv[1]); import build; '
+            + 's = build.kit_features(json.load(open(sys.argv[2]))); u = [x for x in s["settings"] if x["key"] == "uploadLogs"]; '
+            + 'print(json.dumps([s.get("internet"), len(u), u[0]["default"], u[0]["group"]]))', path.join(ROOT, 'kit', 'tools'), path.join(APP, 'app.json')], { encoding: 'utf8' });
+        assert.deepStrictEqual(JSON.parse(py.stdout), [true, 1, false, 'Log upload'], py.stderr);
     }],
     ['2.9.3 tyres: a car with no units event (G26) reads deg C unless its own pressures are psi; one odd value latches nothing', async () => {
         const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });

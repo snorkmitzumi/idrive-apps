@@ -26,6 +26,7 @@ const { Display } = require('./display');
 const { HmiText } = require('./hmi-text');
 const { listSheet } = require('./sheet');
 const { qrLogSheet } = require('./qrlog');
+const { LogUpload } = require('./logupload');
 
 const sdkLog = logging.getSDKLogger();
 const SPEC = JSON.parse(fs.readFileSync(path.join(__dirname, 'app-spec.json'), 'utf8'));
@@ -555,6 +556,21 @@ class Widget {
     }
 }
 
+/* ---------------- log upload (app.json "logUpload": true) ---------------- */
+// build.py gives such an app the setting uploadLogs (off by default) and the Store's internet; with it on and upload.json
+// in the data folder (logupload.js), the log goes to the owner's GitHub repository 2 min after a start, as the setting is
+// switched on and at a press of its Settings row. ctx.logUpload.send(why) for the app's own moments (Cockpit: the car
+// stopped); null for an app without it.
+function logUpload(settings, log) {
+    if (!settings.schema.some((s) => s.key === 'uploadLogs')) return null;
+    const up = new LogUpload({ file: LOG_FILE, dataDir: DATA_DIR, app: SPEC.id, version: SPEC.version, log, enabled: () => !!settings.get('uploadLogs') });
+    const send = (why) => up.send(why).catch((e) => { log.warn('log upload: ' + e); return 'failed'; });
+    const t = setTimeout(() => send('start'), 2 * 60 * 1000);
+    if (t.unref) t.unref();
+    settings.onChange((k) => { if (k === 'uploadLogs' && settings.get('uploadLogs')) send('switched on'); });
+    return { send, status: () => up.status() };
+}
+
 /* ---------------- generic settings screen ---------------- */
 // the app's own rows at the bottom of the settings where the kit draws them (ctx.settingsRow)
 const settingsRows = [];
@@ -596,7 +612,9 @@ function wireSettings(ctx) {
             if (d.sheet && d.sheet.settings) { d.closeSheet(); return null; }
             // every app's last row: its log as QR codes (qrlog.js), for an issue sent without SSH
             const qrRow = { label: 'QR log', value: 'The app\'s log as codes to photograph', open: () => qrLogSheet({ file: LOG_FILE, app: SPEC.id, version: SPEC.version }) };
-            const sh = listSheet(settings, null, { version: SPEC.version, extra: () => settingsRows.concat([qrRow]) });
+            // and with app.json "logUpload": how the upload went, a press sends now
+            const up = ctx.logUpload, upRow = up && { label: 'Log upload', value: () => up.status(), open: () => { up.send('by hand'); return null; } };
+            const sh = listSheet(settings, null, { version: SPEC.version, extra: () => settingsRows.concat(upRow ? [upRow, qrRow] : [qrRow]) });
             sh.settings = true;
             sh.onClose = () => refresh();
             if (d.openSheet(sh)) return null;
@@ -882,6 +900,7 @@ async function runInner(impl) {
         .concat(settingsScreen ? [{ name: 'SETTINGS' }] : [])
         .map((s) => ui.comp(s.name)).filter((st) => st && st.updateResources)
         .map((st) => st.updateResources())), 4000);
+    ctx.logUpload = logUpload(settings, log);
     await step('settings screen', wireSettings(ctx), 3000);
     if (impl && impl.start) await step('app start', Promise.resolve().then(() => impl.start(ctx)), 5000);
     await app.initialized();
