@@ -16,6 +16,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mgu-rt-'));
 process.env.MGU_RENDERD_SOCKET = path.join(dir, 'render.sock');
 ['MGU_RENDERER', 'MGU_RENDERD_FILE', 'MGU_RENDERD_PROTO', 'MGU_NO_GRAB'].forEach((k) => delete process.env[k]);
 process.env.MGU_BAR_IDLE_MS = '1200';         // (display.js: the bar hidden while idle, sooner here)
+process.env.MGU_EMBED_GRACE_MS = '400';     // (the in-page grace after a dropped connection, short for the test)
 const { Display } = require('../runtime/display');
 const { RenderClient } = require('../runtime/renderd');
 const themes = require('../runtime/themes');
@@ -73,7 +74,7 @@ async function setup(o) {
         setVisible: (v) => { if (v) vis.add('MAIN'); else vis.delete('MAIN'); visH.forEach((fn) => fn('MAIN', v)); },
     };
     const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', embed: !!(o && o.embed), buttons: [['BTN_SETTINGS', 'Settings']] }] };
-    if (o && o.embed) { ui.embed = { screen: 'MAIN', state: 'MAIN_EMBED', on: false }; ui.embedCalls = []; ui.useEmbed = (on) => { ui.embedCalls.push(on); ui.embed.on = on; }; }
+    if (o && o.embed) { ui.embed = { screen: 'MAIN', state: 'MAIN_EMBED', on: false }; ui.embedCalls = []; ui.useEmbed = (on) => { if (ui.embed.on !== on) ui.embedCalls.push(on); ui.embed.on = on; }; }
     const set = (o && o.settings) || {}, shownBar = [];
     ui.visible = (name, on) => shownBar.push(name + ':' + (on ? 1 : 0));
     const d = new Display(ui, log, spec, { get: (k) => set[k], onChange() {} }, () => themes.theme());
@@ -359,6 +360,25 @@ test('in-page map style: no tab row, the page right under BMW\'s strip, BMW\'s t
         d.closeSheet();
         assert.strictEqual(titles[titles.length - 1], 'MAIN_EMBED_TITLE=Performance', 'the page again');
         assert.strictEqual(t.log.errors.length, 0, JSON.stringify(t.log.errors));
+    } finally { t.end(); }
+});
+
+test('in-page: a dropped connection comes back at once and the in-page state stays; a renderer that stays away: the screen\'s own state', async () => {
+    const t = await setup({ embed: true, embedBox: [0, 0, 1920, 720] }), d = t.d;
+    try {
+        assert.deepStrictEqual(t.ui.embedCalls, [true]);
+        const t0 = Date.now();
+        t.c.s.destroy();                                      // the renderer sends the app back elsewhere
+        assert(await waitFor(() => d.gpu.ready && d.embedOn, 2000), 'connected again');
+        assert(Date.now() - t0 < 1500, 'at once, not after 3 s: ' + (Date.now() - t0) + ' ms');
+        await sleep(600);
+        assert.deepStrictEqual(t.ui.embedCalls, [true], 'the in-page state kept: no page switch (a black page) for a drop');
+        // now it stays away: every connection closed at once, before READY
+        onConn = (c) => c.s.destroy();
+        d.gpu.sock.destroy();
+        assert(await waitFor(() => t.ui.embedCalls.length === 2, 3000), 'after the grace: ' + JSON.stringify(t.ui.embedCalls));
+        assert.strictEqual(t.ui.embedCalls[1], false, 'the screen\'s own state again');
+        assert(!d.embedOn);
     } finally { t.end(); }
 });
 
