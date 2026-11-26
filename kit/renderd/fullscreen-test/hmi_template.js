@@ -16,7 +16,11 @@
  *            (position z -88: the HMI script places pages by x and z, z vertical), so the strip lies over the
  *            app's top instead of beside it (embed_area 0,0,1920,720). On a G26 (2026-11-26) "map" still left the
  *            surface under the strip, squeezed into the 632 px there.
- *   down     the same with z +88, in case the HMI's z grows upwards
+ *   down     the same with z +88, in case the HMI's z grows upwards. On a G26: up moved the picture down, down
+ *            moved it up to the top (under the strip, as wanted) but it stayed 632 high: the layout gives the
+ *            surface what the title bar's box leaves of the 720, whatever its own height
+ *   flat     the title bar proxy as stock (the scene draws BMW's strip through it, over the app), but its layout
+ *            box 0 high, so the surface gets the whole 1920 x 720 from the top (embed_area 0,0,1920,720)
  *   map      the title bar proxy kept (BMW's pages have it: the scene's info area, the strip with the home
  *            button and status icons, is drawn through it), but the surface first, over the whole screen
  *            (embed_area 0,0,1920,720), the proxy's box after it: the strip drawn over the app, as over BMW's
@@ -134,8 +138,9 @@ function varint(n) {
 const FULL = { x: 0, w: 1920, h: 720 }, WIDE = { x: 0, w: 1920, h: 632 }, TITLE_H = 88;
 
 function template(ids, surfaceId, layoutName) {
-    const full = layoutName === 'full', map = layoutName === 'map', shift = layoutName === 'up' ? -TITLE_H : layoutName === 'down' ? TITLE_H : 0;
-    const box = full || map || shift ? FULL : layoutName === 'wide' ? WIDE : AREA;
+    const full = layoutName === 'full', map = layoutName === 'map', flat = layoutName === 'flat';
+    const shift = layoutName === 'up' ? -TITLE_H : layoutName === 'down' ? TITLE_H : 0;
+    const box = full || map || flat || shift ? FULL : layoutName === 'wide' ? WIDE : AREA;
     const v = (f, n) => Buffer.concat([varint(f * 8), varint(n)]);
     const f32 = (f, x) => {
         const b = Buffer.alloc(4);
@@ -193,7 +198,7 @@ function template(ids, surfaceId, layoutName) {
                     m(4, m(2, m(1, float(1)))),
                     m(5, m(2, m(1, v(41, 1)))),
                     flow)))),
-        m(3, vec3(ref(P('titlebarRegularDynTextW_ID7')), ref(P('defaultD_ID7')), ref(P('titlebarH_ID7')))),
+        m(3, vec3(ref(P('titlebarRegularDynTextW_ID7')), ref(P('defaultD_ID7')), flat ? val(0) : ref(P('titlebarH_ID7')))),
         m(5, vec3(ref(P('titlebarX_ID7')), m(3, zero), ref(P('titlebarMB_ID7')))),
         flow,
         m(7, m(2, m(1, v(41, 0)))));
@@ -223,7 +228,7 @@ if (require.main === module) {
     if (!opt.layout) {
         try { opt.layout = fs.readFileSync('/var/opt/mgu-render/hmi-layout', 'utf8').trim(); } catch (e) { /* none */ }
     }
-    opt.layout = ['full', 'wide', 'map', 'up', 'down'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
+    opt.layout = ['full', 'wide', 'map', 'up', 'down', 'flat'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
     if (!opt.out || !Number.isInteger(surfaceId) || surfaceId < 0) {
         console.error('usage: node hmi_template.js [--hmi FILE] [--surface-id ID] --out DIR');
         process.exit(2);
