@@ -1010,8 +1010,8 @@ class Display {
         if (this.embedOn) {
             // in-page: BMW's strip is over the box, not in it - the header row is the app's whole width, the back arrow
             // column the page's background (the HMI draws its back arrow over it)
-            if (map && this.headH()) c.fillRect(mapEnd, 0, W - mapEnd, FULL.headH, t.bg);
-            else c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
+            // (map style: the tabs' row on the page's background - none at all without tabs, _embedMap: the page is there)
+            if (map) { if (this.headH()) c.fillRect(mapEnd, 0, W - mapEnd, FULL.headH, t.bg); } else c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
             if (hx > 0 && pl.left !== 0) c.fillRect(0, 0, hx, H, t.bg);
         } else if (map) {
             // map style, full screen as BMW's map (2.6.9): the HMI's title strip covered by the page's own background,
