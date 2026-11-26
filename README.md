@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.0.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.0.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -171,7 +171,11 @@ top, as on BMW's map. With the renderer's full-screen template (`embed_layout = 
 the stock one, the area under BMW's title bar. In **map style** there is no tab row at all (2.9.9): the page starts right
 under BMW's strip, and BMW's own title in the strip names the page shown (or Settings while open), as on BMW's pages;
 the pages are in the left side bar and on the controller. In the other layouts the tab names sit just below the strip.
-BMW's back arrow is drawn over the page's left edge in-page, as on every BMW page: Cockpit keeps that column free (3.0.0). Without the template (or with
+BMW's back arrow is drawn over the page's left edge in-page, as on every BMW page: Cockpit keeps that column free (3.0.0).
+When the connection to the renderer drops (it restarts, or, with the old `idrive7-renderd` still installed beside
+`mgu-render`, it sends Cockpit back to that one a few times after each start), Cockpit reconnects at once and keeps its
+in-page page meanwhile, a short flicker instead of a black page; only after 10 s without the renderer does it go back
+to drawing over the HMI (3.0.1). Without the template (or with
 another renderer) Cockpit draws over the HMI as before, and BMW's pop-ups stay under it.
 
 **Side bars, by touch:** a touch on the page's left or right edge opens that bar (full screen: on the slim handle). It hides again 5 s after the last touch.

@@ -93,6 +93,8 @@ const LAYOUTS = ['full', 'standard', 'map'];
 // in-page over the whole screen (mgu-render embed_layout = full): BMW's title strip, home button to status icons with its
 // line under them, is this high over the box's top (measured on a G26's calibration picture); the app's layout starts there
 const EMBED_STRIP = 88;
+// in-page: a dropped connection to the renderer gets this long to come back before the screen leaves its in-page state
+const EMBED_GRACE_MS = Number(process.env.MGU_EMBED_GRACE_MS) || 10000;
 const CTL_RETRIES = 3, CTL_RETRY_MS = 30000;   // connecting again for the controller (_ctlRetry)
 
 // the HMI's page animation when a screen opens (the picture shows after it)
@@ -189,6 +191,7 @@ class Display {
         const gpu = this.gpu = new RenderClient(this.spec.id, this.log, Object.assign({ native }, file ? { file } : {}));
         gpu.on('ready', () => {
             if (this.gpu !== gpu) return;
+            clearTimeout(this.embedGrace); this.embedGrace = null;
             // in-page drawing (mgu-render's page template) for a screen that has an in-page state, while offered
             this.embedOn = this._embedOK();
             this.embedTitleShown = null;            // (the in-page state's title written again)
@@ -200,8 +203,22 @@ class Display {
         gpu.on('close', () => {
             if (this.gpu !== gpu) return;
             clearTimeout(this.frontTimer); this.blocked = false;
-            // the in-page state shows nothing without the renderer: the screen's own state (the HMI's image) again
-            if (this.embedOn) { this.embedOn = false; if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(false)).catch(() => {}); }
+            // the in-page state shows nothing without the renderer, but a closed connection is mostly back at once (the
+            // renderer sent the app to another one and it came back, or it restarted): the in-page state stays for
+            // EMBED_GRACE_MS, and only then the screen's own state (the HMI's image) again - switching each time showed
+            // a black page for 4 s, three times after each start on a G26
+            if (this.embedOn) {
+                clearTimeout(this.embedGrace);
+                this.embedGrace = setTimeout(() => {
+                    this.embedGrace = null;
+                    if (this.gpu !== gpu || gpu.ready || !this.embedOn) return;
+                    this.log.warn('display: the renderer is still away: the screen over the HMI again');
+                    this.embedOn = false;
+                    if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(false)).catch(() => {});
+                    this._lost();
+                }, EMBED_GRACE_MS);
+                return;
+            }
             this._lost();
         });
         gpu.on('stats', (s) => { this.gpuStats = s; });

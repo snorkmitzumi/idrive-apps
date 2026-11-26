@@ -35,6 +35,7 @@ const CLAIM = 9, TOUCH = 105, CLOSED = 106;
 // mgu-render/1 (mgu-store native/mgu-render/PROTOCOL.md)
 const X = { MODE: 0x4d520001, GRAB: 0x4d520002, READY: 0x4d520101, STATE: 0x4d520102, CCU: 0x4d520103 };
 const X_MODE_LAYER = 1, X_MODE_EMBED = 2;
+const RETRY_SOON_MS = 150;
 
 function msg(type, payload) {
     const len = payload ? payload.length : 0;
@@ -134,7 +135,10 @@ class RenderClient extends EventEmitter {
             const was = this.ready;
             this.connected = this.ready = this.native = false; this.sock = null; this.waiting = false; this.onScreen = null;
             if (was) { this.log.warn('renderd: connection closed'); this.emit('close'); }
-            if (!this.closed) this.retry = setTimeout(() => { this.retry = null; this.connect(); }, this.soon ? 0 : 3000);
+            // a connection that was up and is closed (the renderer sent the app elsewhere, or restarted): at once - the
+            // picture is gone meanwhile (on a G26 with idrive7-renderd beside mgu-render: 3 times after each start); a
+            // socket that refuses us: every 3 s
+            if (!this.closed) this.retry = setTimeout(() => { this.retry = null; this.connect(); }, this.soon ? 0 : was ? RETRY_SOON_MS : 3000);
             this.soon = false;
         });
         return this;
