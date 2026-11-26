@@ -12,6 +12,10 @@
  *   wide     the stock title bar, the surface the screen's full width under it (embed_area 0,88,1920,632)
  *   full     no title bar, the surface over the whole 1920 x 720 screen, as BMW's full-screen map
  *            (embed_area 0,0,1920,720). On a G26 (2026-11-26) the HMI showed it black.
+ *   map      the title bar proxy kept (BMW's pages have it: the scene's info area, the strip with the home
+ *            button and status icons, is drawn through it), but the surface first, over the whole screen
+ *            (embed_area 0,0,1920,720), the proxy's box after it: the strip drawn over the app, as over BMW's
+ *            map (its table LT_Table_Nav_MapPlayer, the scene folding the strip on NotifyInfoAreaHidden).
  *
  * HmiMain3D builds its pages from widget definitions it reads from the *.pbw
  * files of its widget directories (protobuf; every name is an index into an
@@ -125,7 +129,7 @@ function varint(n) {
 const FULL = { x: 0, w: 1920, h: 720 }, WIDE = { x: 0, w: 1920, h: 632 };
 
 function template(ids, surfaceId, layoutName) {
-    const full = layoutName === 'full', box = full ? FULL : layoutName === 'wide' ? WIDE : AREA;
+    const full = layoutName === 'full', map = layoutName === 'map', box = full || map ? FULL : layoutName === 'wide' ? WIDE : AREA;
     const v = (f, n) => Buffer.concat([varint(f * 8), varint(n)]);
     const f32 = (f, x) => {
         const b = Buffer.alloc(4);
@@ -194,7 +198,7 @@ function template(ids, surfaceId, layoutName) {
         m(7, m(2, m(1, v(41, 0)))));
     // full: no title bar above the surface (its box would push the surface down), the surface from the top
     const layout = m(9, id(1, 'eGfxIdLayout_content'),
-        m(2, m(1, m(2, id(1, 'eGfxIdLayout_spec'), full ? m(2, streamBox) : m(2, titlebarBox, streamBox)))));
+        m(2, m(1, m(2, id(1, 'eGfxIdLayout_spec'), full ? m(2, streamBox) : map ? m(2, streamBox, titlebarBox) : m(2, titlebarBox, streamBox)))));
     return m(1, id(1, TEMPLATE), id(2, 'eGfxIdWidgetType_eWidgetType_PlayerBasic'),
         ...(full ? [] : [titlebar]), stream, ...params, layout,
         id(14, 'eGfxIdImportDefinition_WID_State_Generic'),
@@ -213,7 +217,7 @@ if (require.main === module) {
     if (!opt.layout) {
         try { opt.layout = fs.readFileSync('/var/opt/mgu-render/hmi-layout', 'utf8').trim(); } catch (e) { /* none */ }
     }
-    opt.layout = ['full', 'wide'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
+    opt.layout = ['full', 'wide', 'map'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
     if (!opt.out || !Number.isInteger(surfaceId) || surfaceId < 0) {
         console.error('usage: node hmi_template.js [--hmi FILE] [--surface-id ID] --out DIR');
         process.exit(2);

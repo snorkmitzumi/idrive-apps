@@ -2,6 +2,8 @@
 # Full-screen page template test for the MGU Store's renderer (mgu-render), iDrive 7.
 # Run as root on the head unit:  sh install.sh wide   (or full)      Undo:  sh undo.sh
 #   wide  BMW's title bar as stock, the app the full screen width under it (0,88,1920,632)
+#   map   the title bar proxy kept but after the app, the app over the whole screen (0,0,1920,720): BMW's strip
+#         drawn over it, as over BMW's map
 #   full  no title bar, the app over the whole screen (0,0,1920,720): showed black on a G26 (2026-11-26)
 #
 # What it does (nothing else is touched):
@@ -21,8 +23,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 LAYOUT=${1:-wide}
 case $LAYOUT in
 wide) AREA=0,88,1920,632 ;;
-full) AREA=0,0,1920,720 ;;
-*) echo "usage: sh install.sh wide|full"; exit 2 ;;
+full | map) AREA=0,0,1920,720 ;;
+*) echo "usage: sh install.sh wide|map|full"; exit 2 ;;
 esac
 
 if [ ! -f "$CUR/hmi_template.js" ] || [ ! -f "$CUR/mgu-render-hmi.sh" ]; then
