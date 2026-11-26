@@ -12,6 +12,11 @@
  *   wide     the stock title bar, the surface the screen's full width under it (embed_area 0,88,1920,632)
  *   full     no title bar, the surface over the whole 1920 x 720 screen, as BMW's full-screen map
  *            (embed_area 0,0,1920,720). On a G26 (2026-11-26) the HMI showed it black.
+ *   up       as wide (the stock title bar first), but the surface 720 high and moved up by the title bar's 88 px
+ *            (position z -88: the HMI script places pages by x and z, z vertical), so the strip lies over the
+ *            app's top instead of beside it (embed_area 0,0,1920,720). On a G26 (2026-11-26) "map" still left the
+ *            surface under the strip, squeezed into the 632 px there.
+ *   down     the same with z +88, in case the HMI's z grows upwards
  *   map      the title bar proxy kept (BMW's pages have it: the scene's info area, the strip with the home
  *            button and status icons, is drawn through it), but the surface first, over the whole screen
  *            (embed_area 0,0,1920,720), the proxy's box after it: the strip drawn over the app, as over BMW's
@@ -126,10 +131,11 @@ function varint(n) {
 }
 
 // the whole screen (iDrive 7's 1920 x 720) for --layout full; the full width under the title bar for wide
-const FULL = { x: 0, w: 1920, h: 720 }, WIDE = { x: 0, w: 1920, h: 632 };
+const FULL = { x: 0, w: 1920, h: 720 }, WIDE = { x: 0, w: 1920, h: 632 }, TITLE_H = 88;
 
 function template(ids, surfaceId, layoutName) {
-    const full = layoutName === 'full', map = layoutName === 'map', box = full || map ? FULL : layoutName === 'wide' ? WIDE : AREA;
+    const full = layoutName === 'full', map = layoutName === 'map', shift = layoutName === 'up' ? -TITLE_H : layoutName === 'down' ? TITLE_H : 0;
+    const box = full || map || shift ? FULL : layoutName === 'wide' ? WIDE : AREA;
     const v = (f, n) => Buffer.concat([varint(f * 8), varint(n)]);
     const f32 = (f, x) => {
         const b = Buffer.alloc(4);
@@ -193,7 +199,7 @@ function template(ids, surfaceId, layoutName) {
         m(7, m(2, m(1, v(41, 0)))));
     const streamBox = m(1, id(1, 'eGfxIdWidget_layer'),
         m(3, vec3(val(box.w), ref(P('defaultD_ID7')), val(box.h))),
-        m(5, vec3(val(box.x), val(0), val(0))),
+        m(5, vec3(val(box.x), val(0), val(shift))),
         flow,
         m(7, m(2, m(1, v(41, 0)))));
     // full: no title bar above the surface (its box would push the surface down), the surface from the top
@@ -217,7 +223,7 @@ if (require.main === module) {
     if (!opt.layout) {
         try { opt.layout = fs.readFileSync('/var/opt/mgu-render/hmi-layout', 'utf8').trim(); } catch (e) { /* none */ }
     }
-    opt.layout = ['full', 'wide', 'map'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
+    opt.layout = ['full', 'wide', 'map', 'up', 'down'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
     if (!opt.out || !Number.isInteger(surfaceId) || surfaceId < 0) {
         console.error('usage: node hmi_template.js [--hmi FILE] [--surface-id ID] --out DIR');
         process.exit(2);
