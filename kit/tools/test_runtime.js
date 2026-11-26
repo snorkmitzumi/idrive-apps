@@ -340,6 +340,7 @@ test('in-page map style: no tab row, the page right under BMW\'s strip, BMW\'s t
     try {
         assert(d.embedOn && d.mapStyle(), 'in-page map style');
         assert.strictEqual(d.headH(), 0, 'no tab row');
+        assert(d.place.left === 84 && d.place.ox >= 84 - 12 * d.place.scale, 'BMW\'s back arrow column a margin of its own: ' + JSON.stringify(d.place));
         assert.deepStrictEqual(d._tabList().tabs, [], 'no tabs for the controller either: the side bar has the pages');
         assert(d.place.y === 88 && d.place.oy - 0 <= 88, 'the page from under the strip: ' + JSON.stringify(d.place));
         const r = d.canvas(1600, 520);
