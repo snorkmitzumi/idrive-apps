@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.5.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.6.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -117,7 +117,7 @@ A trip book, kept by itself (new in 2.9.0, a first version):
 - **A trip is one drive:** it starts when the car is ready to drive and ends a minute after it isn't. Started again
   within 3 minutes (the engine off at a fuel station), the same trip goes on. **End trip** ends it by hand.
 - **Each trip:** when, distance, time, average and top speed, the fuel used and the consumption. The distance comes
-  from the car's odometer where it sends one and it agrees with the speed's count (within 20 %), else from the speed; the fuel from the tank's level, so it counts in
+  from the car's odometer where it sends one (on a G26 the instrument cluster's, 2.9.6) and it agrees with the speed's count (within 20 %), else from the speed; the fuel from the tank's level, so it counts in
   whole litres, a refuel on the way is noticed, and the consumption shows from 20 km on.
 - **This month:** trips, distance and fuel.
 - **Since refuelling:** distance, fuel and consumption since the last refuel. A refuel is the tank's level rising 3 l
@@ -275,27 +275,36 @@ The log names what the car answered, which reads it refused, and the app's versi
 
 ### The log uploaded to your GitHub
 
-With SSH to the head unit, Cockpit can send its log to a GitHub repository of yours as the car stops (2.9.4), so no
-photos are needed. It is **off by default**: nothing is sent until you switch it on *and* give it a repository.
+Cockpit can send its log to a GitHub repository of yours as the car stops (2.9.4), so no photos are needed. It is
+**off by default**: nothing is sent until you sign in (or give it a repository with SSH) and Upload logs is on.
 
-1. Make a **private** repository (the log names your driving times, the odometer and what the car sent).
-2. Make a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for that repository only,
-   with **Contents: Read and write**.
-3. Put `upload.json` in Cockpit's data folder, `/var/opt/public/oap/oap_<uid>/data/` (the folder that holds
-   `cockpit_combo.log`):
+**Sign in from your phone (2.9.6), no SSH:**
 
-   ```json
-   { "repo": "you/cockpit-logs", "token": "github_pat_..." }
-   ```
+1. Make a **private** repository for the logs (they name your driving times, the odometer and what the car sent).
+2. Install the [log upload GitHub App](#the-github-app) on **that repository only** (*Only select repositories*).
+   It asks for one permission: Contents, read and write.
+3. In the car: Settings > **Log upload** > **Sign in with GitHub**. The screen shows a code and a QR code: scan it (or
+   open `github.com/login/device`) on your phone, type the code and allow it. Upload logs switches on by itself.
 
-   `"branch"` (default: the repository's own) and `"dir"` (default `logs`) are optional.
-4. Settings > Log upload: **on**.
+The car then holds a token of its own, good for 8 hours and renewed by itself for up to 6 months; it reaches only the
+repository you installed the app on. Settings > Log upload > **Sign out** forgets it, and GitHub's
+[Applications](https://github.com/settings/apps/authorizations) page revokes it from anywhere.
+
+**Or with SSH:** a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for the repository
+(Contents: read and write) in `upload.json` in Cockpit's data folder, `/var/opt/public/oap/oap_<uid>/data/` (the
+folder that holds `cockpit_combo.log`). It wins over a sign-in.
+
+```json
+{ "repo": "you/cockpit-logs", "token": "github_pat_..." }
+```
+
+`"branch"` (default: the repository's own) and `"dir"` (default `logs`) are optional.
 
 Cockpit uploads when the car stops (ready to drive, then not), two minutes after it starts (anything a stop without
-internet left behind), and when you press the Log upload row. Each upload is a new file,
+internet left behind), and at **Send now**. Each upload is a new file,
 `logs/cockpit_combo/<month>/<time of its first line>-<version>.log`, holding the lines since the last one, with a VIN
-masked. The token is never written to the log or shown. An upload GitHub took while its answer got lost on a weak connection is sent
-once more under a name with the time added, not refused for good (2.9.5).
+masked. Tokens are never written to the log or shown. An upload GitHub took while its answer got lost on a weak
+connection is sent once more under a name with the time added, not refused for good (2.9.5).
 
 The head unit's apps reach the internet only through the MGU Store's **mgu-uplink** (a USB modem, a phone tethered
 by USB, or Wi-Fi); the car's own connection isn't open to apps. Without it the row says *No internet* and the lines
@@ -303,6 +312,12 @@ wait for the next try.
 
 It is a kit feature, as the QR log is: an app of your own gets it with `"logUpload": true` in its `app.json`
 ([KIT.md](KIT.md), 6.1).
+
+#### The GitHub App
+
+The sign-in goes through a GitHub App that holds no secret and receives nothing: no webhooks, no server, Contents
+only. Its client id is in the kit (`kit/runtime/mgu.js`, `KIT_GITHUB_APP`); an app of your own can name its own with
+`"logUpload": { "clientId": "Iv23..." }`.
 
 ## Development
 

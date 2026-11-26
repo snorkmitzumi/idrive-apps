@@ -853,7 +853,7 @@ checks.push(
         clock += RESUME_MS + 1000; tb.odometer(1000); run(tb, 1, 0, 10); run(tb, 300, 100, 10); tb.odometer(1009); run(tb, END_MS / 1000 + 1, 0, 5);
         assert(tb.trips.length === 2 && tb.trips[0].km === 9 && tb.trips[0].kmFrom === 'odometer', JSON.stringify(tb.trips[0]));
         // a G26 (2.9.1): the first reading bogus (1024), the real one later; the odometer first read mid-trip
-        clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 600, 60, 10); tb.odometer(1024, 'SecureMileage'); run(tb, 600, 60, 10); tb.odometer(35748, 'SecureMileage'); tb.odometer(99, 'MileageVehicle'); run(tb, END_MS / 1000 + 1, 0, 5);
+        clock += RESUME_MS + 1000; run(tb, 1, 0, 10); run(tb, 600, 60, 10); tb.odometer(1024, 'SecureMileage'); run(tb, 600, 60, 10); tb.odometer(35748, 'SecureMileage'); tb.odometer(99, 'Kombi'); run(tb, END_MS / 1000 + 1, 0, 5);
         assert(tb.trips[0].kmFrom === 'speed' && Math.abs(tb.trips[0].km - 20) < 0.3, 'an odometer that disagrees with the speed: the speed\'s 20 km: ' + JSON.stringify(tb.trips[0]));
         assert(lines.some((m) => /trips: ended, 20\.0 km \(speed\).*odometer \d+ > 35748/.test(m)) && lines.some((m) => /odometer SecureMileage 35748 km/.test(m)) && lines.some((m) => /odometer from SecureMileage/.test(m)) && tb.odoSrc === 'SecureMileage', lines.slice(-4).join(' | '));
         {
@@ -1194,6 +1194,77 @@ checks.push(
             + 's = build.kit_features(json.load(open(sys.argv[2]))); u = [x for x in s["settings"] if x["key"] == "uploadLogs"]; '
             + 'print(json.dumps([s.get("internet"), len(u), u[0]["default"], u[0]["group"]]))', path.join(ROOT, 'kit', 'tools'), path.join(APP, 'app.json')], { encoding: 'utf8' });
         assert.deepStrictEqual(JSON.parse(py.stdout), [true, 1, false, 'Log upload'], py.stderr);
+    }],
+    ['2.9.6 phone sign-in: GitHub\'s device flow (waits, slows down), the logs repository found, tokens renewed and refused, the sheet', async () => {
+        const { GitHubAuth, signInSheet } = require(path.join(KIT, 'ghauth'));
+        const { LogUpload } = require(path.join(KIT, 'logupload'));
+        const data = tmp('auth'), logged = [], log = { info: (m) => logged.push(m), warn: (m) => logged.push(m), error: (m) => logged.push(m) };
+        let now = 1e12, polls = 0, refused = false;
+        const waits = [];
+        const reply = (o, status) => Promise.resolve({ status: status || 200, text: JSON.stringify(o) });
+        const calls = [];
+        const http = (req) => {
+            calls.push(req.method + ' ' + req.host + req.path.split('?')[0] + (req.body ? ' ' + req.body : ''));
+            if (req.path === '/login/device/code') return reply({ device_code: 'DEV', user_code: 'WDJB-MJHT', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 });
+            if (req.path === '/login/oauth/access_token' && /device_code/.test(req.body)) {
+                polls++;
+                return reply(polls === 1 ? { error: 'authorization_pending' } : polls === 2 ? { error: 'slow_down', interval: 10 }
+                    : { access_token: 'ghu_A', expires_in: 28800, refresh_token: 'ghr_A', refresh_token_expires_in: 15897600 });
+            }
+            if (req.path === '/login/oauth/access_token' && /refresh_token/.test(req.body)) return refused ? reply({ error: 'bad_refresh_token' }) : reply({ access_token: 'ghu_B', expires_in: 28800, refresh_token: 'ghr_B', refresh_token_expires_in: 15897600 });
+            if (req.path === '/user') return reply({ login: 'snorkmitzumi' });
+            if (req.path.indexOf('/user/installations?') === 0) return reply({ installations: [{ id: 7 }] });
+            if (req.path.indexOf('/user/installations/7/repositories') === 0) return reply({ repositories: [{ full_name: 'snorkmitzumi/notes' }, { full_name: 'snorkmitzumi/cockpit-logs' }] });
+            return reply({}, 404);
+        };
+        const file = path.join(data, 'upload-auth.json');
+        const a = new GitHubAuth({ file, clientId: 'Iv23test', log, http, now: () => now, wait: (ms, fn) => { waits.push(ms); return setTimeout(fn, 0); } });
+        let enabled = false;
+        const sh = signInSheet({ auth: a, send: () => Promise.resolve('sent'), enabled: () => enabled, enable: () => { enabled = true; } });
+        const cv = () => new Canvas(1600, 520);
+        let tx = await textsOf(() => sh.draw(cv(), themes.theme('m_tricolour')));
+        assert(tx.includes('Sign in with GitHub') && !tx.some((x) => /NaN|undefined/.test(x)), tx.join(' | '));
+        sh.press();                                                     // Sign in with GitHub
+        for (let k = 0; k < 20 && !(a.flow && a.flow.phase === 'done'); k++) await new Promise((r) => setTimeout(r, 5));
+        assert.strictEqual(a.flow.phase, 'done', JSON.stringify(a.flow));
+        assert.deepStrictEqual(waits, [5000, 5000, 10000], 'polled at the interval, slower after slow_down');
+        assert(calls.some((c) => /client_id=Iv23test/.test(c)) && !calls.some((c) => /client_secret/.test(c)), 'the client id only, no secret');
+        assert.deepStrictEqual(a.signedIn(), { login: 'snorkmitzumi', repo: 'snorkmitzumi/cockpit-logs' }, 'the repository named ...logs');
+        assert(enabled, 'signing in switches Upload logs on');
+        assert.strictEqual((fs.statSync(file).mode & 0o777).toString(8), '600', 'the tokens readable by the app only');
+        assert(!logged.some((m) => /ghu_|ghr_/.test(m)), 'no token in the log');
+        // while the code shows: the code and the page to open on the phone
+        const b = new GitHubAuth({ file: path.join(data, 'b.json'), clientId: 'Iv23test', log, http, now: () => now, wait: () => 0 });
+        b.start(); await new Promise((r) => setTimeout(r, 5));
+        tx = await textsOf(() => signInSheet({ auth: b, send: () => null, enabled: () => true, enable: () => {} }).draw(cv(), themes.theme('m_tricolour')));
+        assert(tx.includes('WDJB-MJHT') && tx.includes('github.com/login/device') && tx.includes('Cancel'), tx.join(' | '));
+        b.cancel();
+        // signed in: the sheet offers Send now and Sign out
+        tx = await textsOf(() => sh.draw(cv(), themes.theme('m_tricolour')));
+        assert(tx.includes('Send now') && tx.includes('Sign out') && tx.some((x) => /snorkmitzumi\/cockpit-logs/.test(x)), tx.join(' | '));
+        // the token: as it is while it lasts, renewed near its end (the new pair kept), signed out when GitHub refuses
+        assert.strictEqual(await a.token(), 'ghu_A');
+        now += 28800 * 1000 - 60000;
+        assert.strictEqual(await a.token(), 'ghu_B');
+        assert.strictEqual(new GitHubAuth({ file, clientId: 'x', log, http }).a.refresh, 'ghr_B', 'the renewed tokens saved');
+        now += 28800 * 1000; refused = true;
+        assert.strictEqual(await a.token(), null);
+        assert(!a.signedIn() && !fs.existsSync(file), 'signed out');
+        // the upload with a sign-in instead of upload.json
+        refused = false; polls = 2;
+        const c = new GitHubAuth({ file: path.join(data, 'c.json'), clientId: 'Iv23test', log, http, now: () => now, wait: (ms, fn) => setTimeout(fn, 0) });
+        c.start();
+        for (let k = 0; k < 20 && !(c.flow && c.flow.phase === 'done'); k++) await new Promise((r) => setTimeout(r, 5));
+        const lease = path.join(data, 'lease.json'); fs.writeFileSync(lease, JSON.stringify({ dns: ['1.1.1.1'] }));
+        const lf = path.join(data, 'app.log'); fs.writeFileSync(lf, '2026-11-26T10:00:01.000Z INFO hello\n');
+        const puts = [];
+        const up = new LogUpload({ file: lf, dataDir: data, app: 'cockpit_combo', version: '2.9.6', log, enabled: () => true, leases: [lease], auth: c,
+            put: (cfg, f) => { puts.push(cfg); return Promise.resolve({ status: 201, text: '{}' }); } });
+        assert(/^On, to snorkmitzumi\/cockpit-logs/.test(up.status()), up.status());
+        assert.strictEqual(await up.send('t'), 'sent');
+        assert.strictEqual(puts[0].repo, 'snorkmitzumi/cockpit-logs'); assert(/^ghu_/.test(puts[0].token));
+        // no app id and no upload.json: says what it needs
+        assert(/upload\.json/.test(new LogUpload({ file: lf, dataDir: tmp('none'), app: 'x', version: '1', log, enabled: () => true }).status()));
     }],
     ['2.9.3 tyres: a car with no units event (G26) reads deg C unless its own pressures are psi; one odd value latches nothing', async () => {
         const T = (a) => ({ actualValueTemperatureTyreFLH: a[0], actualValueTemperatureTyreFRH: a[1], actualValueTemperatureTyreRLH: a[2], actualValueTemperatureTyreRRH: a[3] });

@@ -1,8 +1,9 @@
 'use strict';
 /**
  * logupload.js - the app's log sent to a GitHub repository of the owner's, when the app asks (Cockpit: as the car
- * stops), for an app whose owner switched it on. Nothing is sent unless the app's setting is on AND the app's data
- * folder holds upload.json, which only someone with SSH puts there:
+ * stops), for an app whose owner switched it on. Nothing is sent unless the app's setting is on AND the owner gave it a
+ * repository: signed in with GitHub from a phone (ghauth.js: the app's GitHub App, no file needed), or upload.json in
+ * the app's data folder, which only someone with SSH puts there (it wins over a sign-in):
  *
  *   { "repo": "owner/name", "token": "github_pat_...", "branch": "main", "dir": "logs" }   (branch, dir optional)
  *
@@ -16,7 +17,8 @@
  * Each upload is one new file, <dir>/<app>/<YYYY-MM>/<first line's time>-<version>.log, of the lines since the last one
  * sent (upload-state.json keeps that line's time), with a VIN masked as the QR log does.
  *
- *   const up = new LogUpload({ file, dataDir, app, version, log, enabled: () => bool })
+ *   const up = new LogUpload({ file, dataDir, app, version, log, enabled: () => bool })   up.auth = a GitHubAuth (or none)
+ *   up.http(req)     a request over the uplink ({ method, host, path, headers, body } -> { status, text }), for ghauth.js
  *   up.send(why)     a try now (a Promise: 'sent' | 'off' | 'nothing' | 'no config' | 'offline' | 'failed' | 'busy')
  *   up.status()      one line for the settings row
  */
@@ -73,25 +75,31 @@ function lookupVia(servers) {
     };
 }
 
-/** PUT a file through GitHub's contents API: resolves the HTTP status, rejects on a network error. */
-function put(cfg, file, body, lookup) {
+/** An HTTPS request: { method, host, path, headers, body (string), lookup } -> { status, text } (1 MB of it at most);
+ *  rejects on a network error or after TIMEOUT_MS. */
+function request(o) {
     return new Promise((resolve, reject) => {
-        const data = JSON.stringify(body);
-        const req = require('https').request({
-            host: 'api.github.com', method: 'PUT', lookup,
-            path: '/repos/' + cfg.repo + '/contents/' + file.split('/').map(encodeURIComponent).join('/'),
-            headers: {
-                'Authorization': 'Bearer ' + cfg.token, 'User-Agent': 'mgu-app-log-upload', 'Accept': 'application/vnd.github+json',
-                'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data),
-            },
-        }, (res) => {
-            let txt = '';
-            res.on('data', (d) => { if (txt.length < 2000) txt += d; });
-            res.on('end', () => resolve({ status: res.statusCode, text: txt }));
+        const data = o.body || '';
+        const headers = Object.assign({ 'User-Agent': 'mgu-app-log-upload' }, o.headers || {});
+        if (data) headers['Content-Length'] = Buffer.byteLength(data);
+        const req = require('https').request({ host: o.host, method: o.method || 'GET', path: o.path, lookup: o.lookup, headers }, (res) => {
+            const parts = [];
+            let n = 0;
+            res.on('data', (d) => { if (n < 1048576) { parts.push(d); n += d.length; } });
+            res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(parts).toString('utf8') }));
         });
         req.setTimeout(TIMEOUT_MS, () => req.abort());
         req.on('error', reject);
         req.end(data);
+    });
+}
+
+/** PUT a file through GitHub's contents API: resolves the HTTP status, rejects on a network error. */
+function put(cfg, file, body, lookup) {
+    return request({
+        method: 'PUT', host: 'api.github.com', lookup, body: JSON.stringify(body),
+        path: '/repos/' + cfg.repo + '/contents/' + file.split('/').map(encodeURIComponent).join('/'),
+        headers: { 'Authorization': 'Bearer ' + cfg.token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
     });
 }
 
@@ -100,6 +108,8 @@ class LogUpload {
         this.file = o.file; this.dataDir = o.dataDir; this.app = o.app; this.version = o.version;
         this.log = o.log; this.enabled = o.enabled || (() => false);
         this.put = o.put || put;                       // (tests)
+        this.request = o.request || request;           // (tests)
+        this.auth = o.auth || null;                    // ghauth.js GitHubAuth: the sign-in from a phone
         this.leases = o.leases || LEASES;
         this.stateFile = path.join(this.dataDir, 'upload-state.json');
         this.busy = false;
@@ -130,11 +140,18 @@ class LogUpload {
 
     note(what) { this.last = { at: Date.now(), what }; return what; }
 
+    /** A request over the uplink (names through its DNS): rejects at once without one. */
+    http(req) {
+        const lease = this.lease();
+        if (!lease) return Promise.reject(Object.assign(new Error('no internet (mgu-uplink)'), { code: 'OFFLINE' }));
+        return this.request(Object.assign({ lookup: lookupVia(lease.dns) }, req));
+    }
+
     async send(why) {
         if (!this.enabled()) return 'off';
         if (this.busy) return 'busy';
-        const cfg = this.config(true);
-        if (!cfg) { if (!this.last || this.last.what !== 'no config') this.log.warn('log upload: no upload.json (repo and token) in ' + this.dataDir); return this.note('no config'); }
+        const fromFile = this.config(true), me = !fromFile && this.auth && this.auth.signedIn();
+        if (!fromFile && !me) { if (!this.last || this.last.what !== 'no config') this.log.warn('log upload: not signed in with GitHub (Settings > Log upload), no upload.json in ' + this.dataDir); return this.note('no config'); }
         const lease = this.lease();
         if (!lease) { if (!this.last || this.last.what !== 'offline') this.log.info('log upload (' + why + '): no internet (no mgu-uplink lease), later'); return this.note('offline'); }
         // (the first upload: all the log holds, 512 KB at most)
@@ -142,6 +159,12 @@ class LogUpload {
         if (!lines.length) return this.note('nothing');
         this.busy = true;
         try {
+            let cfg = fromFile;
+            if (!cfg) {
+                const token = await this.auth.token();
+                if (!token) return this.note('no config');
+                cfg = { repo: me.repo, token, branch: null, dir: 'logs' };
+            }
             const first = TS.exec(lines[0]), lastT = TS.exec(lines.filter((l) => TS.test(l)).pop() || '');
             const t0 = (first ? first[1] : new Date().toISOString()).replace(/\.\d+Z$/, '').replace(/:/g, '-');
             const file = (cfg.dir ? cfg.dir + '/' : '') + this.app + '/' + t0.slice(0, 7) + '/' + t0 + '-' + this.version + '.log';
@@ -172,13 +195,14 @@ class LogUpload {
 
     status() {
         if (!this.enabled()) return 'Off';
-        if (!this.config()) return 'Needs upload.json in the app\'s data folder';
+        const me = !this.config() && this.auth && this.auth.signedIn();
+        if (!this.config() && !me) return this.auth ? 'Not signed in: press to sign in with GitHub on your phone' : 'Needs upload.json in the app\'s data folder';
         const t = (ms) => { const d = new Date(ms); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
         const last = this.sentAt ? 'last sent ' + new Date(this.sentAt).toISOString().slice(0, 10) + ' ' + t(this.sentAt) : 'nothing sent yet';
         if (this.last && this.last.what === 'offline') return 'No internet (mgu-uplink): ' + last;
         if (this.last && this.last.what === 'failed') return 'Last try failed (see the log): ' + last;
-        return 'On: ' + last + '. Press to send now';
+        return (me ? 'On, to ' + me.repo + ': ' : 'On: ') + last + (me ? '' : '. Press to send now');
     }
 }
 
-module.exports = { LogUpload, newLines, fit, mask, lookupVia };
+module.exports = { LogUpload, newLines, fit, mask, lookupVia, request };

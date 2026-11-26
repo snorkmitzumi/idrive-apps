@@ -560,15 +560,32 @@ class Widget {
 // in the data folder (logupload.js), the log goes to the owner's GitHub repository 2 min after a start, as the setting is
 // switched on and at a press of its Settings row. ctx.logUpload.send(why) for the app's own moments (Cockpit: the car
 // stopped); null for an app without it.
+// the kit's GitHub App for the log upload's sign-in from a phone (Contents read and write; device flow on; ghauth.js):
+// its client id is public, it is no secret. null: none yet, apps use upload.json (or their own, app.json).
+const KIT_GITHUB_APP = null;
 function logUpload(settings, log) {
     if (!settings.schema.some((s) => s.key === 'uploadLogs')) return null;
     const { LogUpload } = require('./logupload');          // (only an app with the feature loads it)
     const up = new LogUpload({ file: LOG_FILE, dataDir: DATA_DIR, app: SPEC.id, version: SPEC.version, log, enabled: () => !!settings.get('uploadLogs') });
+    // the sign-in from a phone (ghauth.js): with a GitHub App's client id, app.json "logUpload": { "clientId": ... }, or
+    // the kit's own (KIT_GITHUB_APP). Without one: upload.json only.
+    const lu = SPEC.logUpload, clientId = (lu && typeof lu === 'object' && lu.clientId) || KIT_GITHUB_APP;
+    let auth = null;
+    if (clientId) {
+        const { GitHubAuth } = require('./ghauth');
+        auth = up.auth = new GitHubAuth({ file: path.join(DATA_DIR, 'upload-auth.json'), clientId, log, http: (req) => up.http(req) });
+    }
     const send = (why) => up.send(why).catch((e) => { log.warn('log upload: ' + e); return 'failed'; });
     const t = setTimeout(() => send('start'), 2 * 60 * 1000);
     if (t.unref) t.unref();
     settings.onChange((k) => { if (k === 'uploadLogs' && settings.get('uploadLogs')) send('switched on'); });
-    return { send, status: () => up.status() };
+    /** The Settings row pressed: upload.json there: send now; else the sign-in sheet (null: sent, no sheet). */
+    const open = () => {
+        if (up.config(true) || !auth) { send('by hand'); return null; }
+        const { signInSheet } = require('./ghauth');
+        return signInSheet({ auth, send, enabled: () => !!settings.get('uploadLogs'), enable: () => settings.set('uploadLogs', true) });
+    };
+    return { send, status: () => up.status(), open };
 }
 
 /* ---------------- generic settings screen ---------------- */
@@ -613,7 +630,7 @@ function wireSettings(ctx) {
             // every app's last row: its log as QR codes (qrlog.js), for an issue sent without SSH
             const qrRow = { label: 'QR log', value: 'The app\'s log as codes to photograph', open: () => qrLogSheet({ file: LOG_FILE, app: SPEC.id, version: SPEC.version }) };
             // and with app.json "logUpload": how the upload went, a press sends now
-            const up = ctx.logUpload, upRow = up && { label: 'Log upload', value: () => up.status(), open: () => { up.send('by hand'); return null; } };
+            const up = ctx.logUpload, upRow = up && { label: 'Log upload', value: () => up.status(), open: () => up.open() };
             const sh = listSheet(settings, null, { version: SPEC.version, extra: () => settingsRows.concat(upRow ? [upRow, qrRow] : [qrRow]) });
             sh.settings = true;
             sh.onClose = () => refresh();
