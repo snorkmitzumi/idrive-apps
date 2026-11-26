@@ -90,6 +90,9 @@ const FULL = {
     src: { x: 12, y: 38, w: 1576, h: 482 },
 };
 const LAYOUTS = ['full', 'standard', 'map'];
+// in-page over the whole screen (mgu-render embed_layout = full): BMW's title strip, home button to status icons with its
+// line under them, is this high over the box's top (measured on a G26's calibration picture); the app's layout starts there
+const EMBED_STRIP = 88;
 const CTL_RETRIES = 3, CTL_RETRY_MS = 30000;   // connecting again for the controller (_ctlRetry)
 
 // the HMI's page animation when a screen opens (the picture shows after it)
@@ -184,9 +187,22 @@ class Display {
         // mgu-render/1 for every app that draws no pixel images (Doom: "chrome": false)
         const native = this.screen.chrome !== false && process.env.MGU_RENDERD_PROTO !== 'upstream';
         const gpu = this.gpu = new RenderClient(this.spec.id, this.log, Object.assign({ native }, file ? { file } : {}));
-        gpu.on('ready', () => { if (this.gpu !== gpu) return; this._place(); this._syncVisible(); this._grab(); });
+        gpu.on('ready', () => {
+            if (this.gpu !== gpu) return;
+            // in-page drawing (mgu-render's page template) for a screen that has an in-page state, while offered
+            this.embedOn = this._embedOK();
+            gpu.mode(this.embedOn ? 'embed' : 'layer');
+            if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(this.embedOn)).catch((e) => this.log.warn('in-page: ' + e));
+            this._place(); this._syncVisible(); this._grab();
+        });
         gpu.on('tick', () => { if (this.gpu === gpu) { this.tickT = Date.now(); this.tickHandlers.forEach((fn) => fn()); } });
-        gpu.on('close', () => { if (this.gpu === gpu) { clearTimeout(this.frontTimer); this.blocked = false; this._lost(); } });
+        gpu.on('close', () => {
+            if (this.gpu !== gpu) return;
+            clearTimeout(this.frontTimer); this.blocked = false;
+            // the in-page state shows nothing without the renderer: the screen's own state (the HMI's image) again
+            if (this.embedOn) { this.embedOn = false; if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(false)).catch(() => {}); }
+            this._lost();
+        });
         gpu.on('stats', (s) => { this.gpuStats = s; });
         // mgu-render/1: the renderer shows the app only while its foreground gate has it in front. A screen
         // that stays shown here while the gate says otherwise (seen: a leftover install claiming the same
@@ -245,13 +261,33 @@ class Display {
         this.gpu.grab(this.grabbing || (this.own() && gate && !process.env.MGU_NO_GRAB));
     }
 
+    /**
+     * In-page drawing usable now: the screen has an in-page state (app.json "embed": true, build.py), the renderer offers
+     * embed (its page template is loaded) and its box is a screen's width. MGU_NO_EMBED=1: never (layer, as before).
+     */
+    _embedOK() {
+        const g = this.gpu, b = g && g.native && g.info && g.info.embed && g.info.embedBox;
+        return !!(b && this.ui.embed && this.screen && this.screen.embed && process.env.MGU_NO_EMBED !== '1' && b[2] >= 1000 && b[3] >= 400);
+    }
+    /** In-page with the whole screen (the full template, mgu-render embed_layout = full): BMW's title strip lies over the
+     *  box's top, so the app's layout starts under it (px). 0: the box starts under the strip already. */
+    _embedTop() {
+        const b = this.embedOn && this.gpu.info.embedBox;
+        return b && b[1] < HMI.img.y && b[1] + b[3] > HMI.img.y + 200 ? EMBED_STRIP - b[1] : 0;
+    }
+    /** The placement the renderer gets: the app's (laid out under BMW's strip in-page) moved down by that strip. */
+    _dev(pl) {
+        const top = pl.embedTop || 0;
+        return top ? Object.assign({}, pl, { y: pl.y - top, h: pl.h + top, oy: pl.oy + top }) : pl;
+    }
+
     /** The kit runs the screen: mgu-render/1 with touch, full-screen layout. */
     own() { return !!(this.gpu && this.gpu.ready && !this.blocked && this.gpu.native && this.gpu.touch && this.place && this.place.full); }
     /** own() but for the placement, which depends on it (the bar's height): the renderer and layout allow it. */
     ownable() {
         const g = this.gpu;
         const h = geometryFor(g && g.screen);
-        return !!(g && g.ready && g.native && g.touch && (this.layout() === 'full' || this.layout() === 'map') && g.screen.w === h.screen.w && g.screen.h === h.screen.h);
+        return !!(g && g.ready && g.native && g.touch && (this.embedOn || this.layout() === 'full' || this.layout() === 'map') && g.screen.w === h.screen.w && g.screen.h === h.screen.h);
     }
     /** Settings is the header's last tab where the kit runs the screen (the app has a Settings button). */
     hasSettings() { return !!(this.screen && (this.screen.buttons || []).some((b) => b[0] === 'BTN_SETTINGS')); }
@@ -549,7 +585,7 @@ class Display {
         const W = pl.w, hx = HMI.left - pl.x, by = pl.h - this.barH();
         // the header as far as the HMI's status corner shows through it (iDrive 7); iDrive 8 has none in the
         // app's area: the whole row is the app's, as a tap there must not count as the HMI's (mgu-render closes)
-        const he = HMI.status.h ? this.headEnd : W;
+        const he = HMI.status.h && !this.embedOn ? this.headEnd : W;
         if (this.own()) {
             // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's
             const px = pl.left === 0 ? -pl.x : hx;     // (map style: the back arrow column's page part is the app's)
@@ -628,20 +664,22 @@ class Display {
         HMI = geometryFor(scr);
         let pl;
         // iDrive 8 has only the full layout (no HMI page box of iDrive 7's size to sit in)
-        if ((v === 'standard' && HMI === HMI7) || scr.w !== HMI.screen.w || scr.h !== HMI.screen.h) {
+        // in-page: the renderer's box, the full layout (or map style) in it; the template has no bar of the HMI's
+        const top = this.embedOn ? this._embedTop() : 0, eb = this.embedOn ? this.gpu.info.embedBox : null;
+        if (!this.embedOn && ((v === 'standard' && HMI === HMI7) || scr.w !== HMI.screen.w || scr.h !== HMI.screen.h)) {
             pl = { x: HMI7.img.x, y: HMI7.img.y, w: HMI7.img.w, h: HMI7.img.h, scale: 1, ox: 0, oy: 0, full: false };
         } else {
             // iDrive 7: the surface covers the whole screen, so the HMI's own bar can't show under the back
             // arrow column; the page content goes right of that column. iDrive 8: the area under its status bar
-            const a = HMI.area ? this._area(HMI) : { x: 0, y: 0, w: scr.w, h: scr.h };
+            const a = eb ? { x: eb[0], y: eb[1] + top, w: eb[2], h: eb[3] - top } : HMI.area ? this._area(HMI) : { x: 0, y: 0, w: scr.w, h: scr.h };
             // map style (2.5.2): the page over the back arrow column too (only the home button above it stays the
             // HMI's), so its left margin is the right one's - BMW's map covers the column the same way
-            const left = v === 'map' ? 0 : HMI.left;
+            const left = v === 'map' ? 0 : Math.max(0, HMI.left - a.x);
             const w = a.w - left, h = a.h, src = FULL.src;
             const ah = h - this.headH() - this.barH();
             const s = Math.floor(Math.min(w / src.w, ah / src.h) * 1000) / 1000;
             pl = {
-                x: a.x, y: a.y, w: a.w, h, full: true,
+                x: a.x, y: a.y, w: a.w, h, full: true, embedTop: top,
                 scale: s,
                 ox: left + Math.round((w - src.w * s) / 2 - src.x * s), left,
                 oy: Math.round(this.headH() + (ah - src.h * s) / 2 - src.y * s),
@@ -665,13 +703,13 @@ class Display {
             }
         }
         this.place = pl;
-        this.gpu.place(pl);
+        this.gpu.place(this._dev(pl));
         this._grab();
         this._hmiBar();
         this.recorders.clear();             // text sizes depend on the scale
         this.app = null; this.outRec = null;
         this.lastWords = null;              // a new placement (or its dropped resources) needs a frame, the same or not
-        this.log.info('display: renderer placement ' + JSON.stringify(pl) + ' (layout ' + v + ')');
+        this.log.info('display: renderer placement ' + JSON.stringify(pl) + ' (layout ' + v + (this.embedOn ? ', in-page' : '') + ')');
         // (only a real change: hideButton places again for every button it hides)
         const key = JSON.stringify([pl, this.own(), this.screen ? this.buttons().map((b) => b.id) : []]);
         if (key !== this.layoutKey) { this.layoutKey = key; this._layoutChanged(); }
@@ -686,14 +724,15 @@ class Display {
         const oy = reaches ? pl.oyTop : pl.oyMid;
         if (pl.oy === oy) return;
         pl.oy = oy;
-        this.gpu.place(pl);                 // (the same scale: the renderer keeps our resources)
+        this.gpu.place(this._dev(pl));      // (the same scale: the renderer keeps our resources)
         this.lastWords = null;              // the renderer draws the page at the new oy with the next frame
     }
 
     /** the screen is up and not covered by an HMI popup */
     _shown() {
         // the HMI's settings screen over ours (no drawn settings: another renderer, software): it shows, not our picture
-        return this.ui.isVisible(this.screen.name) && !this.ui.isVisible('SETTINGS') && (!this.ui.hasFocus || this.ui.hasFocus(this.screen.name));
+        // (in-page: an HMI popup is drawn over the app by the HMI itself, so the app stays)
+        return this.ui.isVisible(this.screen.name) && !this.ui.isVisible('SETTINGS') && (this.embedOn || !this.ui.hasFocus || this.ui.hasFocus(this.screen.name));
     }
 
     _syncVisible() {
@@ -905,7 +944,7 @@ class Display {
         let sx = hx, mapEnd = hx;
         if (!map) {
             const end = G.header(c, Object.assign({}, t, { bg: HMI.headBg }), hx, 0, HMI.status.x - pl.x - hx, FULL.headH,
-                this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
+                this.embedOn ? '' : this.screen.title || this.spec.title, tb.tabs, tb.sel, tb.badges, true, true);
             // the HMI's own title is in the strip under the header: a narrower header (a sheet: no tabs) stays
             // as wide as the app's widest, so none of that title shows beside it
             if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);
@@ -950,7 +989,13 @@ class Display {
         // the HMI's status icons and its back arrow column (home button, back arrow) show through;
         // the column under them is covered, so the HMI's own bar doesn't show at the bottom left, nor the
         // mark the HMI draws above it when its bar is wider than the screen (eDrive's "Reset drive totals")
-        if (map) {
+        if (this.embedOn) {
+            // in-page: BMW's strip is over the box, not in it - the header row is the app's whole width, the back arrow
+            // column the page's background (the HMI draws its back arrow over it)
+            if (map) c.fillRect(mapEnd, 0, W - mapEnd, FULL.headH, t.bg);
+            else c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
+            if (hx > 0 && pl.left !== 0) c.fillRect(0, 0, hx, H, t.bg);
+        } else if (map) {
             // map style, full screen as BMW's map (2.6.9): the HMI's title strip covered by the page's own background,
             // only its home button (left) and its status box (right) show, over the page
             const stx = HMI.status.x - pl.x;
@@ -958,9 +1003,10 @@ class Display {
             c.fillRect(stx, HMI.status.h, W - stx, FULL.headH - HMI.status.h, t.bg);
             c.clip(stx, 0, W - stx, HMI.status.h).clear(0).noclip();
         } else c.clip(sx, 0, W - sx, HMI.status.h).clear(0).noclip();
-        if (hx > 0) c.clip(0, 0, hx, (pl.left === 0 ? FULL.headH : HMI.colEnd) - pl.y).clear(0).noclip();
+        if (hx > 0 && !this.embedOn) c.clip(0, 0, hx, (pl.left === 0 ? FULL.headH : HMI.colEnd) - pl.y).clear(0).noclip();
         drawCredit(c, W - 18, FULL.headH + 17);
-        r.xf(1, 0, 0).append(c).xf();
+        // (in-page: these surface pixels start under BMW's strip, pl.embedTop lower on the renderer's surface)
+        r.xf(1, 0, pl.embedTop || 0).append(c).xf();
     }
 
     /** A bar button's text changed (ui.text): its width, and so the bar's layout, follow. */

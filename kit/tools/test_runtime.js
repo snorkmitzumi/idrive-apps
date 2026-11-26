@@ -38,12 +38,13 @@ async function waitFor(fn, ms) {
 // the renderer's side: the app's FRAMEs (time of each, a TICK back for each), READY on connect (onConn)
 let onConn = null;
 const server = net.createServer((s) => {
-    const c = { s, frames: [], buf: Buffer.alloc(0), send: (t, p) => s.write(msg(t, p)) };
+    const c = { s, frames: [], msgs: [], buf: Buffer.alloc(0), send: (t, p) => s.write(msg(t, p)) };
     s.on('data', (d) => {
         c.buf = Buffer.concat([c.buf, d]);
         while (c.buf.length >= 8) {
             const t = c.buf.readUInt32LE(0), n = c.buf.readUInt32LE(4);
             if (c.buf.length < 8 + n) break;
+            c.msgs.push({ t, p: c.buf.slice(8, 8 + n) });
             c.buf = c.buf.slice(8 + n);
             if (t === FRAME) { c.frames.push(Date.now()); c.send(TICK, u32(c.frames.length, 0)); }
         }
@@ -58,14 +59,21 @@ const touch = (phase, x, y) => { const b = Buffer.alloc(12); b.writeUInt32LE(pha
 /** A Display on the stand-in renderer, the kit running the screen (full-screen layout, touch), shown. */
 async function setup(o) {
     let conn = null;
-    onConn = (c) => { conn = c; ready(c); };
+    // o.embedBox: the renderer offers in-page drawing (mgu-render's page template) with that box
+    onConn = (c) => {
+        conn = c;
+        if (!(o && o.embedBox)) { ready(c); return; }
+        c.send(X_READY, Buffer.concat([u32(1, 3, 7), Buffer.from(new Int32Array(o.embedBox.concat([108, 82, 1790, 638])).buffer)]));
+        c.send(READY, u32(4, 1920, 720, 1));
+    };
     const log = { errors: [], info() {}, warn() {}, debug() {}, error: (...a) => log.errors.push(a) };
     const vis = new Set(['MAIN']), visH = [];
     const ui = {
         rhmi: null, close() {}, visible() {}, onVisible: (fn) => visH.push(fn), isVisible: (n) => vis.has(n),
         setVisible: (v) => { if (v) vis.add('MAIN'); else vis.delete('MAIN'); visH.forEach((fn) => fn('MAIN', v)); },
     };
-    const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', buttons: [['BTN_SETTINGS', 'Settings']] }] };
+    const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', embed: !!(o && o.embed), buttons: [['BTN_SETTINGS', 'Settings']] }] };
+    if (o && o.embed) { ui.embed = { screen: 'MAIN', state: 'MAIN_EMBED', on: false }; ui.embedCalls = []; ui.useEmbed = (on) => { ui.embedCalls.push(on); ui.embed.on = on; }; }
     const set = (o && o.settings) || {}, shownBar = [];
     ui.visible = (name, on) => shownBar.push(name + ':' + (on ? 1 : 0));
     const d = new Display(ui, log, spec, { get: (k) => set[k], onChange() {} }, () => themes.theme());
@@ -290,6 +298,39 @@ test('X_READY: whether the renderer offers in-page drawing (embed) now, and its 
         await waitFor(() => ok, 5000);
         assert(h.info.embed === false && !h.info.embedBox, 'layer only (no page template): ' + JSON.stringify(h.info));
     } finally { h.close(); }
+});
+
+test('in-page (embed): a screen with "embed": true asks for it where offered, laid out under BMW\'s strip, not hidden by a popup', async () => {
+    const X_MODE = 0x4d520001, PLACE = 2;
+    const t = await setup({ embed: true, embedBox: [0, 0, 1920, 720] }), d = t.d;
+    try {
+        assert.strictEqual(d.embedOn, true, 'in-page');
+        assert.deepStrictEqual(t.ui.embedCalls, [true], 'the in-page state opened instead of the screen');
+        await sleep(100);
+        const modes = t.c.msgs.filter((m) => m.t === X_MODE).map((m) => m.p.readUInt32LE(0));
+        assert.strictEqual(modes[modes.length - 1], 2, 'X_MODE embed last: ' + modes.join());
+        const pl = t.c.msgs.filter((m) => m.t === PLACE).pop().p;
+        const sent = { x: pl.readInt32LE(0), y: pl.readInt32LE(4), w: pl.readInt32LE(8), h: pl.readInt32LE(12), oy: pl.readFloatLE(24) };
+        assert.deepStrictEqual([sent.x, sent.y, sent.w, sent.h], [0, 0, 1920, 720], 'the renderer gets the whole box');
+        assert(d.place.y === 88 && d.place.h === 632 && d.place.embedTop === 88, 'the layout under the strip: ' + JSON.stringify(d.place));
+        assert(Math.abs(sent.oy - (d.place.oy + 88)) < 0.01, 'the page 88 px lower on the surface: ' + sent.oy + ' vs ' + d.place.oy);
+        assert(d.own(), 'the kit runs the screen');
+        // an HMI popup takes the focus: BMW draws it over the app, which stays shown
+        t.ui.hasFocus = () => false;
+        assert(d.active() && d._shown(), 'shown under a popup');
+        page(d, 50); await sleep(50);
+        assert.strictEqual(t.log.errors.length, 0, JSON.stringify(t.log.errors));
+    } finally { t.end(); }
+    // the same renderer, a screen without "embed": layer as before
+    const u = await setup({ embedBox: [0, 0, 1920, 720] });
+    try {
+        assert(!u.d.embedOn && u.d.place.y === 0 && !u.d.place.embedTop, 'layer: ' + JSON.stringify(u.d.place));
+    } finally { u.end(); }
+    // the stock template's box (under the strip): in-page, nothing to move
+    const v = await setup({ embed: true, embedBox: [104, 88, 1796, 632] });
+    try {
+        assert(v.d.embedOn && v.d.place.y === 88 && v.d.place.h === 632 && !v.d.place.embedTop, 'stock box: ' + JSON.stringify(v.d.place));
+    } finally { v.end(); }
 });
 
 test('the one-time move to the new default theme: a theme picked on a fresh install stays', async () => {
