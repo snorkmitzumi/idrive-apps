@@ -308,8 +308,10 @@ class Ui {
         const c = this.comp(name);
         if (c) c.on('action', (ev) => { log.info('click ' + name); Promise.resolve().then(() => fn(ev || {})).catch((e) => log.error('click ' + name, e)); });
     }
-    open(stateName) { return this._try('open ' + stateName, this.rhmi.openState(stateName)); }
-    close(stateName) { return this._try('close ' + stateName, this.rhmi.closeState(stateName)); }
+    open(stateName) { const s = this._state(stateName); return this._try('open ' + s, this.rhmi.openState(s)); }
+    close(stateName) { const s = this._state(stateName); return this._try('close ' + s, this.rhmi.closeState(s)); }
+    /** The HMI state that stands for screen stateName now: its in-page one (<NAME>_EMBED) while that is in use. */
+    _state(stateName) { const e = this.embed; return e && e.on && stateName === e.screen ? e.state : stateName; }
     isVisible(stateName) { return !!this._visible[stateName]; }
     /** false while an HMI popup covers the (visible) screen */
     hasFocus(stateName) { return this._focus[stateName] !== false; }
@@ -837,12 +839,27 @@ async function runInner(impl) {
     // visibility of our states (pauses rendering when the user leaves); the HMI's settings screen too (the
     // drawn screen gives way to it: display.js)
     const tracked = (SPEC.screens || []).concat(settingsScreen ? [{ name: 'SETTINGS' }] : []);
+    // a canvas screen's in-page state (build.py: "embed": true; iDrive 7 with the renderer's page template): the same
+    // screen to the app (its visibility and focus are the screen's), opened instead of it while ui.embed.on
+    const mainName = (SPEC.screens && SPEC.screens[0] && SPEC.screens[0].name) || 'MAIN';
+    const embedScreen = (SPEC.screens || []).find((s) => s.kind === 'canvas' && s.embed);
+    const embedState = embedScreen && !ui.id8 && ui.rhmi && ui.rhmi.getByName ? ui.rhmi.getByName(embedScreen.name + '_EMBED') : null;
+    if (embedState) {
+        ui.embed = { screen: embedScreen.name, state: embedScreen.name + '_EMBED', on: false };
+        tracked.push({ name: ui.embed.state, as: embedScreen.name });
+    }
+    const raw = {};                      // each tracked state's own visibility; a screen is visible while either of its states is
+    const setVis = (s, v) => {
+        raw[s.name] = v;
+        const as = s.as || s.name;
+        ui._setVisible(as, tracked.some((t) => (t.as || t.name) === as && raw[t.name]));
+    };
     tracked.forEach((s) => {
         const st = ui.comp(s.name);
-        if (st && st.on) st.on('visible', (ev) => ui._setVisible(s.name, !!(ev && ev.visible)));
+        if (st && st.on) st.on('visible', (ev) => setVis(s, !!(ev && ev.visible)));
         // a popup over the screen (options, warnings, calls) takes its focus: the display hides
-        // the GPU overlay meanwhile, so the popup is never covered
-        if (st && st.on) st.on('focus', (ev) => ui._setFocus(s.name, !(ev && ev.focus === false)));
+        // the GPU overlay meanwhile, so the popup is never covered (in-page: BMW draws it over the app)
+        if (st && st.on) st.on('focus', (ev) => ui._setFocus(s.as || s.name, !(ev && ev.focus === false)));
     });
     ui.rhmi.on('applicationStackChanged', (stack) => {
         const shown = stack && Object.keys(stack).length > 0 && ('ROOT_APP' in stack);
@@ -851,16 +868,15 @@ async function runInner(impl) {
         const open = [].concat.apply([], Object.keys(stack || {}).map((k) => stack[k] || []));
         tracked.forEach((s) => {
             const st = ui.comp(s.name);
-            if (st) ui._setVisible(s.name, open.indexOf(st.getId ? st.getId() : -1) >= 0);
+            if (st) setVis(s, open.indexOf(st.getId ? st.getId() : -1) >= 0);
             // back in front (reopened after Home or another app): the HMI does not always say the
             // screen has its focus again, and without it the drawn screen stayed hidden
-            if (st && shown && ui.isVisible(s.name)) ui._setFocus(s.name, true);
+            if (st && shown && ui.isVisible(s.as || s.name)) ui._setFocus(s.as || s.name, true);
         });
     });
 
     // entry points (tiles): map them to the main screen once, up front, like
     // BMW's own apps do; a tap then only opens the mapped state
-    const mainName = (SPEC.screens && SPEC.screens[0] && SPEC.screens[0].name) || 'MAIN';
     let entryUuids = [];
     try {
         const appDesc = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'rhmiData', 'application.json'), 'utf8'));
@@ -869,7 +885,7 @@ async function runInner(impl) {
     const mainState = ui.comp(mainName);
     const mapped = {};
     await Promise.all(entryUuids.map((uuid) => ui.rhmi.mapEntryState(uuid, mainState)
-        .then(() => { mapped[uuid] = true; log.info('mapped entry ' + uuid + ' -> ' + mainName); })
+        .then(() => { mapped[uuid] = mainState; log.info('mapped entry ' + uuid + ' -> ' + mainName); })
         .catch((e) => log.error('map entry state', e))));
     let opening = null;
     // tries: right after a tap started the app the HMI can still refuse the state (INVALID_UUID /
@@ -877,9 +893,10 @@ async function runInner(impl) {
     const openEntry = (uuid, tries) => {
         if (opening) return opening;   // MainApp can send the same tap twice
         let again = false;
-        const map = mapped[uuid] ? Promise.resolve() : ui.rhmi.mapEntryState(uuid, mainState).then(() => { mapped[uuid] = true; });
+        const target = ui.embed && ui.embed.on ? embedState : mainState;
+        const map = mapped[uuid] === target ? Promise.resolve() : ui.rhmi.mapEntryState(uuid, target).then(() => { mapped[uuid] = target; });
         opening = map
-            .then(() => (mainState && mainState.updateResources ? mainState.updateResources().catch(() => {}) : null))
+            .then(() => (target && target.updateResources ? target.updateResources().catch(() => {}) : null))
             .then(() => ui.rhmi.openEntryState(uuid))
             .then(() => ui._setVisible(mainName, true))
             .catch((e) => {
@@ -891,6 +908,20 @@ async function runInner(impl) {
                 if (again) setTimeout(() => openEntry(uuid, tries - 1), 800);
             });
         return opening;
+    };
+    /**
+     * In-page drawing on or off (display.js, as the renderer offers it): the entries open the screen's in-page state
+     * (or the screen itself again) from now on, and a screen shown now moves there. Without an in-page state: nothing.
+     */
+    ui.useEmbed = (on) => {
+        on = !!on;
+        if (!ui.embed || ui.embed.on === on) return Promise.resolve();
+        ui.embed.on = on;
+        const target = on ? embedState : mainState, name = on ? ui.embed.state : ui.embed.screen;
+        log.info('screen ' + ui.embed.screen + (on ? ': in-page, ' : ': over the HMI, ') + name);
+        const remap = Promise.all(entryUuids.map((uuid) => ui.rhmi.mapEntryState(uuid, target)
+            .then(() => { mapped[uuid] = target; }).catch((e) => log.warn('map entry ' + uuid + ': ' + e))));
+        return remap.then(() => (ui.isVisible(ui.embed.screen) ? ui._try('open ' + name, ui.rhmi.openState(name)) : null));
     };
     // a tap on the home-screen widget opens the app
     widget.onTap(() => { if (entryUuids[0]) openEntry(entryUuids[0]); });

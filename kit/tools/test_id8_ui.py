@@ -30,7 +30,10 @@ for path in sorted(glob.glob(os.path.join(build.APPS, '*', 'app.json'))):
     xml7, ui7, s7, ids7 = build.build_ui(json.loads(json.dumps(spec)))
     xml8, ui8, s8, ids8 = build.build_ui(json.loads(json.dumps(spec)), 'en', 'ID8')
     ok(ids8 == ids7, app + ': same state ids')
-    names7 = {c['name'] for cont in ui7['containers'].values() for c in cont['components'].values()}
+    # (an in-page state, <NAME>_EMBED on mgu-render's page template, is iDrive 7's only: iDrive 8 has no template, and
+    # keeps its ids alone)
+    names7 = {c['name'] for cont in ui7['containers'].values() if not cont['name'].endswith('_EMBED') for c in cont['components'].values()}
+    ok(not any(cont['name'].endswith('_EMBED') for cont in ui8['containers'].values()), app + ': no in-page state on iDrive 8')
     names8 = {c['name'] for cont in ui8['containers'].values() for c in cont['components'].values()}
     ok(names8 == names7 | {build.HMI8_MARK}, app + ': same component names (and the iDrive 8 mark): %s' % (names7 ^ names8))
     widgets = set(re.findall(r'widget="([^"]+)"', xml8))

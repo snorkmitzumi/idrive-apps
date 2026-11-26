@@ -34,7 +34,7 @@ const E = { READY: 101, TICK: 102, ERROR: 103, STATS: 104, CCU: 105 };
 const CLAIM = 9, TOUCH = 105, CLOSED = 106;
 // mgu-render/1 (mgu-store native/mgu-render/PROTOCOL.md)
 const X = { MODE: 0x4d520001, GRAB: 0x4d520002, READY: 0x4d520101, STATE: 0x4d520102, CCU: 0x4d520103 };
-const X_MODE_LAYER = 1;
+const X_MODE_LAYER = 1, X_MODE_EMBED = 2;
 
 function msg(type, payload) {
     const len = payload ? payload.length : 0;
@@ -70,6 +70,22 @@ class RenderClient extends EventEmitter {
         this.info = null;            // X_READY: { touch, controller, frontGate }
         this.area = null;            // X_READY: the app area { x, y, w, h } (screen px), null: not told
         this.onScreen = null;        // X_STATE: the renderer shows us (null: not told)
+        this.wantMode = 'layer';     // mgu-render/1: 'layer' (our own layer over the HMI) or 'embed' (in the app's HMI page)
+    }
+
+    /**
+     * mgu-render/1's placement: 'layer' (over the whole HMI, as before) or 'embed' (inside the app's own HMI page on the
+     * renderer's page template: BMW's title strip and popups over the app). Offered as info.embed (X_READY) while the
+     * template is loaded; sent again on every connection. No argument: the mode asked for.
+     */
+    mode(m) {
+        if (m === undefined) return this.wantMode;
+        if (m !== 'layer' && m !== 'embed') throw new Error('mode: layer or embed');
+        if (m === this.wantMode) return m;
+        this.wantMode = m;
+        this.log.info('renderd: ' + m + ' mode');
+        if (this.ready && this.native) { this._write(this._u32msg(X.MODE, [m === 'embed' ? X_MODE_EMBED : X_MODE_LAYER])); if (this.placement) this._sendPlace(); }
+        return m;
     }
 
     /** Socket exists (the renderer is installed and running)? */
@@ -212,9 +228,9 @@ class RenderClient extends EventEmitter {
                 const caps = p.readUInt32LE(8), modes = p.readUInt32LE(4);
                 this.native = true;
                 this.info = { touch: !!(caps & 1), controller: !!(caps & 2), frontGate: !!(caps & 4) };
-                // the modes offered now (PROTOCOL.md X_READY): bit 0 layer (over the HMI, as the kit draws), bit 1 embed (in the
-                // app's own HMI page, under BMW's title bar and popups: only once the renderer's page template is loaded) and
-                // the embed box; logged, not used yet (the volume popup and the car's messages are under a layer app)
+                // the modes offered now (PROTOCOL.md X_READY): bit 0 layer (over the HMI), bit 1 embed (in the app's own HMI
+                // page, under BMW's title bar and popups: only once the renderer's page template is loaded) and the embed box
+                // (display.js uses it for a screen with "embed": true)
                 this.info.embed = !!(modes & 2);
                 if (this.info.embed && p.length >= 28) this.info.embedBox = [p.readInt32LE(12), p.readInt32LE(16), p.readInt32LE(20), p.readInt32LE(24)];
                 // the app area (where the HMI leaves room for apps, in screen px): after the embed box
@@ -225,7 +241,8 @@ class RenderClient extends EventEmitter {
                 this.touch = p.length >= 16 && p.readUInt32LE(12) !== 0;
                 this.log.info('renderd: connected, screen ' + this.screen.w + 'x' + this.screen.h +
                     (this.native ? ', mgu-render/1 ' + JSON.stringify(this.info) : this.opts.native ? ', upstream dialect (no mgu-render/1)' : ''));
-                if (this.native) this._write(this._u32msg(X.MODE, [X_MODE_LAYER]));
+                // (embed only while this connection offers it: a renderer that lost its template would refuse it)
+                if (this.native) this._write(this._u32msg(X.MODE, [this.wantMode === 'embed' && this.info.embed ? X_MODE_EMBED : X_MODE_LAYER]));
                 else if (this.grabbing && this.opts.native) this._write(this._u32msg(M.GRAB, [1]));
                 this.emit('ready', this.screen);
                 // after the app's placement (sent in 'ready'): SHOW again. A SHOW sent before the renderer

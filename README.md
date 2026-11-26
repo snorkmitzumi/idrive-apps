@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.7.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.8.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -162,6 +162,14 @@ Settings > Screen > **Screen layout** picks one of three:
 
 
 <img src="docs/screens/combo_map_pages.png" alt="Map style with the left bar open: the pages" width="49%"> <img src="docs/screens/combo_map_actions.png" alt="Map style with the right bar open: the tab's action and Settings" width="49%">
+
+**BMW's pop-ups over Cockpit (in-page, 2.9.8):** with the MGU Store's renderer (`mgu-render`) and its page template
+loaded, Cockpit draws inside its own BMW page instead of over the whole HMI. BMW's volume bar, car messages, calls and
+the options menu then appear on top of Cockpit, and BMW's own strip (home button, title, status icons) stays at the
+top, as on BMW's map. With the renderer's full-screen template (`embed_layout = full`, [MGU Store
+#382](https://github.com/robertnisipeanu/mgu-store/pull/382)) Cockpit fills the whole screen under that strip; with
+the stock one, the area under BMW's title bar. The tab names sit just below BMW's strip. Without the template (or with
+another renderer) Cockpit draws over the HMI as before, and BMW's pop-ups stay under it.
 
 **Side bars, by touch:** a touch on the page's left or right edge opens that bar (full screen: on the slim handle). It hides again 5 s after the last touch.
 
