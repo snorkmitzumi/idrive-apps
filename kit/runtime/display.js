@@ -191,6 +191,7 @@ class Display {
             if (this.gpu !== gpu) return;
             // in-page drawing (mgu-render's page template) for a screen that has an in-page state, while offered
             this.embedOn = this._embedOK();
+            this.embedTitleShown = null;            // (the in-page state's title written again)
             gpu.mode(this.embedOn ? 'embed' : 'layer');
             if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(this.embedOn)).catch((e) => this.log.warn('in-page: ' + e));
             this._place(); this._syncVisible(); this._grab();
@@ -281,6 +282,19 @@ class Display {
         return top ? Object.assign({}, pl, { y: pl.y - top, h: pl.h + top, oy: pl.oy + top }) : pl;
     }
 
+    /**
+     * In-page: BMW's own title in its strip names what shows - the page (its tab's name), or the open sheet's title
+     * (Settings) - as on BMW's pages. Written only when it changes.
+     */
+    _embedTitle() {
+        if (!this.embedOn || !this.ui.embed || !this.ui.text) return;
+        const ti = this.tabInfo || {}, tab = ti.tabs && ti.sel >= 0 ? ti.tabs[ti.sel] : null;
+        const title = String((this.sheet && this.sheet.title) || tab || this.screen.title || this.spec.title || '');
+        if (!title || title === this.embedTitleShown) return;
+        this.embedTitleShown = title;
+        Promise.resolve(this.ui.text(this.ui.embed.state + '_TITLE', title)).catch((e) => this.log.warn('in-page title: ' + e));
+    }
+
     /** The kit runs the screen: mgu-render/1 with touch, full-screen layout. */
     own() { return !!(this.gpu && this.gpu.ready && !this.blocked && this.gpu.native && this.gpu.touch && this.place && this.place.full); }
     /** own() but for the placement, which depends on it (the bar's height): the renderer and layout allow it. */
@@ -301,6 +315,7 @@ class Display {
         const base = this.tabInfo || { tabs: [], sel: -1, badges: [] };
         // map style: the app's pages in the HMI's top strip too (Cockpit 2.9.2, on a G26: "more slick"), between its home
         // button and its status box - no name, no Settings (the app's side bar has it)
+        if (this._embedMap()) return { tabs: [], sel: -1, badges: [], settings: -1 };
         if (this.mapStyle()) return { tabs: (base.tabs || []).slice(), sel: this.sheet ? -1 : base.sel, badges: base.badges || [], settings: -1 };
         const tabs = (base.tabs || []).slice();
         const settings = this.own() && this.hasSettings() ? tabs.push('Settings') - 1 : -1;
@@ -347,6 +362,7 @@ class Display {
         this.sheet = sheet; this.sheetDown = -1;
         if (!this.sheetTimer) this.sheetTimer = setInterval(() => this._paintSheet(), 33);   // scrolling glides
         this._paintSheet();
+        this._embedTitle();
         return true;
     }
     closeSheet() {
@@ -354,6 +370,7 @@ class Display {
         const sh = this.sheet;
         this.sheet = null; this.sheetTargets = null; this.sheetHead = false;
         if (this.sheetTimer) { clearInterval(this.sheetTimer); this.sheetTimer = null; }
+        this._embedTitle();
         if (this.saved) { this.app = this.saved; this.saved = null; }
         this.lastWords = null;
         this._repaint();
@@ -589,7 +606,7 @@ class Display {
         if (this.own()) {
             // header (tabs), page and the slim bar: the back column and the status corner stay the HMI's
             const px = pl.left === 0 ? -pl.x : hx;     // (map style: the back arrow column's page part is the app's)
-            this.gpu.claim([{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: px, y: this.headH(), w: W - px, h: pl.h - this.headH() }].map(logical));
+            this.gpu.claim([{ x: hx, y: 0, w: he - hx, h: this.headH() }, { x: px, y: this.headH(), w: W - px, h: pl.h - this.headH() }].filter((q) => q.h > 0 && q.w > 0).map(logical));
             return;
         }
         if (!this.onTab || this.tabs.length < 2) { this.gpu.claim([]); return; }
@@ -788,6 +805,7 @@ class Display {
         if (!(r instanceof Recorder)) return softImage(name, r);
         if (r.chrome && r.chrome.tabs) this.tabInfo = r.chrome.tabs;
         else if (r.tabInfo) this.tabInfo = r.tabInfo;
+        this._embedTitle();
         if (!this.sheet) {
             this.pageTargets = r.targets || []; this.pageScroll = r.scroll && typeof r.scroll === 'object' ? r.scroll : !!r.scroll;
             // the knob onto the button ctx.onTilt named, once it is on the page
@@ -950,7 +968,7 @@ class Display {
             if (!this.sheet) this.headMax = Math.max(this.headMax || 0, end);
             sx = Math.min(HMI.status.x - pl.x, Math.ceil(Math.max(end, this.headMax || 0)));
             if (sx > end) { c.fillRect(end, 0, sx - end, FULL.headH - 2, HMI.headBg); c.fillRect(end, FULL.headH - 2, sx - end, 2, G.withAlpha('#ffffff', 0.22)); }
-        } else if (tb.tabs.length > 1) {
+        } else if (tb.tabs.length > 1 && !this._embedMap()) {
             // map style: the tabs alone, on the page's own background (the strip is the page's there), no line under them
             mapEnd = Math.ceil(G.header(c, t, hx, 0, HMI.status.x - pl.x - hx, FULL.headH, '', tb.tabs, tb.sel, tb.badges, true, true));
             c.fillRect(hx, FULL.headH - 2, mapEnd - hx, 2, t.bg);
@@ -992,7 +1010,7 @@ class Display {
         if (this.embedOn) {
             // in-page: BMW's strip is over the box, not in it - the header row is the app's whole width, the back arrow
             // column the page's background (the HMI draws its back arrow over it)
-            if (map) c.fillRect(mapEnd, 0, W - mapEnd, FULL.headH, t.bg);
+            if (map && this.headH()) c.fillRect(mapEnd, 0, W - mapEnd, FULL.headH, t.bg);
             else c.fillRect(sx, 0, W - sx, FULL.headH, HMI.headBg);
             if (hx > 0 && pl.left !== 0) c.fillRect(0, 0, hx, H, t.bg);
         } else if (map) {
@@ -1049,7 +1067,10 @@ class Display {
         if (this.place) this._place();
     }
     /** Header height: 0 for "chrome": false (the app draws the whole screen itself, e.g. a game). */
-    headH() { return this.screen && this.screen.chrome === false ? 0 : FULL.headH; }
+    headH() { return (this.screen && this.screen.chrome === false) || this._embedMap() ? 0 : FULL.headH; }
+    /** In-page map style: no tab row of the kit's at all (BMW's strip is over the page, the page's name in its title,
+     *  as on BMW's map): the pages are the side bar's and the controller's. */
+    _embedMap() { return !!this.embedOn && this.layout() === 'map'; }
 
     /**
      * The HMI's bar buttons in screen pixels, unscrolled: [{ id, label, x, w }]. Where the kit runs

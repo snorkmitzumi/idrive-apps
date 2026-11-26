@@ -333,6 +333,29 @@ test('in-page (embed): a screen with "embed": true asks for it where offered, la
     } finally { v.end(); }
 });
 
+test('in-page map style: no tab row, the page right under BMW\'s strip, BMW\'s title names the page or the sheet', async () => {
+    const t = await setup({ embed: true, embedBox: [0, 0, 1920, 720], settings: { layout: 'map' } }), d = t.d;
+    const titles = [];
+    t.ui.text = (name, text) => { titles.push(name + '=' + text); return Promise.resolve(); };
+    try {
+        assert(d.embedOn && d.mapStyle(), 'in-page map style');
+        assert.strictEqual(d.headH(), 0, 'no tab row');
+        assert.deepStrictEqual(d._tabList().tabs, [], 'no tabs for the controller either: the side bar has the pages');
+        assert(d.place.y === 88 && d.place.oy - 0 <= 88, 'the page from under the strip: ' + JSON.stringify(d.place));
+        const r = d.canvas(1600, 520);
+        r.chrome = { tabs: { tabs: ['Driving', 'Performance'], sel: 1, badges: [] } };
+        d.present('MAIN', r, () => Promise.resolve());
+        assert.deepStrictEqual(titles, ['MAIN_EMBED_TITLE=Performance'], 'the page in BMW\'s title: ' + titles.join());
+        d.present('MAIN', r, () => Promise.resolve());
+        assert.strictEqual(titles.length, 1, 'written once while it stays');
+        d.openSheet({ title: 'Settings', draw: () => [], move() {}, press() {}, back: () => 'close' });
+        assert.strictEqual(titles[titles.length - 1], 'MAIN_EMBED_TITLE=Settings', 'a sheet\'s title while it is open');
+        d.closeSheet();
+        assert.strictEqual(titles[titles.length - 1], 'MAIN_EMBED_TITLE=Performance', 'the page again');
+        assert.strictEqual(t.log.errors.length, 0, JSON.stringify(t.log.errors));
+    } finally { t.end(); }
+});
+
 test('the one-time move to the new default theme: a theme picked on a fresh install stays', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'runtime', 'mgu.js'), 'utf8').replace(/\r\n/g, '\n');
     const cls = src.match(/class Settings[\s\S]*?\n}\n/)[0];      // (as hu-stub.js: the real class without the SDK)
