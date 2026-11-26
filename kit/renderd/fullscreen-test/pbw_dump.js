@@ -16,7 +16,9 @@ const fs = require('fs');
 const path = require('path');
 const { identifiers } = require('./hmi_template.js');
 
-const WIDGETS = '/mnt/dataro/data/hmi/bmw/widget';
+// every folder named "widget" under ROOT: BMW's own are in dataro2/hmi/common/widget (and its siblings), the
+// renderer's in data/hmi/bmw/widget
+const ROOT = '/mnt/dataro';
 const HMI = '/usr/bin/HmiMain3D';
 const MAX_LINES = 4000;
 
@@ -97,13 +99,29 @@ function namesIn(b, acc) {
     return acc;
 }
 
-const files = fs.readdirSync(WIDGETS).filter((f) => /\.pbw$/.test(f)).sort();
-const out = ['# HMI page templates, ' + files.length + ' files in ' + WIDGETS + ', ' + ids.size + ' identifiers in ' + HMI, ''];
+function widgetDirs(dir, depth, acc) {
+    let list = [];
+    try { list = fs.readdirSync(dir); } catch (e) { return acc; }
+    for (const n of list) {
+        const p = path.join(dir, n);
+        let st;
+        try { st = fs.lstatSync(p); } catch (e) { continue; }
+        if (!st.isDirectory()) continue;
+        if (n === 'widget') acc.push(p);
+        else if (depth < 6) widgetDirs(p, depth + 1, acc);
+    }
+    return acc;
+}
+const dirs = widgetDirs(ROOT, 0, []);
+const files = [];
+dirs.forEach((d) => { try { fs.readdirSync(d).filter((f) => /\.pbw$/.test(f)).sort().forEach((f) => files.push(path.join(d, f))); } catch (e) { /* unreadable */ } });
+const out = ['# HMI page templates, ' + files.length + ' files in ' + dirs.join(', ') + '; ' + ids.size + ' identifiers in ' + HMI, ''];
 const want = (f, used) => (opt.parts.length ? opt.parts.some((p) => f.indexOf(p) >= 0)
-    : /A4A_WelcomeApp|Map|Navi|Video|Camera|Cam_|Full/i.test(f) || Array.from(used).some((n) => /EmbeddedSurface|SurfaceId|eWidgetType_\w*(Map|Video|Camera)/i.test(n)));
+    : /A4A_WelcomeApp|Map|Navi|Video|Camera|Cam_|Full|Projected|CarPlay|AndroidAuto|Embedded/i.test(path.basename(f)) || Array.from(used).some((n) => /EmbeddedSurface|SurfaceId|eWidgetType_\w*(Map|Video|Camera)/i.test(n)));
 let n = 0;
 for (const f of files) {
-    const b = fs.readFileSync(path.join(WIDGETS, f));
+    let b;
+    try { b = fs.readFileSync(f); } catch (e) { continue; }
     const used = namesIn(b, new Set());
     if (opt.all) { out.push(f + '  ' + b.length + ' bytes' + (Array.from(used).some((x) => /EmbeddedSurface/.test(x)) ? '  [embedded surface]' : '')); continue; }
     if (!want(f, used)) continue;
