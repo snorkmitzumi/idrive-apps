@@ -691,7 +691,9 @@ class Display {
             const a = eb ? { x: eb[0], y: eb[1] + top, w: eb[2], h: eb[3] - top } : HMI.area ? this._area(HMI) : { x: 0, y: 0, w: scr.w, h: scr.h };
             // map style (2.5.2): the page over the back arrow column too (only the home button above it stays the
             // HMI's), so its left margin is the right one's - BMW's map covers the column the same way
-            const left = v === 'map' ? 0 : Math.max(0, HMI.left - a.x);
+            // (in-page the HMI draws its back arrow over that column, on top of the app: it stays a margin of its own there,
+            // as on BMW's pages and the Store's, so the arrow lies beside the cards, not on them)
+            const left = v === 'map' && !this.embedOn ? 0 : Math.max(0, HMI.left - a.x);
             const w = a.w - left, h = a.h, src = FULL.src;
             const ah = h - this.headH() - this.barH();
             const s = Math.floor(Math.min(w / src.w, ah / src.h) * 1000) / 1000;
