@@ -281,8 +281,8 @@ Cockpit can send its log to a GitHub repository of yours as the car stops (2.9.4
 **Sign in from your phone (2.9.6), no SSH:**
 
 1. Make a **private** repository for the logs (they name your driving times, the odometer and what the car sent).
-2. Install the [log upload GitHub App](#the-github-app) on **that repository only** (*Only select repositories*).
-   It asks for one permission: Contents, read and write.
+2. Install the kit's log upload GitHub App on **that repository only** (*Only select repositories*); it asks for
+   one permission, Contents: read and write. Or [make your own](#the-github-app) and install that.
 3. In the car: Settings > **Log upload** > **Sign in with GitHub**. The screen shows a code and a QR code: scan it (or
    open `github.com/login/device`) on your phone, type the code and allow it. Upload logs switches on by itself.
 
@@ -318,6 +318,11 @@ It is a kit feature, as the QR log is: an app of your own gets it with `"logUplo
 The sign-in goes through a GitHub App that holds no secret and receives nothing: no webhooks, no server, Contents
 only. Its client id is in the kit (`kit/runtime/mgu.js`, `KIT_GITHUB_APP`); an app of your own can name its own with
 `"logUpload": { "clientId": "Iv23..." }`.
+
+To make your own: GitHub > Settings > Developer settings > GitHub Apps > **New GitHub App**, any name and homepage,
+Webhook **Active** off, Repository permissions > **Contents: Read and write** (nothing else). Once created, tick
+**Enable Device Flow** on its General page and save, then **Install App** on your logs repository only. Its Client ID
+(`Iv23...`) goes in your `app.json`.
 
 ## Development
 
