@@ -23,8 +23,9 @@ const EventEmitter = require('events');
 const rec = require('./record');
 
 // the Store's renderer (mgu-render) first, then the community socket (an older renderer, or mgu-render's
-// link): an older renderer still installed beside mgu-render never gets the apps
-const SOCKETS = process.env.MGU_RENDERD_SOCKET ? [process.env.MGU_RENDERD_SOCKET] : ['/run/mgu-renderd/renderd.sock', '/run/mgu-render/render.sock'];
+// link): an older renderer still installed beside mgu-render never gets the apps. (Until 2.9.7 the list had them
+// the other way round: on a G26 with both, Cockpit drew through the older one, which offers no in-page drawing.)
+const SOCKETS = process.env.MGU_RENDERD_SOCKET ? [process.env.MGU_RENDERD_SOCKET] : ['/run/mgu-render/render.sock', '/run/mgu-renderd/renderd.sock'];
 const SOCKET = SOCKETS[0];
 const isSocket = (p) => { try { return fs.statSync(p).isSocket(); } catch (e) { return false; } };
 const M = { HELLO: 1, PLACE: 2, SHOW: 3, ATLAS: 4, RAMP: 5, LAYER: 6, FRAME: 7, DROP_LAYER: 8, IMAGE: 9, GRAB: 10 };
