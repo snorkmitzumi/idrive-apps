@@ -10,6 +10,7 @@
  *     default: every template that holds an embedded surface or a map, video or camera widget, every one named
  *     like a map, navigation, video, camera or full-screen page, and mgu-render's own (LT_State_A4A_WelcomeApp);
  *     --all: every template's name only, as a list;
+ *     --names FILE: also this HmiMain3D's identifier table, "number name" a line (to read the templates elsewhere);
  *     NAME_PART: the templates whose file name contains it, dumped whole.
  */
 const fs = require('fs');
@@ -23,16 +24,23 @@ const HMI = '/usr/bin/HmiMain3D';
 const MAX_LINES = 4000;
 
 const args = process.argv.slice(2);
-const opt = { out: '/tmp/pbw-dump.txt', all: false, parts: [] };
+const opt = { out: '/tmp/pbw-dump.txt', all: false, parts: [], names: null };
 for (let i = 0; i < args.length; i++) {
     if (args[i] === '--out') opt.out = args[++i];
     else if (args[i] === '--all') opt.all = true;
+    else if (args[i] === '--names') opt.names = args[++i];
     else opt.parts.push(args[i]);
 }
 
 const ids = identifiers(fs.readFileSync(HMI));
 const names = new Map();
 ids.forEach((n, name) => names.set(n, name));
+if (opt.names) {
+    const lines = [];
+    names.forEach((name, n) => lines.push(n + ' ' + name));
+    fs.writeFileSync(opt.names, lines.join('\n') + '\n');
+    console.log(names.size + ' identifiers to ' + opt.names);
+}
 const short = (s) => s.replace(/^eGfxId(WidgetType_|Widget_|Parameter_|ParameterValue_|Layout_|ImportDefinition_)?/, '');
 
 /* protobuf, field by field: { f, wt, v (number) | b (Buffer) } */
