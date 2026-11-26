@@ -561,8 +561,8 @@ class Widget {
 // switched on and at a press of its Settings row. ctx.logUpload.send(why) for the app's own moments (Cockpit: the car
 // stopped); null for an app without it.
 // the kit's GitHub App for the log upload's sign-in from a phone (Contents read and write; device flow on; ghauth.js):
-// its client id is public, it is no secret. null: none yet, apps use upload.json (or their own, app.json).
-const KIT_GITHUB_APP = null;
+// its client id is public, it is no secret (an app can name its own in app.json, logUpload.clientId).
+const KIT_GITHUB_APP = 'Iv23liOCFI47ZLv3b5mN';
 function logUpload(settings, log) {
     if (!settings.schema.some((s) => s.key === 'uploadLogs')) return null;
     const { LogUpload } = require('./logupload');          // (only an app with the feature loads it)
