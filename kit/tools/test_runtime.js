@@ -346,6 +346,11 @@ test('in-page map style: no tab row, the page right under BMW\'s strip, BMW\'s t
         r.chrome = { tabs: { tabs: ['Driving', 'Performance'], sel: 1, badges: [] } };
         d.present('MAIN', r, () => Promise.resolve());
         assert.deepStrictEqual(titles, ['MAIN_EMBED_TITLE=Performance'], 'the page in BMW\'s title: ' + titles.join());
+        // nothing of the kit's over the page's top: no header band (2.9.9 drew the black one there, over the side bar)
+        const { Recorder } = require('../runtime/record'), fill = Recorder.prototype.fillRect, bands = [];
+        Recorder.prototype.fillRect = function (x, y, w, h, col) { if (y === 0 && h >= 60 && w > 600) bands.push([x, y, w, h, col]); return fill.apply(this, arguments); };
+        try { d._drawChrome(d.canvas(1600, 520)); } finally { Recorder.prototype.fillRect = fill; }
+        assert.deepStrictEqual(bands, [], 'a band over the page\'s top: ' + JSON.stringify(bands));
         d.present('MAIN', r, () => Promise.resolve());
         assert.strictEqual(titles.length, 1, 'written once while it stays');
         d.openSheet({ title: 'Settings', draw: () => [], move() {}, press() {}, back: () => 'close' });
