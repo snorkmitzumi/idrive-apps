@@ -188,9 +188,15 @@ mgu.run({
         // (each source's latest value, for the status line below)
         const lastOf = {}, seenOf = (k, x) => { lastOf[k] = x; return x; };
         tripWatch('de.bmw.infrastructure.SecureMileage', { mileage: (v) => { raw('SecureMileage')(v); const km = seenOf('SecureMileage', num(v && v.currentMileage)); if (km !== null && km > 0) trips.odometer(km, 'SecureMileage'); } });
-        tripWatch('de.bmw.chassis.VehicleModel', { MileageVehicle: (v) => { raw('MileageVehicle')(v); const km = seenOf('MileageVehicle', num(v && v.mileageVehicle)); if (km !== null && km > 0 && km < 65535) trips.odometer(km, 'MileageVehicle'); } });
+        // the instrument cluster's tank status carries the odometer too (mileageKilometre: 77761 km on a G26 that reads
+        // 77761, 2.9.6). VehicleModel.MileageVehicle, read before, is no odometer: 6925, 7181, 7437 a second apart
         let fuelKombi = false;
-        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => { raw('RangeTankStatus')(v); const l = seenOf('RangeTankStatus', num(v && v.fluidLevelFuelTank)); if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); } } });
+        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => {
+            raw('RangeTankStatus')(v);
+            const l = seenOf('RangeTankStatus', num(v && v.fluidLevelFuelTank)), km = seenOf('Kombi mileage', num(v && v.mileageKilometre));
+            if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); }
+            if (km !== null && km > 0 && km < 16777214) trips.odometer(km, 'Kombi');
+        } });
         tripWatch('de.bmw.infotainment.lsc.LSCDataSink', { mileageRange: (v) => { raw('LSC mileageRange')(v); const l = seenOf('LSC mileageRange', num(v && v.fluidLevelFuelTank)); if (!fuelKombi && l !== null && l < 255) trips.fuel(l); }, fuelSupply: (v) => raw('LSC fuelSupply')(v) });
         // every 10 minutes, what was only logged at the start (the QR log keeps the newest lines): whether the renderer
         // can draw in-page (BMW's popups over the app) and the odometer and fuel values per source
