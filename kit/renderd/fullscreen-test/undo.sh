@@ -20,7 +20,7 @@ elif [ -f "$LC" ]; then
 	mv -f "$LC.tmp" "$LC"
 	echo "embed_layout and embed_area taken out of $LC"
 fi
-rm -f "$R/hmi/stamp"
+rm -f "$R/hmi/stamp" "$R/hmi-layout"
 sh "$CUR/mgu-render-hmi.sh" --build "$CUR" "$R/hmi"
 cat "$R/status.json" 2>/dev/null || :
 echo "Now restart the head unit."

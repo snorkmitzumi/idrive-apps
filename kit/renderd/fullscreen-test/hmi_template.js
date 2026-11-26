@@ -6,11 +6,12 @@
  *   node hmi_template.js [--hmi /usr/bin/HmiMain3D] [--surface-id 0x500] [--layout content|full] --out DIR
  *
  * FULL-SCREEN TEST VARIANT (idrive-apps kit/renderd/fullscreen-test, from robertnisipeanu/mgu-store
- * native/mgu-render/js/hmi_template.js at 37702a8, GPL-3.0): --layout full (or "embed_layout = full" in
- * /var/opt/mgu-render/mgu-render.local.conf) writes the template without the stock title bar and with the
- * embedded surface over the whole 1920 x 720 screen, as BMW's full-screen map: the HMI still paints its home
- * button, status icons and popups over the app. mgu-render's embed_area must then be 0,0,1920,720. Without
- * either: the stock template ("content"), byte for byte as the original.
+ * native/mgu-render/js/hmi_template.js at 37702a8, GPL-3.0). --layout, else the word in
+ * /var/opt/mgu-render/hmi-layout (mgu-render-hmi.sh passes no --layout):
+ *   content  the stock template, byte for byte (embed_area 104,88,1796,632)
+ *   wide     the stock title bar, the surface the screen's full width under it (embed_area 0,88,1920,632)
+ *   full     no title bar, the surface over the whole 1920 x 720 screen, as BMW's full-screen map
+ *            (embed_area 0,0,1920,720). On a G26 (2026-11-26) the HMI showed it black.
  *
  * HmiMain3D builds its pages from widget definitions it reads from the *.pbw
  * files of its widget directories (protobuf; every name is an index into an
@@ -120,11 +121,11 @@ function varint(n) {
     return Buffer.from(out);
 }
 
-// the whole screen (iDrive 7's 1920 x 720) for --layout full
-const FULL = { x: 0, w: 1920, h: 720 };
+// the whole screen (iDrive 7's 1920 x 720) for --layout full; the full width under the title bar for wide
+const FULL = { x: 0, w: 1920, h: 720 }, WIDE = { x: 0, w: 1920, h: 632 };
 
 function template(ids, surfaceId, layoutName) {
-    const full = layoutName === 'full', box = full ? FULL : AREA;
+    const full = layoutName === 'full', box = full ? FULL : layoutName === 'wide' ? WIDE : AREA;
     const v = (f, n) => Buffer.concat([varint(f * 8), varint(n)]);
     const f32 = (f, x) => {
         const b = Buffer.alloc(4);
@@ -207,14 +208,12 @@ if (require.main === module) {
         opt[process.argv[i].replace(/^--/, '')] = process.argv[i + 1];
     }
     const surfaceId = Number(opt['surface-id']);
-    // the layout: --layout, else the unit's local configuration (mgu-render-hmi.sh passes no --layout)
+    // the layout: --layout, else /var/opt/mgu-render/hmi-layout (mgu-render-hmi.sh passes no --layout). Not in
+    // mgu-render.local.conf: mgu-render reads every embed_ key there as its own ("'full' is not a number")
     if (!opt.layout) {
-        try {
-            const m = /^[ \t]*embed_layout[ \t]*=[ \t]*(\w+)/m.exec(fs.readFileSync('/var/opt/mgu-render/mgu-render.local.conf', 'utf8'));
-            if (m) opt.layout = m[1];
-        } catch (e) { /* no local configuration */ }
+        try { opt.layout = fs.readFileSync('/var/opt/mgu-render/hmi-layout', 'utf8').trim(); } catch (e) { /* none */ }
     }
-    opt.layout = opt.layout === 'full' ? 'full' : 'content';
+    opt.layout = ['full', 'wide'].indexOf(opt.layout) >= 0 ? opt.layout : 'content';
     if (!opt.out || !Number.isInteger(surfaceId) || surfaceId < 0) {
         console.error('usage: node hmi_template.js [--hmi FILE] [--surface-id ID] --out DIR');
         process.exit(2);
