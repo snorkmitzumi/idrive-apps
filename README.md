@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 2.9.6.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 2.9.7.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -213,6 +213,8 @@ You need:
   This project does not provide it.
 - **From the Store:** the GPU renderer (`idrive7-renderd`, 2.1.18 or newer) and the controller gate
   (`mgu-inputgate`, 1.1.0 or newer). Both come from the source repo.
+- **Or the MGU Store's own Renderer (`mgu-render`).** With both renderers installed, Cockpit draws through
+  `mgu-render` (2.9.7; before, it took the older one): the one that can draw inside BMW's page, under its pop-ups.
 
 Then add this repository to the MGU Store and install **Cockpit**. When you add the repository, the Store asks what to
 follow:

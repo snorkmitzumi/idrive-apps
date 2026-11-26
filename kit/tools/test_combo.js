@@ -1195,6 +1195,11 @@ checks.push(
             + 'print(json.dumps([s.get("internet"), len(u), u[0]["default"], u[0]["group"]]))', path.join(ROOT, 'kit', 'tools'), path.join(APP, 'app.json')], { encoding: 'utf8' });
         assert.deepStrictEqual(JSON.parse(py.stdout), [true, 1, false, 'Log upload'], py.stderr);
     }],
+    ['2.9.7 the Store\'s renderer (mgu-render) before the community socket: an older renderer beside it never gets the app', async () => {
+        const env = Object.assign({}, process.env); delete env.MGU_RENDERD_SOCKET;
+        const r = require('child_process').spawnSync(process.execPath, ['-e', 'console.log(JSON.stringify(require(process.argv[1]).SOCKETS))', path.join(KIT, 'renderd.js')], { env, encoding: 'utf8' });
+        assert.deepStrictEqual(JSON.parse(r.stdout), ['/run/mgu-render/render.sock', '/run/mgu-renderd/renderd.sock'], r.stderr);
+    }],
     ['2.9.6 phone sign-in: GitHub\'s device flow (waits, slows down), the logs repository found, tokens renewed and refused, the sheet', async () => {
         const { GitHubAuth, signInSheet } = require(path.join(KIT, 'ghauth'));
         const { LogUpload } = require(path.join(KIT, 'logupload'));
