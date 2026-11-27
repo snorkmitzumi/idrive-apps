@@ -931,6 +931,36 @@ checks.push(
         const tx = await textsOf(() => tb.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
         assert(tx.includes('from 20 km') && !tx.some((q) => /^<1 l$|^[0-9]+ l$/.test(q) && q !== '3 l'), tx.join(' | '));
     }],
+    ['3.1.2 local time: the offset from the HMI\'s AutoTime (the head unit\'s clock is UTC), kept across starts; the Trips tab in local time', async () => {
+        const { LocalTime } = appModule('localtime');
+        const { Trips } = appModule('trips');
+        let clock = Date.UTC(2026, 10, 27, 12, 29, 7);
+        const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
+        const dir = tmp('localtime');
+        let lt = new LocalTime({ dataDir: dir, log, now: () => clock });
+        // Poland in winter: the HMI shows 13:29 while UTC is 12:29 (seconds and a late sample: still the nearest 15 min)
+        assert.strictEqual(lt.fromLocal({ date: { day: 27, month: 11, year: 2026 }, time: { hour: 13, minute: 29, second: 41 } }), 3600000);
+        assert(lines.some((m) => /local time: UTC\+1$/.test(m)), lines.join(' | '));
+        assert.strictEqual(lt.at(clock).getUTCHours(), 13, 'a moment read in local time');
+        // nonsense refused, the offset kept
+        assert.strictEqual(lt.fromLocal({ date: { day: 0, month: 13, year: 0 }, time: { hour: 99 } }), null);
+        assert.strictEqual(lt.fromLocal({ date: { day: 29, month: 11, year: 2026 }, time: { hour: 13, minute: 29, second: 0 } }), null, 'two days off: not taken');
+        assert.strictEqual(lt.offsetMs(clock), 3600000);
+        // kept for the next start: local from the first draw, before AutoTime comes again
+        lt = new LocalTime({ dataDir: dir, log, now: () => clock });
+        assert.strictEqual(lt.offsetMs(clock), 3600000, 'kept across starts');
+        // India: +5:30
+        assert.strictEqual(new LocalTime({ log, now: () => clock }).fromLocal({ date: { day: 27, month: 11, year: 2026 }, time: { hour: 17, minute: 59, second: 0 } }), 5.5 * 3600000);
+        // the Trips tab: a trip started 12:29 UTC shows 13:29, and one at 23:30 UTC on 30 Nov counts in December
+        const run = (tb, s, kmh, cond) => { for (let i = 0; i < s; i++) { clock += 1000; tb.tick({ speed: kmh, condition: cond }); } };
+        const tb = new Trips({ dataDir: tmp('trips-local'), log, now: () => clock, localTime: lt });
+        run(tb, 1, 0, 10); run(tb, 600, 60, 10); run(tb, 70, 0, 5);
+        const tx = await textsOf(() => tb.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
+        assert(tx.some((q) => /^27 Nov {2}13:29/.test(q)) && !tx.some((q) => /12:29/.test(q)), tx.join(' | '));
+        clock = Date.UTC(2026, 10, 30, 23, 30, 0);
+        run(tb, 1, 0, 10); run(tb, 600, 60, 10); run(tb, 70, 0, 5);
+        assert.deepStrictEqual(tb.months().map((m) => m.key + ':' + m.trips), ['2026-12:1', '2026-11:1'], JSON.stringify(tb.months()));
+    }],
     ['2.9.0 since refuelling: a refuel (also a litre at a time at the pump, or while the app was off) starts a count: distance, fuel, consumption', async () => {
         const { Trips } = appModule('trips');
         let clock = Date.UTC(2026, 10, 25, 8, 0, 0);

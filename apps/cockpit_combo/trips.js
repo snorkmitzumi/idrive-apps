@@ -24,7 +24,7 @@
  * SAVE_MS while one runs, and as the app exits; a trip running when the app stopped is resumed if the car is driven
  * again within RESUME_MS of its last save, else ended there.
  *
- *   const tb = new Trips({ dataDir, log, now, settings })
+ *   const tb = new Trips({ dataDir, log, now, settings, localTime })   localTime: localtime.js, for the times shown and the months
  *   tb.tick({ speed, condition })     once a second: the speed (km/h) and the car's state (Car.conditionOf) now
  *   tb.odometer(km)  tb.fuel(litres)  the car's values as they come (null: not given)
  *   tb.current  tb.trips  tb.months()  tb.sinceRefuel()  tb.endNow()  tb.save()  tb.draw(cv, t)
@@ -46,6 +46,8 @@ class Trips {
         this.log = o.log || { info() {}, warn() {} };
         this.now = o.now || Date.now;
         this.settings = o.settings || { get: () => null };
+        // the local time of a moment (a Date read with getUTC*): the car's (localtime.js), else the head unit's own zone
+        this.at = o.localTime ? (ms) => o.localTime.at(ms) : (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000);
         this.file = o.dataDir ? path.join(o.dataDir, 'trips.json') : null;
         this.trips = []; this.current = null;
         this.odo = null; this.litres = null; this.sawState = false; this.monthFuel = {};
@@ -121,7 +123,7 @@ class Trips {
             this.save();
         } else if (l < this.floor) {
             // the month's fuel: only a new lowest level counts, so the level going down and up again (slosh, a slope) adds nothing
-            const k = monthKey(this.now());
+            const k = monthKey(this.at(this.now()));
             this.monthFuel[k] = (this.monthFuel[k] || 0) + (this.floor - l);
             this.floor = l; this.filling = false;
         }
@@ -223,7 +225,7 @@ class Trips {
     months() {
         const m = {};
         this.trips.concat(this.current ? [this.closed(this.current)] : []).forEach((x) => {
-            const k = monthKey(x.start);
+            const k = monthKey(this.at(x.start));
             const a = m[k] || (m[k] = { key: k, trips: 0, km: 0, hours: 0, fuel: 0 });
             a.trips++; a.km += x.km; a.hours += (x.end - x.start) / 3600000; if (isNum(x.fuel)) a.fuel += x.fuel;
         });
@@ -243,7 +245,7 @@ class Trips {
             cv.text('A trip begins when the car is ready to drive.', 334, 270, 18, t.dim, { align: 'center' });
         } else {
             const mins = Math.max(0, (s.end - s.start) / 60000), avg = mins > 0 ? s.km / (mins / 60) : null;
-            cv.text(when(s.start) + (s.live ? '' : '  -  ' + clock(s.end)), 624, 82, 20, t.dim, { align: 'right', font: 'bold' });      // (the title's row)
+            cv.text(when(this.at(s.start)) + (s.live ? '' : '  -  ' + clock(this.at(s.end))), 624, 82, 20, t.dim, { align: 'right', font: 'bold' });      // (the title's row)
             big(cv, t, 44, 190, G.fmt(D(s.km), 1), dU, 96);
             cv.text(s.kmFrom === 'odometer' ? 'from the odometer' : 'from the speed', 44, 222, 16, t.dim);
             const rows = [['Time', dur(mins)], ['Average speed', isNum(avg) ? G.fmt(D(avg), 0) + ' ' + vU : '--'], ['Top speed', s.top ? G.fmt(D(s.top), 0) + ' ' + vU : '--'],
@@ -263,7 +265,7 @@ class Trips {
         if (!list.length) cv.text('Ended trips show here', 676, 130, 20, t.dim);
         list.forEach((x, i) => {
             const y = 130 + i * 38, mins = (x.end - x.start) / 60000;
-            cv.text(when(x.start), 676, y, 20, t.text);
+            cv.text(when(this.at(x.start)), 676, y, 20, t.text);
             cv.text(G.fmt(D(x.km), 1) + ' ' + dU, 1040, y, 22, t.text, { align: 'right', font: 'bold' });
             cv.text(dur(mins), 1200, y, 20, t.dim, { align: 'right' });
             cv.text(isNum(x.per100) ? (mi ? G.fmt(235.215 / x.per100, 1) + ' mpg' : G.fmt(x.per100, 1) + ' l/100') : '', 1380, y, 20, t.dim, { align: 'right' });
@@ -272,14 +274,14 @@ class Trips {
         // right bottom: this month, and since refuelling (side by side)
         const my = 44 + listH + 12, mh = 468 + ex - listH - 12, mo = this.months()[0], pw = 454;
         G.panel(cv, t, 656, my, pw, mh, 'This month');
-        const key = monthKey(this.now());
+        const key = monthKey(this.at(this.now()));
         const a = mo && mo.key === key ? mo : { trips: 0, km: 0, hours: 0, fuel: 0 };
         cells(cv, t, 676, my, [['Trips', String(a.trips)], ['Distance', G.fmt(D(a.km), 0) + ' ' + dU], ['Fuel', a.fuel ? G.fmt(a.fuel, 0) + ' l' : '--']], !!a.trips);
         const rx = 656 + pw + 12, r = this.sinceRefuel();
         G.panel(cv, t, rx, my, 1576 - rx, mh, 'Since refuelling');
         if (!r) cv.text('Counts from the next refuel', rx + 20, my + 100, 20, t.dim);
         else {
-            cv.text(when(r.at), 1556, my + 34, 18, t.dim, { align: 'right', font: 'bold' });
+            cv.text(when(this.at(r.at)), 1556, my + 34, 18, t.dim, { align: 'right', font: 'bold' });
             cells(cv, t, rx + 20, my, [['Distance', G.fmt(D(r.km), 0) + ' ' + dU], ['Fuel', isNum(r.fuel) ? litres(r.fuel) : '--'],
                 ['Consumption', isNum(r.per100) ? (mi ? G.fmt(235.215 / r.per100, 1) + ' mpg' : G.fmt(r.per100, 1) + ' l/100') : 'from ' + MIN_FUEL_KM + ' ' + dU]], true);
         }
@@ -317,9 +319,10 @@ function plausible(x) {
     const h = Math.max(0, x.end - x.start) / 3600000;
     return x.km <= Math.min(PLAUSIBLE_KMH, Math.max(isNum(x.top) ? x.top : 0, 30)) * h + 2;
 }
-function monthKey(ms) { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
-function clock(ms) { const d = new Date(ms); return two(d.getHours()) + ':' + two(d.getMinutes()); }
-function when(ms) { const d = new Date(ms); return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + '  ' + clock(ms); }
+// (d: a Date whose getUTC* parts are the local time: Trips#at())
+function monthKey(d) { return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); }
+function clock(d) { return two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()); }
+function when(d) { return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + '  ' + clock(d); }
 // (the tank's level comes in whole litres: under one is "<1 l", not 0)
 function litres(l) { return l < 1 ? '<1 l' : G.fmt(l, 0) + ' l'; }
 function dur(mins) { const m = Math.round(mins); return m >= 60 ? Math.floor(m / 60) + ' h ' + two(m % 60) + ' min' : m + ' min'; }
