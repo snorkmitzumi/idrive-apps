@@ -310,7 +310,7 @@ class Ui {
     }
     open(stateName) { const s = this._state(stateName); return this._try('open ' + s, this.rhmi.openState(s)); }
     close(stateName) { const s = this._state(stateName); return this._try('close ' + s, this.rhmi.closeState(s)); }
-    /** The HMI state that stands for screen stateName now: its in-page one (<NAME>_EMBED) while that is in use. */
+    /** The HMI state that stands for screen stateName now: its in-page one (<NAME>_EMBED or _FULL) while that is in use. */
     _state(stateName) { const e = this.embed; return e && e.on && stateName === e.screen ? e.state : stateName; }
     isVisible(stateName) { return !!this._visible[stateName]; }
     /** false while an HMI popup covers the (visible) screen */
@@ -839,14 +839,16 @@ async function runInner(impl) {
     // visibility of our states (pauses rendering when the user leaves); the HMI's settings screen too (the
     // drawn screen gives way to it: display.js)
     const tracked = (SPEC.screens || []).concat(settingsScreen ? [{ name: 'SETTINGS' }] : []);
-    // a canvas screen's in-page state (build.py: "embed": true; iDrive 7 with the renderer's page template): the same
-    // screen to the app (its visibility and focus are the screen's), opened instead of it while ui.embed.on
+    // a canvas screen's in-page states (build.py: "embed": true, <NAME>_EMBED on the renderer's page template; "full"
+    // also <NAME>_FULL on its whole-screen one; iDrive 7): the same screen to the app (its visibility and focus are the
+    // screen's), one of them opened instead of it while ui.embed.on (ui.embed.state: which)
     const mainName = (SPEC.screens && SPEC.screens[0] && SPEC.screens[0].name) || 'MAIN';
     const embedScreen = (SPEC.screens || []).find((s) => s.kind === 'canvas' && s.embed);
-    const embedState = embedScreen && !ui.id8 && ui.rhmi && ui.rhmi.getByName ? ui.rhmi.getByName(embedScreen.name + '_EMBED') : null;
-    if (embedState) {
-        ui.embed = { screen: embedScreen.name, state: embedScreen.name + '_EMBED', on: false };
-        tracked.push({ name: ui.embed.state, as: embedScreen.name });
+    const inPage = (suffix) => (embedScreen && !ui.id8 && ui.rhmi && ui.rhmi.getByName && ui.rhmi.getByName(embedScreen.name + suffix) ? embedScreen.name + suffix : null);
+    const pageName = inPage('_EMBED'), fullName = embedScreen && embedScreen.embed === 'full' ? inPage('_FULL') : null;
+    if (pageName || fullName) {
+        ui.embed = { screen: embedScreen.name, state: pageName || fullName, page: pageName, full: fullName, on: false };
+        [pageName, fullName].filter(Boolean).forEach((n) => tracked.push({ name: n, as: embedScreen.name }));
     }
     const raw = {};                      // each tracked state's own visibility; a screen is visible while either of its states is
     const setVis = (s, v) => {
@@ -893,7 +895,7 @@ async function runInner(impl) {
     const openEntry = (uuid, tries) => {
         if (opening) return opening;   // MainApp can send the same tap twice
         let again = false;
-        const target = ui.embed && ui.embed.on ? embedState : mainState;
+        const target = ui.embed && ui.embed.on ? ui.comp(ui.embed.state) : mainState;
         const map = mapped[uuid] === target ? Promise.resolve() : ui.rhmi.mapEntryState(uuid, target).then(() => { mapped[uuid] = target; });
         opening = map
             .then(() => (target && target.updateResources ? target.updateResources().catch(() => {}) : null))
@@ -910,14 +912,18 @@ async function runInner(impl) {
         return opening;
     };
     /**
-     * In-page drawing on or off (display.js, as the renderer offers it): the entries open the screen's in-page state
-     * (or the screen itself again) from now on, and a screen shown now moves there. Without an in-page state: nothing.
+     * In-page drawing on or off (display.js, as the renderer offers it), full: on the whole-screen state (<NAME>_FULL)
+     * where the screen has one: the entries open that in-page state (or the screen itself again) from now on, and a
+     * screen shown now moves there. Without an in-page state: nothing.
      */
-    ui.useEmbed = (on) => {
+    ui.useEmbed = (on, full) => {
         on = !!on;
-        if (!ui.embed || ui.embed.on === on) return Promise.resolve();
+        if (!ui.embed) return Promise.resolve();
+        const state = on ? (full && ui.embed.full) || ui.embed.page || ui.embed.full : ui.embed.state;
+        if (ui.embed.on === on && (!on || ui.embed.state === state)) return Promise.resolve();
         ui.embed.on = on;
-        const target = on ? embedState : mainState, name = on ? ui.embed.state : ui.embed.screen;
+        ui.embed.state = state;
+        const target = ui.comp(on ? state : ui.embed.screen), name = on ? state : ui.embed.screen;
         log.info('screen ' + ui.embed.screen + (on ? ': in-page, ' : ': over the HMI, ') + name);
         const remap = Promise.all(entryUuids.map((uuid) => ui.rhmi.mapEntryState(uuid, target)
             .then(() => { mapped[uuid] = target; }).catch((e) => log.warn('map entry ' + uuid + ': ' + e))));

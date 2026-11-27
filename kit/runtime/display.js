@@ -90,7 +90,7 @@ const FULL = {
     src: { x: 12, y: 38, w: 1576, h: 482 },
 };
 const LAYOUTS = ['full', 'standard', 'map'];
-// in-page over the whole screen (mgu-render embed_layout = full): BMW's title strip, home button to status icons with its
+// in-page over the whole screen ("embed": "full", the renderer's whole-screen template): BMW's title strip, home button to status icons with its
 // line under them, is this high over the box's top (measured on a G26's calibration picture); the app's layout starts there
 const EMBED_STRIP = 88;
 // in-page: a dropped connection to the renderer gets this long to come back before the screen leaves its in-page state
@@ -193,10 +193,12 @@ class Display {
             if (this.gpu !== gpu) return;
             clearTimeout(this.embedGrace); this.embedGrace = null;
             // in-page drawing (mgu-render's page template) for a screen that has an in-page state, while offered
-            this.embedOn = this._embedOK();
+            // ("embed": "full": the whole-screen template where offered, else the page box's)
+            this.embedFull = this._embedOK(true);
+            this.embedOn = this.embedFull || this._embedOK(false);
             this.embedTitleShown = null;            // (the in-page state's title written again)
-            gpu.mode(this.embedOn ? 'embed' : 'layer');
-            if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(this.embedOn)).catch((e) => this.log.warn('in-page: ' + e));
+            gpu.mode(this.embedFull ? 'full' : this.embedOn ? 'embed' : 'layer');
+            if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(this.embedOn, this.embedFull)).catch((e) => this.log.warn('in-page: ' + e));
             this._place(); this._syncVisible(); this._grab();
         });
         gpu.on('tick', () => { if (this.gpu === gpu) { this.tickT = Date.now(); this.tickHandlers.forEach((fn) => fn()); } });
@@ -213,7 +215,7 @@ class Display {
                     this.embedGrace = null;
                     if (this.gpu !== gpu || gpu.ready || !this.embedOn) return;
                     this.log.warn('display: the renderer is still away: the screen over the HMI again');
-                    this.embedOn = false;
+                    this.embedOn = this.embedFull = false;
                     if (this.ui.useEmbed) Promise.resolve(this.ui.useEmbed(false)).catch(() => {});
                     this._lost();
                 }, EMBED_GRACE_MS);
@@ -280,17 +282,26 @@ class Display {
     }
 
     /**
-     * In-page drawing usable now: the screen has an in-page state (app.json "embed": true, build.py), the renderer offers
-     * embed (its page template is loaded) and its box is a screen's width. MGU_NO_EMBED=1: never (layer, as before).
+     * In-page drawing usable now, on the whole screen (full) or in the page box: the screen has that in-page state
+     * (app.json "embed": true, the page box's; "full", both: build.py), the renderer offers its template (loaded) and
+     * its box is a screen's width. MGU_NO_EMBED=1: never (layer, as before).
      */
-    _embedOK() {
-        const g = this.gpu, b = g && g.native && g.info && g.info.embed && g.info.embedBox;
-        return !!(b && this.ui.embed && this.screen && this.screen.embed && process.env.MGU_NO_EMBED !== '1' && b[2] >= 1000 && b[3] >= 400);
+    _embedOK(full) {
+        const e = this.ui.embed, b = this._embedBox(full);
+        return !!(b && e && (full ? e.full : e.page) && this.screen && this.screen.embed && (!full || this.screen.embed === 'full') &&
+            process.env.MGU_NO_EMBED !== '1' && b[2] >= 1000 && b[3] >= 400);
     }
-    /** In-page with the whole screen (the full template, mgu-render embed_layout = full): BMW's title strip lies over the
-     *  box's top, so the app's layout starts under it (px). 0: the box starts under the strip already. */
+    /** The in-page box: the renderer's whole-screen template's (info.fullBox) or its page box's (info.embedBox); no
+     *  argument: the one in use. null: not offered now (that template isn't loaded). */
+    _embedBox(full) {
+        const g = this.gpu, i = g && g.native && g.info;
+        if (!i) return null;
+        return (full === undefined ? this.embedFull : full) ? (i.full && i.fullBox) || null : (i.embed && i.embedBox) || null;
+    }
+    /** In-page with the whole screen (the renderer's whole-screen template): BMW's title strip lies over the box's top,
+     *  so the app's layout starts under it (px). 0: the box starts under the strip already. */
     _embedTop() {
-        const b = this.embedOn && this.gpu.info.embedBox;
+        const b = this.embedOn && this._embedBox();
         return b && b[1] < HMI.img.y && b[1] + b[3] > HMI.img.y + 200 ? EMBED_STRIP - b[1] : 0;
     }
     /** The placement the renderer gets: the app's (laid out under BMW's strip in-page) moved down by that strip. */
@@ -699,7 +710,7 @@ class Display {
         let pl;
         // iDrive 8 has only the full layout (no HMI page box of iDrive 7's size to sit in)
         // in-page: the renderer's box, the full layout (or map style) in it; the template has no bar of the HMI's
-        const top = this.embedOn ? this._embedTop() : 0, eb = this.embedOn ? this.gpu.info.embedBox : null;
+        const top = this.embedOn ? this._embedTop() : 0, eb = this.embedOn ? this._embedBox() : null;
         if (!this.embedOn && ((v === 'standard' && HMI === HMI7) || scr.w !== HMI.screen.w || scr.h !== HMI.screen.h)) {
             pl = { x: HMI7.img.x, y: HMI7.img.y, w: HMI7.img.w, h: HMI7.img.h, scale: 1, ox: 0, oy: 0, full: false };
         } else {
