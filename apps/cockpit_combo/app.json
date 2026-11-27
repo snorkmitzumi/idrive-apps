@@ -11,9 +11,9 @@
     "ID7"
   ],
   "requires": {
-    "idrive7-renderd": "2.1.18",
     "mgu-inputgate": "1.1.0"
   },
+  "mguNeeds": ["renderer"],
   "autostart": true,
   "include": {
     "ambient_config": [

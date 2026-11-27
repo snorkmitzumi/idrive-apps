@@ -227,10 +227,11 @@ You need:
 
 - **A BMW with the MGU head unit (iDrive 7)**, with the MGU Store on it. Root access is needed to install the Store.
   This project does not provide it.
-- **From the Store:** the GPU renderer (`idrive7-renderd`, 2.1.18 or newer) and the controller gate
-  (`mgu-inputgate`, 1.1.0 or newer). Both come from the source repo.
-- **Or the MGU Store's own Renderer (`mgu-render`).** With both renderers installed, Cockpit draws through
-  `mgu-render` (2.9.7; before, it took the older one): the one that can draw inside BMW's page, under its pop-ups.
+- **From the Store:** its Renderer (`mgu-render`) and the controller gate (`mgu-inputgate`, 1.1.0 or newer).
+  Cockpit asks the Store for a renderer (3.1.0), not for a particular one, so the older GPU renderer (`idrive7-renderd`)
+  can be removed. That renderer doesn't tell the Store it is one, so on a car with only `idrive7-renderd` the Store
+  won't install Cockpit 3.1.0: install `mgu-render` first. With both installed, Cockpit draws through `mgu-render`,
+  the one that can draw inside BMW's page, under its pop-ups.
 
 Then add this repository to the MGU Store and install **Cockpit**. When you add the repository, the Store asks what to
 follow:
