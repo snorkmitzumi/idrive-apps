@@ -932,7 +932,7 @@ checks.push(
         assert(tx.includes('from 20 km') && !tx.some((q) => /^<1 l$|^[0-9]+ l$/.test(q) && q !== '3 l'), tx.join(' | '));
     }],
     ['3.1.2 local time: the offset from the HMI\'s AutoTime (the head unit\'s clock is UTC), kept across starts; the Trips tab in local time', async () => {
-        const { LocalTime } = appModule('localtime');
+        const { LocalTime } = require(path.join(KIT, 'localtime.js'));
         const { Trips } = appModule('trips');
         let clock = Date.UTC(2026, 10, 27, 12, 29, 7);
         const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
@@ -1260,6 +1260,16 @@ checks.push(
         fs.readFileSync = function (f) { reads.push(String(f)); return readFileSync.apply(fs, arguments); };
         try { for (let k = 0; k < 50; k++) up3.status(); } finally { fs.readFileSync = readFileSync; }
         assert(reads.filter((f) => /upload\.json$/.test(f)).length <= 1, 'read ' + reads.length + ' times for 50 frames');
+        assert(reads.filter((f) => /localtime\.json$/.test(f)).length <= 1, 'the kept time zone not read each frame either');
+        // the last sent time in the car's local time (localtime.json kept by the app: UTC+1)
+        {
+            const ld = tmp('upload-local');
+            fs.writeFileSync(path.join(ld, 'localtime.json'), JSON.stringify({ offsetMs: 3600000 }));
+            fs.writeFileSync(path.join(ld, 'upload-state.json'), JSON.stringify({ sent: '2026-11-27T23:30:00.000Z', sentAt: Date.UTC(2026, 10, 27, 23, 30) }));
+            const ul = new LogUpload({ file, dataDir: ld, app: 'x', version: '1', log, enabled: () => true });
+            ul.config = () => ({ repo: 'x/y', token: 't' });
+            assert(/last sent 2026-11-28 00:30/.test(ul.status()), ul.status());
+        }
         // a kit feature: app.json "logUpload" -> build.py adds the setting (off) and the Store's internet (mgu-uplink)
         assert.strictEqual(SPEC.logUpload, true);
         const py = require('child_process').spawnSync('python3', ['-c', 'import json,sys; sys.path.insert(0, sys.argv[1]); import build; '
