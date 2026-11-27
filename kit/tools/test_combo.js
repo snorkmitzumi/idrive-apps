@@ -629,14 +629,25 @@ function aa56(o) {
     return [0x62, 0xAA, 0x56].concat(data);
 }
 
+// A check that waits on something that never comes (a timer never set, an app that failed to start) leaves nothing to
+// run: Node then ends the process with code 0 and no summary, and CI took that for a pass (#27: Cockpit's main.js
+// required a module that was gone, every check after the first failures waited, and the job passed).
+let running = 'before the first check';
+process.on('beforeExit', () => {
+    if (running === null) return;
+    console.log('FAIL the checks stopped in "' + running + '": it waits on something that never comes');
+    process.exit(1);
+});
 (async () => {
     let failed = 0;
     const realTimers = { set: global.setTimeout, clear: global.clearTimeout };
     for (const [name, fn] of checks) {
+        running = name;
         try { await fn(); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); }
         global.setTimeout = realTimers.set; global.clearTimeout = realTimers.clear;      // a check that failed half-way
         booted.forEach((v) => { v.shown = false; });
     }
+    running = null;
     if (failed) { console.log(failed + ' of ' + checks.length + ' Combo checks failed'); process.exit(1); }
     console.log('Combo checks passed (' + checks.length + ').');
     process.exit(0);

@@ -109,11 +109,20 @@ const checks = [
     }],
 ];
 
+// a check waiting on something that never comes: Node would end with code 0 and no summary (see test_combo.js)
+let running = 'before the first check';
+process.on('beforeExit', () => {
+    if (running === null) return;
+    console.log('FAIL the checks stopped in "' + running + '": it waits on something that never comes');
+    process.exit(1);
+});
 (async () => {
     let failed = 0;
     for (const [name, fn] of checks) {
+        running = name;
         try { await fn(); console.log('ok   ' + name); } catch (e) { failed++; console.log('FAIL ' + name + ': ' + (e && e.stack || e)); }
     }
+    running = null;
     console.log('ambient page: ' + checks.length + ' checks, ' + failed + ' failed');
     process.exit(failed ? 1 : 0);
 })();
