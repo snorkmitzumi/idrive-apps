@@ -56,3 +56,6 @@ kit/tools/.font-cache/
 /kit/renderd/core
 /apps/zf8hp/data/
 egs-snapshot*.json
+
+# Local graphify knowledge graph
+graphify-out/
