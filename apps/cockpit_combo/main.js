@@ -40,7 +40,7 @@ const { drawBar } = require('./rail');
 const { probe } = require('./seatprobe');
 const { MView } = require('./mview');
 const { Trips } = require('./trips');
-const { LocalTime } = require('./localtime');
+const { LocalTime } = require('./kit/localtime');
 const ambientPage = require('./ambient_page');
 
 const W = 1600, H = 520;

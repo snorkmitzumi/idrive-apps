@@ -24,6 +24,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { LocalTime } = require('./localtime');
 // (https and dns are loaded at the first upload: an app that never sends pays nothing for them)
 
 const LEASES = ['/run/mgu-uplink/lease.json'];
@@ -197,8 +198,12 @@ class LogUpload {
         if (!this.enabled()) return 'Off';
         const me = !this.config() && this.auth && this.auth.signedIn();
         if (!this.config() && !me) return this.auth ? 'Not signed in: press to sign in with GitHub on your phone' : 'Needs upload.json in the app\'s data folder';
-        const t = (ms) => { const d = new Date(ms); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); };
-        const last = this.sentAt ? 'last sent ' + new Date(this.sentAt).toISOString().slice(0, 10) + ' ' + t(this.sentAt) : 'nothing sent yet';
+        // in the car's local time where the app keeps it (localtime.js: the head unit's own clock is UTC), date and time
+        // alike; its file read at most every 30 s (the Settings row asks for this each frame)
+        if (!this._lt || Date.now() - this._ltAt > 30000) { this._lt = new LocalTime({ dataDir: this.dataDir }); this._ltAt = Date.now(); }
+        const lt = this._lt;
+        const t = (ms) => { const d = lt.at(ms); return d.toISOString().slice(0, 10) + ' ' + d.toISOString().slice(11, 16); };
+        const last = this.sentAt ? 'last sent ' + t(this.sentAt) : 'nothing sent yet';
         if (this.last && this.last.what === 'offline') return 'No internet (mgu-uplink): ' + last;
         if (this.last && this.last.what === 'failed') return 'Last try failed (see the log): ' + last;
         return (me ? 'On, to ' + me.repo + ': ' : 'On: ') + last + (me ? '' : '. Press to send now');

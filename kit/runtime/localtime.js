@@ -1,7 +1,7 @@
 'use strict';
 /**
- * localtime.js - the car's local time for what Cockpit shows (3.1.2). The head unit's own clock runs on UTC, so a
- * Date's local hours there are UTC: the Trips tab showed a 13:29 start as 12:29 in Poland.
+ * localtime.js - the car's local time for what an app shows (Cockpit 3.1.2). The head unit's own clock runs on UTC, so
+ * a Date's local hours there are UTC: Cockpit's Trips tab showed a 13:29 start as 12:29 in Poland.
  *
  * The offset from UTC comes from the head unit's AutoTime.current (the local date and time as the HMI shows them):
  * that time less the UTC time now, to the nearest 15 minutes, at most 14 h either way. It is kept in localtime.json in
@@ -12,6 +12,9 @@
  *   lt.fromLocal({ date: { day, month, year }, time: { hour, minute, second } })   AutoTime.current as it comes
  *   lt.offsetMs(ms)      the offset now (ms)
  *   lt.at(ms)            a Date whose getUTC* parts are the local time of ms
+ *
+ * The app that watches AutoTime makes one and feeds it; others in the same app (logupload.js) read the kept offset with
+ * new LocalTime({ dataDir }) as they need it.
  */
 const fs = require('fs');
 const path = require('path');
