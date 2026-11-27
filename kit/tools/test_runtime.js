@@ -60,11 +60,13 @@ const touch = (phase, x, y) => { const b = Buffer.alloc(12); b.writeUInt32LE(pha
 /** A Display on the stand-in renderer, the kit running the screen (full-screen layout, touch), shown. */
 async function setup(o) {
     let conn = null;
-    // o.embedBox: the renderer offers in-page drawing (mgu-render's page template) with that box
+    // o.embedBox: the renderer offers in-page drawing (mgu-render's page template) with that box; o.fullBox: its
+    // whole-screen template too (caps bit 9, the box in words 13-16)
     onConn = (c) => {
         conn = c;
         if (!(o && o.embedBox)) { ready(c); return; }
-        c.send(X_READY, Buffer.concat([u32(1, 3, 7), Buffer.from(new Int32Array(o.embedBox.concat([108, 82, 1790, 638])).buffer)]));
+        const words = o.embedBox.concat([108, 82, 1790, 638], o.fullBox ? [0, 0].concat(o.fullBox) : []);
+        c.send(X_READY, Buffer.concat([u32(1, 3, o.fullBox ? 7 | 512 : 7), Buffer.from(new Int32Array(words).buffer)]));
         c.send(READY, u32(4, 1920, 720, 1));
     };
     const log = { errors: [], info() {}, warn() {}, debug() {}, error: (...a) => log.errors.push(a) };
@@ -73,8 +75,16 @@ async function setup(o) {
         rhmi: null, close() {}, visible() {}, onVisible: (fn) => visH.push(fn), isVisible: (n) => vis.has(n),
         setVisible: (v) => { if (v) vis.add('MAIN'); else vis.delete('MAIN'); visH.forEach((fn) => fn('MAIN', v)); },
     };
-    const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', embed: !!(o && o.embed), buttons: [['BTN_SETTINGS', 'Settings']] }] };
-    if (o && o.embed) { ui.embed = { screen: 'MAIN', state: 'MAIN_EMBED', on: false }; ui.embedCalls = []; ui.useEmbed = (on) => { if (ui.embed.on !== on) ui.embedCalls.push(on); ui.embed.on = on; }; }
+    const spec = { id: 'test', title: 'Test', screens: [{ name: 'MAIN', kind: 'canvas', embed: (o && o.embed) || false, buttons: [['BTN_SETTINGS', 'Settings']] }] };
+    if (o && o.embed) {
+        ui.embed = { screen: 'MAIN', state: 'MAIN_EMBED', page: 'MAIN_EMBED', full: o.embed === 'full' ? 'MAIN_FULL' : null, on: false };
+        ui.embedCalls = []; ui.embedStates = [];
+        ui.useEmbed = (on, full) => {
+            if (ui.embed.on !== on) ui.embedCalls.push(on);
+            ui.embed.on = on;
+            if (on) { ui.embed.state = full && ui.embed.full ? ui.embed.full : ui.embed.page; ui.embedStates.push(ui.embed.state); }
+        };
+    }
     const set = (o && o.settings) || {}, shownBar = [];
     ui.visible = (name, on) => shownBar.push(name + ':' + (on ? 1 : 0));
     const d = new Display(ui, log, spec, { get: (k) => set[k], onChange() {} }, () => themes.theme());
@@ -331,6 +341,40 @@ test('in-page (embed): a screen with "embed": true asks for it where offered, la
     const v = await setup({ embed: true, embedBox: [104, 88, 1796, 632] });
     try {
         assert(v.d.embedOn && v.d.place.y === 88 && v.d.place.h === 632 && !v.d.place.embedTop, 'stock box: ' + JSON.stringify(v.d.place));
+    } finally { v.end(); }
+});
+
+test('in-page full screen: a screen with "embed": "full" asks for the whole-screen template where offered, else the page box', async () => {
+    const X_MODE = 0x4d520001, PLACE = 2;
+    const lastMode = (t) => t.c.msgs.filter((m) => m.t === X_MODE).map((m) => Array.from(new Uint32Array(m.p.buffer.slice(m.p.byteOffset, m.p.byteOffset + m.p.length)))).pop();
+    const t = await setup({ embed: 'full', embedBox: [104, 88, 1796, 632], fullBox: [0, 0, 1920, 720] }), d = t.d;
+    try {
+        assert(d.gpu.info.full && d.gpu.info.fullBox.join() === '0,0,1920,720', JSON.stringify(d.gpu.info));
+        assert.strictEqual(d.embedOn, true, 'in-page');
+        assert.deepStrictEqual(t.ui.embedCalls, [true], 'the in-page state opened instead of the screen');
+        assert.strictEqual(t.ui.embed.state, 'MAIN_FULL', 'the whole screen\'s state');
+        await sleep(100);
+        assert.deepStrictEqual(lastMode(t), [2, 1], 'X_MODE embed on the whole-screen template');
+        const pl = t.c.msgs.filter((m) => m.t === PLACE).pop().p;
+        assert.deepStrictEqual([pl.readInt32LE(0), pl.readInt32LE(4), pl.readInt32LE(8), pl.readInt32LE(12)], [0, 0, 1920, 720], 'the whole screen');
+        assert(d.place.y === 88 && d.place.h === 632 && d.place.embedTop === 88, 'the layout under BMW\'s strip: ' + JSON.stringify(d.place));
+        assert.strictEqual(t.log.errors.length, 0, JSON.stringify(t.log.errors));
+    } finally { t.end(); }
+    // only the page box's template loaded (a renderer without the whole-screen one): the page box's state, as with true
+    const u = await setup({ embed: 'full', embedBox: [104, 88, 1796, 632] });
+    try {
+        assert(u.d.embedOn && !u.d.embedFull && !u.d.gpu.info.full, 'page box: ' + JSON.stringify(u.d.gpu.info));
+        assert.strictEqual(u.ui.embed.state, 'MAIN_EMBED', 'the page box\'s state');
+        assert(u.d.place.y === 88 && u.d.place.h === 632 && !u.d.place.embedTop, 'under BMW\'s title bar: ' + JSON.stringify(u.d.place));
+        await sleep(100);
+        assert.deepStrictEqual(lastMode(u), [2], 'X_MODE embed, the page box');
+    } finally { u.end(); }
+    // "embed": true beside a renderer offering both: the page box, as before
+    const v = await setup({ embed: true, embedBox: [104, 88, 1796, 632], fullBox: [0, 0, 1920, 720] });
+    try {
+        assert(v.d.embedOn && v.d.place.y === 88 && !v.d.place.embedTop, 'page box: ' + JSON.stringify(v.d.place));
+        await sleep(100);
+        assert.deepStrictEqual(lastMode(v), [2], 'X_MODE embed, the page box');
     } finally { v.end(); }
 });
 

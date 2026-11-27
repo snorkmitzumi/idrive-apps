@@ -372,26 +372,32 @@ def build_ui(spec, language='en', hmi='ID7'):
             main_id = cid
     # a canvas screen with "embed": true gets a second state on the renderer's page template (mgu-render's
     # LT_State_A4A_WelcomeApp: BMW's title bar and popups over the app's surface; display.js opens it while the renderer
-    # offers in-page drawing), the Store's way. iDrive 7 only (iDrive 8 has no template), after every other state so no
+    # offers in-page drawing), the Store's way; "embed": "full" a third one too, <NAME>_FULL, on its whole-screen template
+    # (LT_State_A4A_StockExchange: the same over all 1920x720, BMW's strip over the app's top), opened instead where
+    # the renderer offers it (a renderer with the page template alone keeps <NAME>_EMBED). iDrive 7 only (iDrive 8 has no template), after every other state so no
     # earlier id changes
     # (iDrive 8: the same ids taken, so both descriptions keep the same state ids; no such state written there)
     for scr in screens:
         if scr.get('kind') != 'canvas' or not scr.get('embed'):
             continue
-        name = scr['name'] + '_EMBED'
-        cid = nid()
-        state_ids[name] = cid
-        tid, gid = nid(), nid()
-        if id8:
-            continue
-        title = scr.get('title', spec['title'])
-        xml += [f'    <container id="{cid}" type="state" widget="LT_State_A4A_WelcomeApp">',
-                f'        <layoutGroup id="{gid}" name="Titlebar">',
-                f'            <component id="{tid}" type="title">', '                <property id="2" value="1"/>', '            </component>',
-                '        </layoutGroup>', '    </container>']
-        ui['containers'][str(cid)] = {'type': 'state', 'name': name, 'components': {str(tid): {
-            'type': 'title', 'name': name + '_TITLE', 'properties': {'Visible': {'value': 1, 'type': 'UInt'}},
-            'rows': [text_row(name + '_TITLE', title)]}}}
+        kinds = [('_EMBED', 'LT_State_A4A_WelcomeApp')]
+        if scr.get('embed') == 'full':
+            kinds.append(('_FULL', 'LT_State_A4A_StockExchange'))
+        for suffix, widget in kinds:
+            name = scr['name'] + suffix
+            cid = nid()
+            state_ids[name] = cid
+            tid, gid = nid(), nid()
+            if id8:
+                continue
+            title = scr.get('title', spec['title'])
+            xml += [f'    <container id="{cid}" type="state" widget="{widget}">',
+                    f'        <layoutGroup id="{gid}" name="Titlebar">',
+                    f'            <component id="{tid}" type="title">', '                <property id="2" value="1"/>', '            </component>',
+                    '        </layoutGroup>', '    </container>']
+            ui['containers'][str(cid)] = {'type': 'state', 'name': name, 'components': {str(tid): {
+                'type': 'title', 'name': name + '_TITLE', 'properties': {'Visible': {'value': 1, 'type': 'UInt'}},
+                'rows': [text_row(name + '_TITLE', title)]}}}
     xml.append('</application>')
     return '\n'.join(xml) + '\n', ui, strings, state_ids
 

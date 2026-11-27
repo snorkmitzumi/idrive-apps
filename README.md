@@ -166,9 +166,10 @@ Settings > Screen > **Screen layout** picks one of three:
 **BMW's pop-ups over Cockpit (in-page, 2.9.8):** with the MGU Store's renderer (`mgu-render`) and its page template
 loaded, Cockpit draws inside its own BMW page instead of over the whole HMI. BMW's volume bar, car messages, calls and
 the options menu then appear on top of Cockpit, and BMW's own strip (home button, title, status icons) stays at the
-top, as on BMW's map. With the renderer's full-screen template (`embed_layout = full`, [MGU Store
-#382](https://github.com/robertnisipeanu/mgu-store/pull/382)) Cockpit fills the whole screen under that strip; with
-the stock one, the area under BMW's title bar. In **map style** there is no tab row at all (2.9.9): the page starts right
+top, as on BMW's map. With a renderer that has the whole-screen page template (proposed in [MGU Store
+#382](https://github.com/robertnisipeanu/mgu-store/pull/382)), Cockpit fills the whole screen with BMW's strip over its
+top and nothing to set (3.1.0); the Store and other apps keep their page as before. With only the stock template,
+Cockpit gets the area under BMW's title bar. In **map style** there is no tab row at all (2.9.9): the page starts right
 under BMW's strip, and BMW's own title in the strip names the page shown (or Settings while open), as on BMW's pages;
 the pages are in the left side bar and on the controller. In the other layouts the tab names sit just below the strip.
 BMW's back arrow is drawn over the page's left edge in-page, as on every BMW page: Cockpit keeps that column free (3.0.0).
