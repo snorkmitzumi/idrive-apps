@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -128,6 +128,9 @@ A trip book, kept by itself (new in 2.9.0, a first version):
   or more, also a litre at a time with Cockpit running at the pump, or between two drives; the count starts from the
   full tank. Over a tank's worth of driving this is the most exact consumption Cockpit shows.
 - Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
+- Times and months are the car's local time, taken from the head unit's own clock settings (3.1.2: the head unit's
+  system clock runs on UTC, so trips showed an hour early in Poland). The time zone is kept, so the first trips after a
+  start show local time too.
 
 Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in
 the QR log), and every 10 minutes a `status:` line repeats the latest of each, with whether the renderer can draw

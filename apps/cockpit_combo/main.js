@@ -40,6 +40,7 @@ const { drawBar } = require('./rail');
 const { probe } = require('./seatprobe');
 const { MView } = require('./mview');
 const { Trips } = require('./trips');
+const { LocalTime } = require('./localtime');
 const ambientPage = require('./ambient_page');
 
 const W = 1600, H = 520;
@@ -165,7 +166,9 @@ mgu.run({
             yieldTo: () => !!(ambLights && ambLights._running && !ambLights.held) });
         // the trip book (trips.js, 2.9.0): each drive cycle from the car's own state, its distance from the odometer or the
         // speed, its fuel from the tank's level; recorded whether the Trips tab shows or not (not with the tab switched off)
-        const trips = new Trips({ dataDir: ctx.dataDir, log, settings });
+        // the car's local time (the head unit's clock is UTC): from the HMI's AutoTime, kept across starts
+        const localTime = new LocalTime({ dataDir: ctx.dataDir, log });
+        const trips = new Trips({ dataDir: ctx.dataDir, log, settings, localTime });
         // ...and as the car stops (ready to drive -> not, the trip book's test) the log goes to the owner's GitHub repository:
         // the kit's log upload (app.json "logUpload", 2.9.4), which itself sends after a start, when switched on and from its row
         let wasReady = null;
@@ -191,7 +194,9 @@ mgu.run({
         // the instrument cluster's tank status carries the odometer too (mileageKilometre: 77761 km on a G26 that reads
         // 77761, 2.9.6). VehicleModel.MileageVehicle, read before, is no odometer: 6925, 7181, 7437 a second apart
         let fuelKombi = false;
-        tripWatch('de.bmw.infotainment.KombiIF', { statusRangeTankStatus: (v) => {
+        ctx.signals.watch('com.harman.infotainment.systeminfrastructure.autotime.autotime.AutoTime', 'Inst1', { current: (v) => { raw('AutoTime current')(v); localTime.fromLocal(v); } }, log, { pollMs: 600000 })
+            .then((r) => log.info('local time: AutoTime ' + (r.error ? 'not set up: ' + r.error : 'offered by the car: ' + r.available))).catch((e) => log.warn('local time: ' + (e && e.message || e)));
+        tripWatch('de.bmw.infotainment.KombiIF', { statusTimeDate: (v) => raw('Kombi statusTimeDate')(v), timeDateUTC: (v) => raw('Kombi timeDateUTC')(v), statusRangeTankStatus: (v) => {
             raw('RangeTankStatus')(v);
             const l = seenOf('RangeTankStatus', num(v && v.fluidLevelFuelTank)), km = seenOf('Kombi mileage', num(v && v.mileageKilometre));
             if (l !== null && l < 255) { fuelKombi = true; trips.fuel(l); }
