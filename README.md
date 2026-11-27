@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.0.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.1.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -118,8 +118,12 @@ A trip book, kept by itself (new in 2.9.0, a first version):
   within 3 minutes (the engine off at a fuel station), the same trip goes on. **End trip** ends it by hand.
 - **Each trip:** when, distance, time, average and top speed, the fuel used and the consumption. The distance comes
   from the car's odometer where it sends one (on a G26 the instrument cluster's, 2.9.6) and it agrees with the speed's count (within 20 %), else from the speed; the fuel from the tank's level, so it counts in
-  whole litres, a refuel on the way is noticed, and the consumption shows from 20 km on.
-- **This month:** trips, distance and fuel.
+  whole litres, a refuel on the way is noticed, and a trip's fuel and consumption show from 20 km on (3.1.1: a short
+  trip's whole litres were mostly rounding).
+- **This month:** trips, distance and fuel. The fuel is what the tank's level went down by this month, not the trips'
+  rounded litres added up (3.1.1).
+- Trips recorded by early 2.9 versions whose distance no car could drive in their time (two odometers mixed, one at 34,724 km) are
+  dropped once, as 3.1.1 starts.
 - **Since refuelling:** distance, fuel and consumption since the last refuel. A refuel is the tank's level rising 3 l
   or more, also a litre at a time with Cockpit running at the pump, or between two drives; the count starts from the
   full tank. Over a tank's worth of driving this is the most exact consumption Cockpit shows.
@@ -139,8 +143,10 @@ taken from the source repo at build time.
 - **Colour:** the whole car or upper / lower lights separately, with brightness.
 - **Animations:** moving scenes.
 - **Modes:** a look for each driving mode (Sport, Comfort, Eco Pro, Adaptive).
-- **Signals:** a turn signal blinks that side's front door line green, the whole line (both strips on a G26), at an even
-  pace of its own; the rear doors keep your colour. An open door can show red.
+- **Signals:** a turn signal sweeps that side's front door line green, front to back like a car's dynamic indicator
+  (3.1.1): on a G26 the line's first strip lights, then its second, both stay lit, then both go dark, about once a
+  second. That's as many writes to the lights as the blink before it, so it doesn't load the light module more. The
+  rear doors keep your colour. An open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
 first drives the lights and the other leaves them alone. To leave the lights to another app for good, switch Cockpit's

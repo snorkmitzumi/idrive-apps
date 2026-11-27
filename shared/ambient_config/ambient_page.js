@@ -21,7 +21,7 @@
  *   Colour         the colour ring (and white) for the whole car, the upper lights or the lower ones, the
  *                  brightness, and the car from above lit as the car is; Original colour gives the light back
  *   Animations     Solid, Breathing, Rainbow, Smooth fade, Colour wave, how fast, shown moving on the car picture;
- *                  Turn signal glow (that side's door lines blink green with it), Open door red (its line blinking) and
+ *                  Turn signal glow (that side's front door line sweeps green with it, front to back), Open door red (its line blinking) and
  *                  Hazard red (every light pulses red while the hazards are on), each off until switched on
  *   Driving modes  for each driving mode the car has: Choose colour (the Colour and Animations tabs change that mode's
  *                  look until Done), the animation button stepping through them, or Original colour (BMW's); with
@@ -168,7 +168,7 @@ async function background(bg, opts) {
         log.info('vehicle state: none from the car, not driven or used for ' + IDLE_MS / 60000 + ' min: parked');
         control.away(true);
     }, 30000);
-    // the turn signals: that side's door lines blink green; an open door: its line red (settings turnGlow, doorRed, both off
+    // the turn signals: that side's front door line sweeps green; an open door: its line red (settings turnGlow, doorRed, both off
     // until switched on)
     signals.watch('de.bmw.body.Light', '1', { StatusFunctionsIndicators: (v) => control.turn(turnOf(v)) }, log)
         .catch((e) => log.warn('turn signals: ' + (e && e.message || e)));

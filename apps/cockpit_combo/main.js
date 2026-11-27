@@ -205,7 +205,15 @@ mgu.run({
             log.info('status: renderer ' + (info ? JSON.stringify(info) : g ? 'connected, no mgu-render/1 info' : 'none (software)') + '; trips odometer ' + (trips.odoSrc || 'none')
                 + ' ' + JSON.stringify(lastOf) + (trips.current ? '; trip ' + trips.closed(trips.current).km + ' km' : ''));
         }, 600000);
-        tripWatch('de.bmw.infotainment.resetlogic.ResetLogic', { averageConsumption: (v) => raw('ResetLogic averageConsumption')(v) });
+        // the trip computer's own average: logged as it changes (up to 12 times a run), to learn whether it carries the real
+        // consumption while driving (it read all 0 at each start so far) and could replace the tank's whole litres
+        let avgSeen = 0, avgLast = null;
+        tripWatch('de.bmw.infotainment.resetlogic.ResetLogic', { averageConsumption: (v) => {
+            let s; try { s = JSON.stringify(v); } catch (e) { s = String(v); }
+            if (s === avgLast || avgSeen >= 12) return;
+            avgLast = s; avgSeen++;
+            log.info('trips signal ResetLogic averageConsumption (' + avgSeen + '): ' + (s && s.length > 300 ? s.slice(0, 300) + '...' : s));
+        } });
         const perfDemo = new PerfDemo();
         const SAMPLE = { rpm: 1, speed: 1, gLong: 1, torque: 1 };
         values.onPut = (k, v) => {

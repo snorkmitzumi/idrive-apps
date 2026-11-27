@@ -889,6 +889,48 @@ checks.push(
         const empty = await draw(new Trips({ log, now: () => clock }), 'kmh');
         assert(empty.includes('No trip yet') && !empty.some((q) => /NaN|undefined/.test(q)), empty.join(' | '));
     }],
+    ['3.1.1 trips: impossible kept trips dropped, no odometer from last night, the month\'s fuel from the tank\'s lowest level', async () => {
+        const { Trips, END_MS, RESUME_MS } = appModule('trips');
+        let clock = Date.UTC(2026, 10, 27, 9, 58, 0);
+        const lines = [], log = { info: (m) => lines.push(m), warn: (m) => lines.push('WARN ' + m) };
+        const run = (tb, s, kmh, cond) => { for (let i = 0; i < s; i++) { clock += 1000; tb.tick({ speed: kmh, condition: cond }); } };
+        // trips kept by 2.9.x with two odometers mixed: dropped as they load, and the file saved without them
+        const dir = tmp('trips-bad'), min = 60000, t0 = Date.UTC(2026, 10, 25, 21, 0, 0);
+        fs.writeFileSync(path.join(dir, 'trips.json'), JSON.stringify({ v: 1, trips: [
+            { start: t0, end: t0 + 41 * min, km: 34724, top: 110, kmFrom: 'odometer' },
+            { start: t0 - 3600000, end: t0 - 3600000 + 34 * min, km: 28.9, top: 90, kmFrom: 'speed' },
+            { start: t0 - 7200000, end: t0 - 7200000 + 5 * min, km: 1636, top: 60, kmFrom: 'odometer' }] }));
+        let tb = new Trips({ dataDir: dir, log, now: () => clock });
+        assert(tb.trips.length === 1 && tb.trips[0].km === 28.9, 'the possible one kept: ' + JSON.stringify(tb.trips));
+        assert(lines.some((m) => /WARN trips: 2 trip\(s\) dropped.*34724 km in 41 min/.test(m)), lines.join(' | '));
+        assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'trips.json'), 'utf8')).trips.length, 1, 'saved without them');
+        // last night's odometer, a km counted after that trip ended: a parked start is no 1.0 km trip
+        const nd = tmp('trips-night');
+        tb = new Trips({ dataDir: nd, log, now: () => clock });
+        tb.odometer(77779, 'Kombi');
+        clock += 15 * 3600000;
+        run(tb, 1, 0, 10); run(tb, 20, 0, 10); tb.odometer(77780, 'Kombi'); run(tb, 60, 0, 10); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert.strictEqual(tb.trips.length, 0, 'not kept: ' + JSON.stringify(tb.trips));
+        // the reading the car gives as it wakes still counts: 77780 a moment before the start, 77789 at the end
+        clock += RESUME_MS + 1000; tb.odometer(77780, 'Kombi'); run(tb, 1, 0, 10); run(tb, 540, 60, 10); tb.odometer(77789, 'Kombi'); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert(tb.trips[0].km === 9 && tb.trips[0].kmFrom === 'odometer', JSON.stringify(tb.trips[0]));
+        // a whole km of the odometer against a car that hardly moved: the speed's count
+        clock += RESUME_MS + 1000; tb.odometer(77789, 'Kombi'); run(tb, 1, 0, 10); run(tb, 20, 50, 10); tb.odometer(77790, 'Kombi'); run(tb, END_MS / 1000 + 1, 0, 5);
+        assert(tb.trips[0].kmFrom === 'speed' && tb.trips[0].km < 0.5, JSON.stringify(tb.trips[0]));
+        // the month's fuel: the tank's new lowest levels only (36 > 35 > 36 > 35 > 34: 2 l, not 3), kept across a restart
+        const fd = tmp('trips-fuel');
+        tb = new Trips({ dataDir: fd, log, now: () => clock });
+        tb.fuel(36); run(tb, 1, 0, 10); run(tb, 600, 60, 10);
+        [35, 36, 35, 34].forEach((l) => { tb.fuel(l); run(tb, 60, 60, 10); });
+        run(tb, END_MS / 1000 + 1, 0, 5);
+        assert.strictEqual(tb.months()[0].fuel, 2, 'month: ' + JSON.stringify(tb.months()[0]));
+        tb = new Trips({ dataDir: fd, log, now: () => clock });
+        tb.fuel(33);
+        assert.strictEqual(tb.months()[0].fuel, 3, 'after a restart: the litre lost meanwhile counts too: ' + JSON.stringify(tb.months()[0]));
+        // a trip under 20 km: no litres shown for it (whole litres: 0, 1 or 2 by rounding)
+        const tx = await textsOf(() => tb.draw(new Canvas(1600, 520), themes.theme('m_tricolour')));
+        assert(tx.includes('from 20 km') && !tx.some((q) => /^<1 l$|^[0-9]+ l$/.test(q) && q !== '3 l'), tx.join(' | '));
+    }],
     ['2.9.0 since refuelling: a refuel (also a litre at a time at the pump, or while the app was off) starts a count: distance, fuel, consumption', async () => {
         const { Trips } = appModule('trips');
         let clock = Date.UTC(2026, 10, 25, 8, 0, 0);

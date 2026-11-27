@@ -14,7 +14,7 @@
  * The car locked and left (parked or standby, nobody in it: away(true)): every light back to the car's own and nothing
  * renewed; someone back in (living, ignition, driving): the look again, with the welcome sweep when it is on.
  * Over the look (or the car's own colour), with their settings switched on (both off by default): turn(side) - while a turn signal is on, that side's
- * front door line blinks green (both its strips), fully on and off, as fast as the lights take it (setting turnGlow; hazards: both sides; not with
+ * front door line sweeps green front to back like a car's dynamic indicator, then goes dark (sweep(); setting turnGlow; hazards: both sides; not with
  * the car locked and left); doors(open) - an open door's line blinks red until it closes (setting doorRed; not with
  * the car locked and left, so a door left open does not keep the body module awake); with the hazards on (setting
  * hazardRed) every light pulses red, bright then dim, in place of the turn glow (not with the car locked and left). Left is
@@ -46,6 +46,21 @@ const halves = () => {
 };
 const blink = (rgb) => { const lit = halves(); return (t) => (lit(t) ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 }); };
 const pulse = (rgb) => { const lit = halves(); return (t) => ({ rgb, bright: lit(t) ? 100 : PULSE_DIM }); };
+/* The turn glow as a dynamic indicator (Cockpit 3.1.1): a line's sections light one after another, front to back, SWEEP_STEP_MS
+ * apart, stay lit to SWEEP_ON_MS, then all go dark, every SWEEP_MS. A G26's front door line has two strips, each its own
+ * light: "door line" (section 0) and "door line 2" (section 1). Each write changes one light, so a side's sweep is the
+ * blink's four writes (on, on, dark, dark; ~200 ms each through the gateway), in the order the sections light - no more
+ * traffic than the blink, which lit the strips one after another anyway. With the hazards (both sides) every time is
+ * doubled: twice the writes. A line of one strip lights at once, a blink as before. */
+const SWEEP_MS = 1000, SWEEP_STEP_MS = 250, SWEEP_ON_MS = 600;
+const sectionOf = (l) => (l && / door line 2$/i.test(String(l.name || '')) ? 1 : 0);
+const sweep = (rgb, sides) => {
+    const k = Math.max(1, sides || 1);
+    return (t, on, light) => {
+        const p = t % (SWEEP_MS * k);
+        return p >= sectionOf(light) * SWEEP_STEP_MS * k && p < SWEEP_ON_MS * k ? { rgb, bright: 100 } : { rgb: [0, 0, 0], bright: 0 };
+    };
+};
 // the car's indicator off this long before the glow stops: its signal's short gaps don't restart the blink
 const TURN_GRACE_MS = 1500;
 const DOORS = ['driver front', 'driver rear', 'passenger front', 'passenger rear'];
@@ -181,7 +196,7 @@ class Control {
         const key = sides.join();
         if (key !== this._glow) {
             this._glow = key;
-            this.lights.overlay('turn', sides.length ? turnLightsOf(all, sides) : null, blink(GLOW));
+            this.lights.overlay('turn', sides.length ? turnLightsOf(all, sides) : null, sweep(GLOW, sides.length));
         }
         this._carDoor();
         // our red blink: the open doors the car's own warning doesn't show
@@ -281,4 +296,4 @@ class Control {
     }
 }
 
-module.exports = { Control, DEFAULT_LOOK, FLASH_FILE, FAVS, NIGHT, DOORS, GLOW, RED, BLINK_MS, blink, pulse, sideOf, doorOf };
+module.exports = { Control, DEFAULT_LOOK, FLASH_FILE, FAVS, NIGHT, DOORS, GLOW, RED, BLINK_MS, SWEEP_MS, SWEEP_STEP_MS, SWEEP_ON_MS, blink, pulse, sweep, sideOf, doorOf };
