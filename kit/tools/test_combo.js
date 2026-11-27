@@ -82,6 +82,17 @@ function settingsOf(over) {
 
 // every app started by boot(): hidden after each check, so its diagnostic reader stops (it keeps running otherwise)
 const booted = [];
+/* Every watch the app makes, checked against app.json "signals" (its SOME/IP manifest), as the SDK does on the car: a
+ * field, interface or instance not listed there is refused ("Unknown event"; 3.1.2's AutoTime and the car's units were
+ * never listed, so they never came). Recorded here, asserted by a check below. */
+const unlisted = [];
+function listed(iface, inst, handlers) {
+    const e = SPEC.signals[iface];
+    if (!e) { unlisted.push(iface); return; }
+    if (e === '*') return;
+    if (String(inst) !== String(e._instances || '1')) unlisted.push(iface + ' instance ' + inst + ' (listed: ' + (e._instances || '1') + ')');
+    Object.keys(handlers || {}).forEach((f) => { if (!Object.prototype.hasOwnProperty.call(e, f)) unlisted.push(iface + '.' + f); });
+}
 /** One start of the app; draw() renders a frame and returns its texts. */
 async function boot(dir, opts) {
     opts = opts || {};
@@ -98,7 +109,7 @@ async function boot(dir, opts) {
     const ctx = {
         ui: { onClick: (k, fn) => { clicks[k] = fn; }, text() {}, image: async () => {}, isVisible: (n) => n === 'MAIN' && vis.shown, onVisible: (fn) => vis.handlers.push(fn), comp: () => ({}) },
         settings, log: opts.log || { info() {}, warn() {}, error() {} }, spec: SPEC, dataDir: dir,
-        signals: { watch: opts.watch || (() => Promise.resolve({ available: false })) },
+        signals: { watch: (iface, inst, handlers, ...rest) => { listed(iface, inst, handlers); return (opts.watch || (() => Promise.resolve({ available: false })))(iface, inst, handlers, ...rest); } },
         onTab(fn) { tab = fn; }, onTilt(fn) { tilt = fn; }, mapStyle: () => !!opts.map, openSettings() { opened.push('settings'); }, hideButton(id) { hidden.push(id); }, onScroll() {}, onTap(fn) { tap = fn; }, loop(n, fps, fn) { frame = fn; return { fps: (r) => rates.push(r) }; },
         theme: () => themes.theme('m_tricolour'),
         canvas: (w, h) => { const cv = new Canvas(w, h); cv.own = opts.own !== false; last = cv; return cv; },
@@ -971,6 +982,12 @@ checks.push(
         clock = Date.UTC(2026, 10, 30, 23, 30, 0);
         run(tb, 1, 0, 10); run(tb, 600, 60, 10); run(tb, 70, 0, 5);
         assert.deepStrictEqual(tb.months().map((m) => m.key + ':' + m.trips), ['2026-12:1', '2026-11:1'], JSON.stringify(tb.months()));
+    }],
+    ['3.1.3 every signal Cockpit watches is in app.json "signals" (the SDK refuses the others: they never come)', async () => {
+        unlisted.length = 0;
+        const b = await boot(tmp('manifest'), { settings: { demo: 'off' } });
+        await new Promise((r) => setTimeout(r, 50));
+        assert(b && unlisted.length === 0, 'not listed: ' + unlisted.join(', '));
     }],
     ['2.9.0 since refuelling: a refuel (also a litre at a time at the pump, or while the app was off) starts a count: distance, fuel, consumption', async () => {
         const { Trips } = appModule('trips');

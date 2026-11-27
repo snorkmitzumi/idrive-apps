@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.3.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -101,7 +101,7 @@ off the diagnostic link.
 
 The engine's and gearbox's health at a glance:
 
-- **Tyres:** pressure against the car's target, and temperature in °C. A car that doesn't say its units (a G26) is read as psi and °F only when its own tyre pressures are in psi (2.9.3: one odd reading had turned a 7 °C tyre into −14).
+- **Tyres:** pressure against the car's target, and temperature in °C. The tyre values come in the car's own units, which Cockpit now asks the car for (3.1.3: the request was missing from the app's list of signals, so the units never came). Until they come, or on a car that doesn't say them, the values are read as psi and °F only when its own tyre pressures are in psi (2.9.3: one odd reading had turned a 7 °C tyre into −14).
 - **Temperatures:** engine oil, coolant, gearbox oil and intake air, each with its maximum this drive and a trace.
 - **Misfires:** per cylinder this driving cycle, from the engine's own on-board monitors. *Reset misfires* counts
   from then on; nothing is cleared in the car.
@@ -128,8 +128,8 @@ A trip book, kept by itself (new in 2.9.0, a first version):
   or more, also a litre at a time with Cockpit running at the pump, or between two drives; the count starts from the
   full tank. Over a tank's worth of driving this is the most exact consumption Cockpit shows.
 - Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
-- Times and months are the car's local time, taken from the head unit's own clock settings (3.1.2: the head unit's
-  system clock runs on UTC, so trips showed an hour early in Poland). The time zone is kept, so the first trips after a
+- Times and months are the car's local time, taken from the head unit's own clock settings (3.1.2, working from 3.1.3:
+  the head unit's system clock runs on UTC, so trips showed an hour early in Poland). The time zone is kept, so the first trips after a
   start show local time too.
 
 Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in

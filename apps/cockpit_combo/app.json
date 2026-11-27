@@ -2,7 +2,7 @@
   "id": "cockpit_combo",
   "title": "Cockpit",
   "description": "Tabs of one app: Driving (engine, boost, power, xDrive, batteries in M Vitals' look), Performance (Virtual Dyno beside Drag Timer), Seats, M View (tyres, oil, coolant and gearbox temperatures, misfires per cylinder, fuel trims and timing) and Ambient config's colours, animations and driving modes",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "vendor": "custom",
   "loggingId": "OAA3",
   "iconGlyph": "gauge",
@@ -31,7 +31,8 @@
   },
   "signals": {
     "de.bmw.infrastructure.SecureMileage": { "_optional": "Trips: the odometer (else the speed adds up the distance)", "mileage": "rs" },
-    "de.bmw.infotainment.KombiIF": { "_optional": "Trips: the fuel in the tank and the odometer", "statusRangeTankStatus": "rs" },
+    "de.bmw.infotainment.KombiIF": { "_optional": "Trips: the fuel in the tank and the odometer", "statusRangeTankStatus": "rs", "statusTimeDate": "rs", "timeDateUTC": "rs" },
+    "com.harman.infotainment.systeminfrastructure.autotime.autotime.AutoTime": { "_optional": "Trips: times in the car's local time (else UTC, the head unit's clock)", "_instances": "Inst1", "current": "rs" },
     "de.bmw.infotainment.lsc.LSCDataSink": { "_optional": "Trips: the fuel in the tank, a second source", "mileageRange": "s", "fuelSupply": "s" },
     "de.bmw.infotainment.resetlogic.ResetLogic": { "_optional": "Trips: the car's own average consumption (logged, to compare)", "averageConsumption": "rs" },
     "de.bmw.infotainment.vehicle.CDS": {
@@ -39,8 +40,9 @@
       "statusEngineTemperature": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle": {
-      "_optional": "day or night: dimmer at night",
-      "statusDayNightChangeOver": "rs"
+      "_optional": "day or night: dimmer at night; the car's units for the tyres",
+      "statusDayNightChangeOver": "rs",
+      "statusNewCurrentUnitsStatusExt": "rs"
     },
     "de.bmw.infotainment.vehicle.Vehicle2": {
       "statusCarSpeed2": "rs",
