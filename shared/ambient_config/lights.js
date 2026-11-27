@@ -13,7 +13,8 @@
  * still colour holds 150 s and is written again every 40 s, a moving one holds 5 s. carColour() gives every light back
  * to the car (NAD 0 off, sent once more).
  * flash(rgb, ms) lays a colour over everything for a moment; overlay(key, test, at) lays one over the lights test(light)
- * picks until overlay(key, null) - at(ms, on) with on flipping each frame, so a blink is as fast as the writes go (the turn signal's glow, an open door; the rest keep the scene, or the car's own
+ * picks until overlay(key, null) - at(ms, on, light) with on flipping each frame (light: the one it is for, so a sweep can
+ * light them one after another), so a blink is as fast as the writes go (the turn signal's glow, an open door; the rest keep the scene, or the car's own
  * colour); dim(f) scales the brightness (night). Writes that fail
  * in a row (the car switched off, the BDC asleep) pause the writing for 10 s. hold(key, true) stops the writing while
  * something else talks to the body controller (the strobe: the gateway takes one request at a time, and ours in
@@ -165,7 +166,7 @@ class Lights extends EventEmitter {
         if (this._flash && now < this._flash.until) return { rgb: this._flash.rgb, bright: 100 };
         // the overlay set last wins
         const ov = this._overs ? Array.from(this._overs.values()).reverse().find((o) => o.test(light)) : null;
-        if (ov) { const v = ov.at(now - ov.t0, !!this._phase); return { rgb: v.rgb, bright: Math.round(v.bright * this._dim) }; }
+        if (ov) { const v = ov.at(now - ov.t0, !!this._phase, light); return { rgb: v.rgb, bright: Math.round(v.bright * this._dim) }; }
         const sc = scene || this.scene;
         if (!sc) return null;
         const v = S.lightAt(sc, light, t == null ? now - this.t0 : t);

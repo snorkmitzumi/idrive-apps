@@ -13,7 +13,7 @@ const A = path.join(__dirname, '..', '..', 'shared', 'ambient_config');
 const L = require(path.join(A, 'lin'));
 const S = require(path.join(A, 'scenes'));
 const { Lights } = require(path.join(A, 'lights'));
-const { Control, DEFAULT_LOOK, BLINK_MS } = require(path.join(A, 'control'));
+const { Control, DEFAULT_LOOK, BLINK_MS, SWEEP_MS, SWEEP_STEP_MS, SWEEP_ON_MS } = require(path.join(A, 'control'));
 
 let fails = 0, checks = 0;
 const ok = (c, msg) => { checks++; if (!c) { fails++; console.log('FAIL ' + msg); } };
@@ -229,6 +229,14 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     await sleep(200);
     const nad3 = writes.filter((w) => w[0] === 0xe3 && w[2] === 3).map((w) => w[4]);
     ok(nad3.length >= 4 && nad3.every((b, i) => i === 0 || b !== nad3[i - 1]), 'a blink: fully on, then dark, write after write (' + nad3.join() + ')');
+    // each light handed to the overlay: a sweep colours one light and not yet the next at the same moment
+    {
+        const got = [];
+        lights.overlay('turn', (l) => /^Passenger/.test(l.name), (t, on, l) => { got.push(l && l.name); return { rgb: [0, 230, 60], bright: 100 }; });
+        const one = lights.lights.find((l) => /^Passenger/.test(l.name));
+        lights.at(one);
+        ok(got[got.length - 1] === one.name, 'an overlay is told which light it colours: ' + got[got.length - 1]);
+    }
     lights.overlay('doors', null); lights.overlay('turn', null);
     await sleep(300);
     ok(lit[0].concat(lit[1]).every((c) => c.join() === '0,0,0'), 'both taken off with the car\'s colour on: given back');
@@ -330,10 +338,19 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     c.turn('left');
     ok(fake.overs.turn && fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x19)) && !fake.overs.turn.test(pl(0x0c)) && !fake.overs.turn.test(pl(0x01)),
         'left turn signal: the driver\'s side lights (left-hand drive), not the footwells nor the other side');
-    const g = [0, BLINK_MS / 2 + 10].map((ms) => fake.overs.turn.at(ms, true));
-    ok(g[0].rgb.join() === '0,230,60' && g[0].bright === 100 && g[1].bright === 0 && g[1].rgb.join() === '0,0,0', 'its blink: green fully on, then dark, on its own clock');
-    ok(BLINK_MS >= 500 && BLINK_MS <= 1000 && fake.overs.turn.at(BLINK_MS + 30, false).bright === 100,
-        'the blink keeps its own pace (' + BLINK_MS + ' ms), whatever the frame flag says');
+    {
+        // a dynamic indicator (3.1.1): "door line" lights first, "door line 2" a step later, both held, then both dark
+        const at = (ms, l) => fake.overs.turn.at(ms, true, l), s0 = pl(0x05), s1 = pl(0x62);
+        ok(at(0, s0).rgb.join() === '0,230,60' && at(0, s0).bright === 100 && at(0, s1).bright === 0, 'the sweep: the first strip lit, the second not yet');
+        ok(at(SWEEP_STEP_MS + 10, s0).bright === 100 && at(SWEEP_STEP_MS + 10, s1).bright === 100 && at(SWEEP_ON_MS - 10, s1).bright === 100, 'then both, held');
+        ok(at(SWEEP_ON_MS + 10, s0).bright === 0 && at(SWEEP_ON_MS + 10, s1).bright === 0 && at(SWEEP_ON_MS + 10, s1).rgb.join() === '0,0,0', 'then both dark');
+        ok(at(SWEEP_MS + 10, s0).bright === 100 && at(SWEEP_MS + 10, s1).bright === 0 && at(SWEEP_MS + 10, s0).bright === at(SWEEP_MS + 10, s0, false).bright,
+            'again every ' + SWEEP_MS + ' ms, on its own clock, whatever the frame flag says');
+        ok(SWEEP_STEP_MS >= 200 && SWEEP_ON_MS - SWEEP_STEP_MS >= 200 && SWEEP_MS - SWEEP_ON_MS >= 2 * 200,
+            'room for each write (~200 ms): a step for the second strip, and both strips\' dark writes before the next sweep');
+        // a door line of one strip: lit at once, a blink
+        ok(at(0, pl(0x0c)).bright === 100, 'one strip: lit at once');
+    }
     {
         // every half written and as long as the others, however late a frame starts (writes of ~400 ms: no half skipped)
         const b = require(path.join(A, 'control')).blink([0, 230, 60]), seen = [];
@@ -393,6 +410,9 @@ ok(Math.round(S.hueOf([0, 0, 255])) === 240 && S.hsv(120, 1, 1).join() === '0,25
     c.turn(null); c.turn('both');
     ok(fake.overs.turn.test(pl(0x05)) && fake.overs.turn.test(pl(0x62)) && fake.overs.turn.test(pl(0x0c)) && fake.overs.turn.test(pl(0x64))
         && !fake.overs.turn.test(pl(0x09)) && !fake.overs.turn.test(pl(0x10)), 'hazards: both front door lines, whole');
+    ok(fake.overs.turn.at(SWEEP_STEP_MS + 10, true, pl(0x64)).bright === 0 && fake.overs.turn.at(2 * SWEEP_STEP_MS + 10, true, pl(0x64)).bright === 100
+        && fake.overs.turn.at(SWEEP_MS + 10, true, pl(0x05)).bright === 100 && fake.overs.turn.at(2 * SWEEP_ON_MS + 10, true, pl(0x05)).bright === 0,
+        'hazards: twice the writes, every time doubled');
     c.turn(null);
     fake.lights = fake.lights.filter((l) => l.loc < 0x62);
     c.doors([]); c.doors(['driver front']);

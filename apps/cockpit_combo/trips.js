@@ -9,7 +9,12 @@
  *
  * Distance: the car's odometer when it sends one (start to end, whole km), else the speed added up each second.
  * Fuel: the tank's level (litres) at the start against the end; a rise of REFUEL_L or more is a refuel, and what was
- * used before it counts too. Consumption only from MIN_FUEL_KM on (the tank's level moves in whole litres).
+ * used before it counts too. A trip's fuel and consumption only from MIN_FUEL_KM on (the tank's level moves in whole
+ * litres: a short trip read 0, 1 or 2 l by rounding and slosh). The month's fuel: what the tank's lowest level since
+ * the last refuel went down by in that month (monthFuel), not the trips' rounded litres added up (3.1.1).
+ *
+ * Trips kept from before 2.9.1 whose distance no car could drive in their time (two odometers mixed: 34724 km in a
+ * 41 min trip) are dropped as they load (plausible()).
  *
  * Since refuelling: a rise of REFUEL_L or more in the tank's level, during a trip or between two (the level at a start
  * against the last one known), starts a new count: the distance since (odometer or speed), the fuel since (the level
@@ -43,9 +48,10 @@ class Trips {
         this.settings = o.settings || { get: () => null };
         this.file = o.dataDir ? path.join(o.dataDir, 'trips.json') : null;
         this.trips = []; this.current = null;
-        this.odo = null; this.litres = null; this.sawState = false;
+        this.odo = null; this.litres = null; this.sawState = false; this.monthFuel = {};
         this.offAt = null; this.idleAt = null; this.lastT = null; this.savedAt = 0;
         this.load();
+        if (this.dirty) { this.dirty = false; this.save(); }
     }
 
     load() {
@@ -54,6 +60,13 @@ class Trips {
         try { d = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch (e) { d = null; }
         if (!d) return;
         this.trips = Array.isArray(d.trips) ? d.trips.filter((x) => x && isNum(x.start)) : [];
+        const bad = this.trips.filter((x) => !plausible(x));
+        if (bad.length) {
+            this.trips = this.trips.filter(plausible);
+            this.log.warn('trips: ' + bad.length + ' trip(s) dropped, a distance no car drives in its time: ' + bad.map((x) => x.km + ' km in ' + Math.round((x.end - x.start) / 60000) + ' min').join(', '));
+            this.dirty = true;
+        }
+        if (d.monthFuel && typeof d.monthFuel === 'object') Object.keys(d.monthFuel).forEach((k) => { if (isNum(d.monthFuel[k])) this.monthFuel[k] = d.monthFuel[k]; });
         if (d.since && isNum(d.since.at)) this.since = d.since;
         if (isNum(d.level)) this.lastLevel = d.level;
         // a trip running when the app last stopped: resumed below if the car is driven again soon, else ended there
@@ -61,7 +74,7 @@ class Trips {
     }
     save() {
         if (!this.file) return;
-        try { writeWhole(this.file, JSON.stringify({ v: 1, current: this.current, since: this.since || null, level: isNum(this.lastLevel) ? this.lastLevel : null, trips: this.trips.slice(0, KEEP) })); this.savedAt = this.now(); } catch (e) { this.log.warn('trips: ' + e.message); }
+        try { writeWhole(this.file, JSON.stringify({ v: 1, current: this.current, since: this.since || null, level: isNum(this.lastLevel) ? this.lastLevel : null, monthFuel: this.monthFuel, trips: this.trips.slice(0, KEEP) })); this.savedAt = this.now(); } catch (e) { this.log.warn('trips: ' + e.message); }
     }
 
     /**
@@ -82,7 +95,7 @@ class Trips {
             if (this.since) { this.since.odo0 = km; this.since.kmAtOdo0 = this.since.kmSum || 0; }
         }
         this.odoSrc = k;
-        this.odo = km;
+        this.odo = km; this.odoAt = this.now();
         if (this.since && !isNum(this.since.odo0)) { this.since.odo0 = km; this.since.kmAtOdo0 = this.since.kmSum || 0; }
         const c = this.current;
         if (c) { if (!isNum(c.odo0)) { c.odo0 = km; c.kmAtOdo0 = c.kmSum; } c.odo1 = km; }
@@ -97,7 +110,8 @@ class Trips {
         if (this.litres === null) this.log.info('trips: fuel in the tank ' + l + ' l');
         this.litres = l;
         // since refuelling (the last level known kept across restarts: a refuel while the app wasn't running counts too)
-        if (!isNum(this.floor)) this.floor = isNum(this.lastLevel) ? Math.min(this.lastLevel, l) : l;
+        // (the last level known: what the tank lost while the app wasn't running counts for the month too)
+        if (!isNum(this.floor)) this.floor = isNum(this.lastLevel) ? this.lastLevel : l;
         if (this.filling && this.since && l > this.floor) {
             this.since.level = Math.max(this.since.level, l); this.floor = l;            // still filling up: the count from the top
         } else if (l >= this.floor + REFUEL_L) {
@@ -105,7 +119,12 @@ class Trips {
             this.since = { at: this.now(), level: l, kmSum: 0, odo0: isNum(this.odo) ? this.odo : null };
             this.filling = true; this.floor = l;
             this.save();
-        } else if (l < this.floor) { this.floor = l; this.filling = false; }
+        } else if (l < this.floor) {
+            // the month's fuel: only a new lowest level counts, so the level going down and up again (slosh, a slope) adds nothing
+            const k = monthKey(this.now());
+            this.monthFuel[k] = (this.monthFuel[k] || 0) + (this.floor - l);
+            this.floor = l; this.filling = false;
+        }
         this.lastLevel = l;
         // this trip's fuel: what the tank lost, before and after a refuel on the way
         const c = this.current;
@@ -156,7 +175,9 @@ class Trips {
         this.lastRaw = null;
         this.current = back || { start: now, end: now, kmSum: 0, movingS: 0, top: 0 };
         this.lastT = null; this.idleAt = null;
-        if (isNum(this.odo) && !isNum(this.current.odo0)) this.current.odo0 = this.odo;
+        // the odometer count from the reading the car gave as it woke (ODO_FRESH_MS), else from the first one in this trip
+        // (odometer()): last night's reading, before a km counted after that trip ended, gave a parked start 1.0 km (3.1.1)
+        if (isNum(this.odo) && !isNum(this.current.odo0) && now - this.odoAt <= ODO_FRESH_MS) this.current.odo0 = this.odo;
         if (isNum(this.litres) && !isNum(this.current.fuel0)) this.fuel(this.litres);
         this.log.info('trips: ' + (back ? 'the trip goes on' : 'a trip began'));
     }
@@ -198,14 +219,16 @@ class Trips {
     /** The running trip's summary, or the last one's. */
     shown() { return this.current ? Object.assign(this.closed(this.current), { live: true }) : this.trips[0] || null; }
 
-    /** This month and the ones before: { key 'YYYY-MM', trips, km, hours, fuel (litres, the trips that had it) }, newest first. */
+    /** This month and the ones before: { key 'YYYY-MM', trips, km, hours, fuel (litres: monthFuel, else the trips') }, newest first. */
     months() {
         const m = {};
         this.trips.concat(this.current ? [this.closed(this.current)] : []).forEach((x) => {
-            const d = new Date(x.start), k = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+            const k = monthKey(x.start);
             const a = m[k] || (m[k] = { key: k, trips: 0, km: 0, hours: 0, fuel: 0 });
             a.trips++; a.km += x.km; a.hours += (x.end - x.start) / 3600000; if (isNum(x.fuel)) a.fuel += x.fuel;
         });
+        // the tank's own count where there is one (the trips' fuel: whole litres each, rounded up and down)
+        Object.keys(m).forEach((k) => { if (isNum(this.monthFuel[k])) m[k].fuel = this.monthFuel[k]; });
         return Object.keys(m).sort().reverse().map((k) => m[k]);
     }
 
@@ -224,7 +247,7 @@ class Trips {
             big(cv, t, 44, 190, G.fmt(D(s.km), 1), dU, 96);
             cv.text(s.kmFrom === 'odometer' ? 'from the odometer' : 'from the speed', 44, 222, 16, t.dim);
             const rows = [['Time', dur(mins)], ['Average speed', isNum(avg) ? G.fmt(D(avg), 0) + ' ' + vU : '--'], ['Top speed', s.top ? G.fmt(D(s.top), 0) + ' ' + vU : '--'],
-                ['Fuel used', isNum(s.fuel) ? litres(s.fuel) + (s.refuelled ? ' (refuelled)' : '') : 'not given by the car'],
+                ['Fuel used', !isNum(s.fuel) ? 'not given by the car' : s.km >= MIN_FUEL_KM ? litres(s.fuel) + (s.refuelled ? ' (refuelled)' : '') : 'from ' + MIN_FUEL_KM + ' km'],
                 ['Consumption', isNum(s.per100) ? (mi ? G.fmt(235.215 / s.per100, 1) + ' mpg' : G.fmt(s.per100, 1) + ' l/100 km') : isNum(s.fuel) ? 'from ' + MIN_FUEL_KM + ' km' : '--']];
             rows.forEach(([k, v], i) => {
                 const y = 286 + i * 44 + i * ex / 6;
@@ -243,13 +266,13 @@ class Trips {
             cv.text(when(x.start), 676, y, 20, t.text);
             cv.text(G.fmt(D(x.km), 1) + ' ' + dU, 1040, y, 22, t.text, { align: 'right', font: 'bold' });
             cv.text(dur(mins), 1200, y, 20, t.dim, { align: 'right' });
-            cv.text(isNum(x.per100) ? (mi ? G.fmt(235.215 / x.per100, 1) + ' mpg' : G.fmt(x.per100, 1) + ' l/100') : isNum(x.fuel) ? litres(x.fuel) : '', 1380, y, 20, t.dim, { align: 'right' });
+            cv.text(isNum(x.per100) ? (mi ? G.fmt(235.215 / x.per100, 1) + ' mpg' : G.fmt(x.per100, 1) + ' l/100') : '', 1380, y, 20, t.dim, { align: 'right' });
             cv.text('top ' + G.fmt(D(x.top), 0), 1556, y, 20, t.dim, { align: 'right' });
         });
         // right bottom: this month, and since refuelling (side by side)
         const my = 44 + listH + 12, mh = 468 + ex - listH - 12, mo = this.months()[0], pw = 454;
         G.panel(cv, t, 656, my, pw, mh, 'This month');
-        const cur = new Date(this.now()), key = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
+        const key = monthKey(this.now());
         const a = mo && mo.key === key ? mo : { trips: 0, km: 0, hours: 0, fuel: 0 };
         cells(cv, t, 676, my, [['Trips', String(a.trips)], ['Distance', G.fmt(D(a.km), 0) + ' ' + dU], ['Fuel', a.fuel ? G.fmt(a.fuel, 0) + ' l' : '--']], !!a.trips);
         const rx = 656 + pw + 12, r = this.sinceRefuel();
@@ -272,11 +295,12 @@ function cells(cv, t, x, y, items, on) {
 }
 /**
  * The distance by the odometer (odo0 first read when the speed had counted kmAt0 of it), or null where it doesn't agree
- * with the speed's within ODO_AGREE (at least 2 km) - a reading the car got wrong - or has counted no whole km yet.
+ * with the speed's within ODO_AGREE (at least 2 km) - a reading the car got wrong - or has counted no whole km yet, or
+ * where the speed has counted less than ODO_MIN_KM (a whole km of the odometer against a car that hardly moved).
  */
-const ODO_AGREE = 0.2, ODO_FIRST = 'SecureMileage';
+const ODO_AGREE = 0.2, ODO_FIRST = 'SecureMileage', ODO_MIN_KM = 0.5, ODO_FRESH_MS = 2 * 60000;
 function odoKm(odo0, odo1, kmAt0, kmSum) {
-    if (!isNum(odo0) || !isNum(odo1) || odo1 - odo0 < 1) return null;
+    if (!isNum(odo0) || !isNum(odo1) || odo1 - odo0 < 1 || !(kmSum >= ODO_MIN_KM)) return null;
     const part = odo1 - odo0, speedPart = kmSum - (kmAt0 || 0);
     if (Math.abs(part - speedPart) > Math.max(2, speedPart * ODO_AGREE)) return null;
     return Math.round((part + (kmAt0 || 0)) * 10) / 10;
@@ -286,6 +310,14 @@ function big(cv, t, x, y, text, unit, size) {
     cv.text(' ' + unit, x + w, y, 30, t.dim);
 }
 const two = (n) => String(n).padStart(2, '0');
+/** A kept trip a car could have driven: at most its top speed (and PLAUSIBLE_KMH on average) over its time, plus 2 km. */
+const PLAUSIBLE_KMH = 300;
+function plausible(x) {
+    if (!isNum(x.km) || !isNum(x.end)) return false;
+    const h = Math.max(0, x.end - x.start) / 3600000;
+    return x.km <= Math.min(PLAUSIBLE_KMH, Math.max(isNum(x.top) ? x.top : 0, 30)) * h + 2;
+}
+function monthKey(ms) { const d = new Date(ms); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
 function clock(ms) { const d = new Date(ms); return two(d.getHours()) + ':' + two(d.getMinutes()); }
 function when(ms) { const d = new Date(ms); return d.getDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + '  ' + clock(ms); }
 // (the tank's level comes in whole litres: under one is "<1 l", not 0)
