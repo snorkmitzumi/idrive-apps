@@ -284,10 +284,17 @@ Each tab is drawn only as often as it needs (2.6.4; before, every tab was drawn 
 renderer, a still one too): Driving and Performance at Settings > Screen > **Gauges frame rate** (30 by default; 15 is
 the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. A page
 that stays the same for about a second (a parked car, steady values) is drawn 10 times a second until something on it
-changes, then at full pace again (3.1.4: before, the app drew every unchanged frame and then didn't send it). Once a
-minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log). The log
-itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes, rather than written
-to the storage line by line.
+changes, then at full pace again (3.1.4: before, the app drew every unchanged frame and then didn't send it). Each
+frame's copies (the one sent last, the one kept for the renderer) reuse their buffers instead of new ones every frame
+(3.1.4). Once a minute the log says the app's CPU share, its memory, how much of it is buffers outside JavaScript and
+how many frames it drew, then the memory again after a clean-up of what the app no longer uses (`perf:` lines in the
+QR log). The log itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes,
+rather than written to the storage line by line.
+
+To see where the time goes, a CPU profile can be recorded over SSH (3.1.4): `kill -USR2 <pid>` (the log's `profile:`
+line at the start names the command) records 60 s, then writes `cpu-<time>.cpuprofile` and a memory report
+`mem-<time>.json` into the app's data folder. The profile opens in Chrome's DevTools (Performance > Load profile) or
+on speedscope.app. The last three of each are kept; nothing runs until asked.
 
 ## Reporting a problem: the QR log
 

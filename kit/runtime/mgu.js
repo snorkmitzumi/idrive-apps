@@ -701,6 +701,8 @@ async function runInner(impl) {
             '(see the SDK_ lines above). Idle until MainApp stops it.');
         return;
     }
+    // a CPU profile and a memory report on `kill -USR2 <pid>` (profile.js): nothing runs until asked
+    try { require('./profile').install({ dir: DATA_DIR, log }); log.info('profile: kill -USR2 ' + process.pid + ' records 60 s into ' + DATA_DIR); } catch (e) { log.warn('profile: ' + (e && e.message || e)); }
     const ui = new Ui(app);
     const display = new Display(ui, log, SPEC, settings, () => themes.theme(settings.get('theme')));
     ui.display = display;
