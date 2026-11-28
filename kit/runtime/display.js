@@ -898,7 +898,10 @@ class Display {
         // unchanged frame (parked car, steady values): nothing to send - but at least one a
         // second, the renderer hides an app that goes quiet for 3 s (hung app over the HMI)
         const now = Date.now();
-        if (!force && this.lastWords && now - this.lastSent < 1000 && this.lastWords.length === w.byteLength && Buffer.from(w.buffer, w.byteOffset, w.byteLength).equals(this.lastWords)) return;
+        const same = !!this.lastWords && this.lastWords.length === w.byteLength && Buffer.from(w.buffer, w.byteOffset, w.byteLength).equals(this.lastWords);
+        // frames in a row the same as the one before (the loop draws a still page slower: mgu.js loop, STILL_FRAMES)
+        this.stillFrames = same && !force ? (this.stillFrames || 0) + 1 : 0;
+        if (!force && same && now - this.lastSent < 1000) return;
         this.lastSent = now;
         this.gpu.frame(out);
         this.lastWords = Buffer.from(Buffer.from(w.buffer, w.byteOffset, w.byteLength));

@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.3.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.4.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -147,8 +147,9 @@ taken from the source repo at build time.
 - **Animations:** moving scenes.
 - **Modes:** a look for each driving mode (Sport, Comfort, Eco Pro, Adaptive).
 - **Signals:** a turn signal sweeps that side's front door line green, front to back like a car's dynamic indicator
-  (3.1.1): on a G26 the line's first strip lights, then its second, both stay lit, then both go dark, about once a
-  second. That's as many writes to the lights as the blink before it, so it doesn't load the light module more. The
+  (3.1.1): on a G26 the line's first strip lights, then 0.4 s later its second, both stay lit, then both go dark,
+  every 1.4 s (3.1.4: slower than before, so each step comes on time and the sweep runs evenly). That's as many
+  writes to the lights as the blink before it, so it doesn't load the light module more. The
   rear doors keep your colour. An open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
@@ -281,7 +282,9 @@ Cockpit starts with the car (the ambient light needs it running) and shows up in
 
 Each tab is drawn only as often as it needs (2.6.4; before, every tab was drawn 60 times a second with the GPU
 renderer, a still one too): Driving and Performance at Settings > Screen > **Gauges frame rate** (30 by default; 15 is
-the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. Once a
+the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. A page
+that stays the same for about a second (a parked car, steady values) is drawn 10 times a second until something on it
+changes, then at full pace again (3.1.4: before, the app drew every unchanged frame and then didn't send it). Once a
 minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log). The log
 itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes, rather than written
 to the storage line by line.

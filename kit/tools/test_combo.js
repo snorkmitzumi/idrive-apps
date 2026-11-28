@@ -2020,6 +2020,34 @@ checks.push(
         assert(free > 40, 'without a cap: the renderer\'s pace (' + free + ' in 1 s)');
         assert(capped >= 8 && capped <= 12, 'capped at 10: ' + capped + ' in 1 s');
     }],
+    ['3.1.4 the kit\'s loop: a still page (30 frames in a row the same) is drawn 10 times a second, a changing one at full pace again', async () => {
+        const src = fs.readFileSync(path.join(KIT, 'mgu.js'), 'utf8');
+        const body = src.slice(src.indexOf('        loop(stateName, fps, fn) {'), src.indexOf('\n        },\n    };\n', src.indexOf('        loop(stateName, fps, fn) {')) + 10);
+        const tickers = [], display = { active: () => true, gpu: { waiting: false }, onTick: (fn) => tickers.push(fn), stillFrames: 0 };
+        const ui = { onVisible() {}, isVisible: () => true, timing: { png: 0, push: 0 } };
+        // eslint-disable-next-line no-new-func
+        const make = new Function('display', 'ui', 'log', 'return {' + body.trim().replace(/,\s*$/, '') + '}');
+        // each frame: the display's count of unchanged frames, as display.js _send keeps it (changing: 0)
+        const run = async (changing, fps, noTicks) => {
+            let n = 0;
+            display.stillFrames = 0;
+            const lp = make(display, ui, quiet).loop('MAIN', 10, async () => { n++; display.stillFrames = changing ? 0 : display.stillFrames + 1; });
+            if (fps) lp.fps(fps);
+            const iv = setInterval(() => { if (!noTicks) tickers.forEach((t) => t()); }, 16);
+            await new Promise((r) => setTimeout(r, 2000));
+            clearInterval(iv); lp.stop(); tickers.length = 0;
+            return n;
+        };
+        const moving = await run(true, 30), still = await run(false, 30);
+        assert(moving >= 50, 'changing frames at 30 fps: ' + moving + ' in 2 s');
+        // 30 frames at full pace, then about 10 a second
+        assert(still >= 30 && still <= 30 + 12, 'a still page: ' + still + ' in 2 s');
+        // the software path (no renderer, so no ticks) is left as it was
+        display.active = () => false;
+        const soft = await run(false, 0, true);
+        display.active = () => true;
+        assert(soft >= 12, 'software, asked for 10 fps: ' + soft + ' in 2 s');
+    }],
 );
 
 checks.push(

@@ -775,9 +775,14 @@ async function runInner(impl) {
          */
         loop(stateName, fps, fn) {
             let timer = null, on = false, running = false, frames = 0, spent = 0, capMs = 0, lastStart = 0;
-            // the cap's wait before the next frame (0: may go now)
-            const capWait = () => (capMs ? Math.max(0, lastStart + capMs - Date.now()) : 0);
             const gpuOn = () => display.active(stateName);
+            // a still page (STILL_FRAMES frames in a row the same, ~1 s at 30 fps: a parked car, steady values) is drawn
+            // at most every STILL_MS; the first frame that differs brings the full pace back (3.1.4: each frame unchanged
+            // was still drawn in JS, then not sent)
+            const STILL_FRAMES = 30, STILL_MS = 100;
+            const paceMs = () => Math.max(capMs, gpuOn() && (display.stillFrames || 0) >= STILL_FRAMES ? STILL_MS : 0);
+            // the cap's wait before the next frame (0: may go now)
+            const capWait = () => { const ms = paceMs(); return ms ? Math.max(0, lastStart + ms - Date.now()) : 0; };
             const tick = async () => {
                 timer = null;
                 if (!on || running) return;
