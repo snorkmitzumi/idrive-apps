@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.4.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.5.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -287,8 +287,8 @@ that stays the same for about a second (a parked car, steady values) is drawn 10
 changes, then at full pace again (3.1.4: before, the app drew every unchanged frame and then didn't send it). Each
 frame's copies (the one sent last, the one kept for the renderer) reuse their buffers instead of new ones every frame
 (3.1.4). Once a minute the log says the app's CPU share, its memory, how much of it is buffers outside JavaScript and
-how many frames it drew, then the memory again after a clean-up of what the app no longer uses (`perf:` lines in the
-QR log). The log itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes,
+how many frames it drew (`perf:` lines in the QR log; 3.1.4 also cleaned up the memory there each minute, which freed
+little and held the app up to 0.15 s, so 3.1.5 doesn't). The log itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes,
 rather than written to the storage line by line.
 
 To see where the time goes, a CPU profile can be recorded over SSH (3.1.4): `kill -USR2 <pid>` (the log's `profile:`

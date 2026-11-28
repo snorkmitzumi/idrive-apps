@@ -472,19 +472,16 @@ mgu.run({
         // ring under a finger), else not at all
         setRate();
         settings.onChange((k) => { if (k === 'frameRate') setRate(); });
-        // once a minute in the log (the QR log keeps it): the app's CPU share, its memory and the frames it drew. 3.1.4:
-        // then a full collection (the app's Node runs with --expose-gc) and the memory after it, so the log shows how much
-        // was garbage Node 8 had not freed yet; buffers: Node's memory outside the JS heap (Buffers, typed arrays)
+        // once a minute in the log (the QR log keeps it): the app's CPU share, its memory and the frames it drew; buffers:
+        // Node's memory outside the JS heap (Buffers, typed arrays). 3.1.4 also ran a full collection here: it freed
+        // little (heap 22 -> 19 MB, rss the same) and held the app 49-152 ms each minute on the car, so 3.1.5 doesn't
+        // (the profile's memory report still does, when asked: profile.js)
         let cpu0 = process.cpuUsage(), t0 = Date.now(), drawn = 0;
         const MB = 1048576, mbOf = (x) => Math.round((x || 0) / MB);
         setInterval(() => {
             const c = process.cpuUsage(cpu0), now = Date.now(), m = process.memoryUsage(), s = (now - t0) / 1000;
-            let after = '';
-            if (typeof global.gc === 'function') {
-                try { const g0 = Date.now(); global.gc(); const a = process.memoryUsage(); after = ' (after a collection: rss ' + mbOf(a.rss) + ', heap ' + mbOf(a.heapUsed) + ', buffers ' + mbOf(a.external) + ', ' + (Date.now() - g0) + ' ms)'; } catch (e) { after = ''; }
-            }
             log.info('perf: cpu ' + Math.round((c.user + c.system) / 10 / (now - t0)) + '%, rss ' + mbOf(m.rss) + ' MB, heap ' + mbOf(m.heapUsed)
-                + ' MB, buffers ' + mbOf(m.external) + ' MB' + after + ', ' + (drawn / s).toFixed(1) + ' frames/s drawn (' + (tab === AMBIENT ? 'Ambient' : TABS[tab]) + ' at ' + (rateOf() || 'renderer') + ')');
+                + ' MB, buffers ' + mbOf(m.external) + ' MB, ' + (drawn / s).toFixed(1) + ' frames/s drawn (' + (tab === AMBIENT ? 'Ambient' : TABS[tab]) + ' at ' + (rateOf() || 'renderer') + ')');
             cpu0 = process.cpuUsage(); t0 = now; drawn = 0;
         }, 60000);
         resetLabel();
