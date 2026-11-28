@@ -100,6 +100,14 @@ const CTL_RETRIES = 3, CTL_RETRY_MS = 30000;   // connecting again for the contr
 // the HMI's page animation when a screen opens (the picture shows after it)
 const SHOW_DELAY_MS = 350;
 
+/* A frame's words copied into a store kept for it (grown as needed), not a new array each frame: at 30 fps each copy
+ * was ~17 KB of garbage a frame, which Node 8 frees late (3.1.4). The view returned is valid until the next copy. */
+function copyInto(store, u32) {
+    if (!store.a || store.a.length < u32.length) store.a = new Uint32Array(Math.max(u32.length, store.a ? store.a.length * 2 : 0));
+    store.a.set(u32);
+    return store.a.subarray(0, u32.length);
+}
+
 class Display {
     constructor(ui, log, spec, settings, themeFn) {
         this.ui = ui; this.log = log; this.spec = spec; this.settings = settings; this.theme = themeFn;
@@ -107,6 +115,7 @@ class Display {
         this.state = null;                 // canvas screen shown by the renderer (first canvas screen)
         this.recorders = new Map();
         this.lastWords = null; this.lastSent = 0;
+        this.lastStore = {}; this.keepStore = {}; this.appStore = {};   // copyInto: the last frame sent, kept, the app's own
         this.pressed = null; this.pressedT = 0;   // last pressed bar button (flash)
         this.focused = null;                         // bar button the iDrive controller is on
         this.labels = {};                            // bar labels the app changed (ui.text)
@@ -865,7 +874,7 @@ class Display {
             if (this.place.full && r.chrome) {
                 // keep the app's own part: the display redraws the header and bar over it by itself
                 this.app = {
-                    name, softImage, w: r.w, h: r.h, textScale: r.textScale, words: new Uint32Array(r.words()),
+                    name, softImage, w: r.w, h: r.h, textScale: r.textScale, words: copyInto(this.appStore, r.words()),
                     atlases: new Set(r.atlases), ramps: new Set(r.ramps), layersUsed: new Set(r.layersUsed || []), images: new Set(r.images || []), tabs: r.chrome.tabs,
                     reaches: r.extraUsed,
                 };
@@ -898,10 +907,14 @@ class Display {
         // unchanged frame (parked car, steady values): nothing to send - but at least one a
         // second, the renderer hides an app that goes quiet for 3 s (hung app over the HMI)
         const now = Date.now();
-        if (!force && this.lastWords && now - this.lastSent < 1000 && this.lastWords.length === w.byteLength && Buffer.from(w.buffer, w.byteOffset, w.byteLength).equals(this.lastWords)) return;
+        const same = !!this.lastWords && this.lastWords.length === w.byteLength && Buffer.from(w.buffer, w.byteOffset, w.byteLength).equals(this.lastWords);
+        // frames in a row the same as the one before (the loop draws a still page slower: mgu.js loop, STILL_FRAMES)
+        this.stillFrames = same && !force ? (this.stillFrames || 0) + 1 : 0;
+        if (!force && same && now - this.lastSent < 1000) return;
         this.lastSent = now;
         this.gpu.frame(out);
-        this.lastWords = Buffer.from(Buffer.from(w.buffer, w.byteOffset, w.byteLength));
+        const lw = copyInto(this.lastStore, w);
+        this.lastWords = Buffer.from(lw.buffer, lw.byteOffset, lw.byteLength);
         this._keep(name, out, softImage);
         this._stats();
     }
@@ -933,7 +946,7 @@ class Display {
 
     /** Remember the last frame: resent as keepalive, or drawn in software when the GPU goes. */
     _keep(name, r, softImage) {
-        const words = new Uint32Array(r.words());
+        const words = copyInto(this.keepStore, r.words());
         this.last = {
             name, softImage, w: r.w, h: r.h,
             frame: { words: () => words, atlases: new Set(r.atlases), ramps: new Set(r.ramps), layersUsed: new Set(r.layersUsed || []), images: new Set(r.images || []) },

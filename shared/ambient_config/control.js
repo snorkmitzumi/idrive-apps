@@ -51,8 +51,10 @@ const pulse = (rgb) => { const lit = halves(); return (t) => ({ rgb, bright: lit
  * light: "door line" (section 0) and "door line 2" (section 1). Each write changes one light, so a side's sweep is the
  * blink's four writes (on, on, dark, dark; ~200 ms each through the gateway), in the order the sections light - no more
  * traffic than the blink, which lit the strips one after another anyway. With the hazards (both sides) every time is
- * doubled: twice the writes. A line of one strip lights at once, a blink as before. */
-const SWEEP_MS = 1000, SWEEP_STEP_MS = 250, SWEEP_ON_MS = 600;
+ * doubled: twice the writes. A line of one strip lights at once, a blink as before. Cockpit 3.1.4: 1400 ms, the second
+ * strip 400 ms after the first, lit to 900 ms (was 1000 / 250 / 600): the four writes took ~800 of the 1000 ms, so one
+ * slow write put every later step late and the sweep went unevenly; now each step has room for a write and a slow one. */
+const SWEEP_MS = 1400, SWEEP_STEP_MS = 400, SWEEP_ON_MS = 900;
 const sectionOf = (l) => (l && / door line 2$/i.test(String(l.name || '')) ? 1 : 0);
 const sweep = (rgb, sides) => {
     const k = Math.max(1, sides || 1);

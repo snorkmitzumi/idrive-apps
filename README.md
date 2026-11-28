@@ -15,7 +15,7 @@ of several. It is this repository's only app: a fork of
 runtime, build tools) it is built with. The source repo's own guide (how the head unit works, building, writing your own
 app) is in [KIT.md](KIT.md).
 
-**Version 3.1.2.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
+**Version 3.1.4.** Developed and tested on a G26 M440i xDrive (B58 with the 48 V mild hybrid, ZF 8HP). Other cars
 with the MGU should work for the values they send. The seats are tested on a G26's front seats only.
 
 > **Cockpit moves the front seats with their own motors.** It does this only while the car stands still, and stops at
@@ -101,7 +101,7 @@ off the diagnostic link.
 
 The engine's and gearbox's health at a glance:
 
-- **Tyres:** pressure against the car's target, and temperature in °C. A car that doesn't say its units (a G26) is read as psi and °F only when its own tyre pressures are in psi (2.9.3: one odd reading had turned a 7 °C tyre into −14).
+- **Tyres:** pressure against the car's target, and temperature in °C. The tyre values come in the car's own units, which Cockpit now asks the car for (3.1.3: the request was missing from the app's list of signals, so the units never came). Until they come, or on a car that doesn't say them, the values are read as psi and °F only when its own tyre pressures are in psi (2.9.3: one odd reading had turned a 7 °C tyre into −14).
 - **Temperatures:** engine oil, coolant, gearbox oil and intake air, each with its maximum this drive and a trace.
 - **Misfires:** per cylinder this driving cycle, from the engine's own on-board monitors. *Reset misfires* counts
   from then on; nothing is cleared in the car.
@@ -128,8 +128,8 @@ A trip book, kept by itself (new in 2.9.0, a first version):
   or more, also a litre at a time with Cockpit running at the pump, or between two drives; the count starts from the
   full tank. Over a tank's worth of driving this is the most exact consumption Cockpit shows.
 - Kept on the head unit (the last 1000 trips). Recorded whichever tab shows; with the Trips tab switched off, nothing.
-- Times and months are the car's local time, taken from the head unit's own clock settings (3.1.2: the head unit's
-  system clock runs on UTC, so trips showed an hour early in Poland). The time zone is kept, so the first trips after a
+- Times and months are the car's local time, taken from the head unit's own clock settings (3.1.2, working from 3.1.3:
+  the head unit's system clock runs on UTC, so trips showed an hour early in Poland). The time zone is kept, so the first trips after a
   start show local time too.
 
 Which of the odometer and fuel values a car offers to apps is logged once as each first comes (`trips signal` lines in
@@ -147,8 +147,9 @@ taken from the source repo at build time.
 - **Animations:** moving scenes.
 - **Modes:** a look for each driving mode (Sport, Comfort, Eco Pro, Adaptive).
 - **Signals:** a turn signal sweeps that side's front door line green, front to back like a car's dynamic indicator
-  (3.1.1): on a G26 the line's first strip lights, then its second, both stay lit, then both go dark, about once a
-  second. That's as many writes to the lights as the blink before it, so it doesn't load the light module more. The
+  (3.1.1): on a G26 the line's first strip lights, then 0.4 s later its second, both stay lit, then both go dark,
+  every 1.4 s (3.1.4: slower than before, so each step comes on time and the sweep runs evenly). That's as many
+  writes to the lights as the blink before it, so it doesn't load the light module more. The
   rear doors keep your colour. An open door can show red.
 
 The ambient light runs from the car's start with the app closed. With Ambient config installed too, the app started
@@ -281,10 +282,19 @@ Cockpit starts with the car (the ambient light needs it running) and shows up in
 
 Each tab is drawn only as often as it needs (2.6.4; before, every tab was drawn 60 times a second with the GPU
 renderer, a still one too): Driving and Performance at Settings > Screen > **Gauges frame rate** (30 by default; 15 is
-the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. Once a
-minute the log says the app's CPU share, its memory and how many frames it drew (`perf:` lines in the QR log). The log
-itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes, rather than written
-to the storage line by line.
+the lightest, 60 the smoothest), Seats 10 times a second, M View 5, the ambient tabs only while they change. A page
+that stays the same for about a second (a parked car, steady values) is drawn 10 times a second until something on it
+changes, then at full pace again (3.1.4: before, the app drew every unchanged frame and then didn't send it). Each
+frame's copies (the one sent last, the one kept for the renderer) reuse their buffers instead of new ones every frame
+(3.1.4). Once a minute the log says the app's CPU share, its memory, how much of it is buffers outside JavaScript and
+how many frames it drew, then the memory again after a clean-up of what the app no longer uses (`perf:` lines in the
+QR log). The log itself is kept in RAM (2.6.8), with a copy on the head unit's storage at most every 10 minutes,
+rather than written to the storage line by line.
+
+To see where the time goes, a CPU profile can be recorded over SSH (3.1.4): `kill -USR2 <pid>` (the log's `profile:`
+line at the start names the command) records 60 s, then writes `cpu-<time>.cpuprofile` and a memory report
+`mem-<time>.json` into the app's data folder. The profile opens in Chrome's DevTools (Performance > Load profile) or
+on speedscope.app. The last three of each are kept; nothing runs until asked.
 
 ## Reporting a problem: the QR log
 

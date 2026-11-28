@@ -179,6 +179,33 @@ test('map style (layout "map"): the full layout, the app\'s tabs in the HMI\'s t
     } finally { t.end(); }
 });
 
+test('3.1.4 the frame copies reuse their buffers: each change still sent, the unchanged ones counted, the kept frame the newest', async () => {
+    const t = await setup(), c = t.c;
+    try {
+        // (the full layout: the app's own words go through the reused store too, then the header over them)
+        const sent = () => c.frames.length;
+        let n = sent();
+        page(t.d, 10); await sleep(30); page(t.d, 30); await sleep(30); page(t.d, 10); await sleep(30);
+        assert.strictEqual(sent(), n + 3, 'A, B, A: three changes, three FRAMEs (the last frame kept as a copy, not a view of the next)');
+        page(t.d, 10); page(t.d, 10); page(t.d, 10);
+        assert.strictEqual(t.d.stillFrames, 3, 'three unchanged frames in a row');
+        page(t.d, 40);
+        assert.strictEqual(t.d.stillFrames, 0, 'a changed one: 0 again');
+        await sleep(30);
+        // a bigger frame (the store grows), then the kept frame (the renderer's keepalive, the software fallback) is it
+        const r = t.d.canvas(1600, 520);
+        for (let i = 0; i < 200; i++) r.fillRect(i, i, 5, 5, '#0000ff');
+        const want = Array.from(r.words());
+        n = sent();
+        t.d.present('MAIN', r, () => Promise.resolve()); await sleep(30);
+        assert.strictEqual(sent(), n + 1, 'the bigger frame sent');
+        page(t.d, 50);
+        const kept = Array.from(t.d.last.frame.words());
+        assert(kept.length !== want.length || kept.some((x, i) => x !== want[i]), 'the kept frame follows the newest, not the bigger one before it');
+        assert.strictEqual(t.d.lastWords.length, t.d.last.frame.words().length * 4, 'the last frame\'s copy is as long as the newest frame');
+    } finally { t.end(); }
+});
+
 test('unchanged frames: not sent again, but one a second (the renderer hides an app quiet for 3 s)', async () => {
     const t = await setup(), c = t.c;
     try {
